@@ -61,6 +61,16 @@ import UserLocation from "./userlocation.svg"
 import UserPhone from "./userphone.svg"
 import UserEmail from "./useremail.svg" 
 import StepRight from "./stepright.svg"
+import X from "./x.svg"
+import Amazon from "./amazon.svg"
+import Shopify from "./shopify.svg"
+import WooCommerce from "./woo.svg"
+import Ebay from "./ebay.svg"
+import Etsy from "./etsy.svg"
+import Big_Ecommerce from "./big-ecommerce.svg"
+import Magento from "./Magento.svg"
+import PrestaShop from "./PrestaShop.svg" 
+
 
 
 
@@ -127,7 +137,15 @@ export const UserLocationSVG = UserLocation
 export const UserPhoneSVG = UserPhone
 export const UserEmailSVG = UserEmail   
 export const StepRightSVG = StepRight
-
+export const XSVG = X
+export const AmazonSVG = Amazon
+export const ShopifySVG = Shopify
+export const WooCommerceSVG = WooCommerce
+export const EbaySVG = Ebay
+export const EtsySVG = Etsy
+export const Big_EcommerceSVG = Big_Ecommerce
+export const MagentoSVG = Magento
+export const PrestaShopSVG = PrestaShop 
 
 
 

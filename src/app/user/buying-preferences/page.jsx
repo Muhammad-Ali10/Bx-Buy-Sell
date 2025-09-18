@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { StepRightSVG } from "@/svg"
-
+import { XSVG } from "@/svg"
 const steps = [
     { id: 1, title: "Step 1" },
     { id: 2, title: "Step 2" },
@@ -48,11 +48,11 @@ export default function StepForm() {
         background: "",
         businessCategories: [],
         selectedNiches: [],
-        listingPrice: [500],
-        businessAge: [6],
-        yearlyProfit: [500],
-        profitMultiple: [5],
-        revenueMultiple: [5],
+        listingPrice: [1000, 2000],
+        businessAge: [8, 12],
+        yearlyProfit: [1000, 2000],
+        profitMultiple: [8, 12],
+        revenueMultiple: [8, 15],
         sellerLocation: "United States",
         targetCountry: [50],
     })
@@ -145,7 +145,7 @@ export default function StepForm() {
                         </span>
                     </div>
                     {index < steps.length - 1 && (
-                        <div className={`w-32 h-0.5 -mt-6 ${step.id < currentStep ? "bg-lime-400" : "bg-gray-200"}`} />
+                        <div className={`w-32 h-0.5 -mt-8 ${step.id < currentStep ? "bg-lime-400" : "bg-gray-200"}`} />
                     )}
                 </div>
             ))}
@@ -153,7 +153,7 @@ export default function StepForm() {
     )
 
     const Step1 = () => (
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto">
             <h2 className="text-2xl font-semibold mb-8">What's Your Background?</h2>
             <RadioGroup
                 value={formData.background}
@@ -168,11 +168,11 @@ export default function StepForm() {
                 {backgroundOptions.map((option, index) => (
                     <div
                         key={index}
-                        className={`flex items-center space-x-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${formData.background === option ? "border-blue-400 bg-blue-50" : "border-gray-200 hover:border-gray-300"
+                        className={`flex items-center space-x-3 p-4 rounded-lg border-2 m-0 cursor-pointer transition-colors ${formData.background === option ? "border-blue-400 bg-blue-50" : "border-gray-200 hover:border-gray-300"
                             }`}
                     >
                         <RadioGroupItem value={option} id={`option-${index}`} />
-                        <Label htmlFor={`option-${index}`} className="flex-1 cursor-pointer text-gray-700">
+                        <Label htmlFor={`option-${index}`} className="flex-1 font-lufga font-normal text-xl text-black cursor-pointer">
                             {option}
                         </Label>
                     </div>
@@ -190,7 +190,7 @@ export default function StepForm() {
                     <div
                         key={category}
                         className={`flex items-center space-x-3 p-4 rounded-lg border-0 bg-white cursor-pointer transition-colors ${formData.businessCategories.includes(category)
-                            ? "border-lime-400 border-2 bg-[#AEF31F1A]/10"
+                            ? "border-[#AEF31F] border-2 bg-[#AEF31F1A]/10"
                             : ""
                             }`}
                         onClick={() => {
@@ -225,8 +225,8 @@ export default function StepForm() {
                 {niches.map((niche, index) => (
                     <div
                         key={`${niche}-${index}`}
-                        className={`flex items-center space-x-3 p-4 rounded-lg bg-white cursor-pointer transition-colors ${formData.selectedNiches.includes(niche)
-                            ? "border-lime-400 border-2 bg-[#AEF31F1A]/10"
+                        className={`flex items-center space-x-3 py-2 px-4 rounded-lg bg-white cursor-pointer transition-colors ${formData.selectedNiches.includes(niche)
+                            ? "border-[#AEF31F] border-2 bg-[#AEF31F1A]/10"
                             : ""
                             }`}
                         onClick={() => {
@@ -237,13 +237,14 @@ export default function StepForm() {
                         }}
                     >
                         <Checkbox checked={formData.selectedNiches.includes(niche)} onChange={() => handleNicheChange(niche)} />
-                        <span className="text-gray-700">{niche}</span>
+                        <span className="font-lufga font-normal text-black/50 text-lg">{niche}</span>
                     </div>
                 ))}
+                <Button variant="outline" className="w-full bg-[#AEF31F] hover:bg-[#AEF31F] text-black border-0 font-lufga font-semibold text-lg py-6">
+                    Show More <ChevronDown className="ml-2 w-4 h-4" />
+                </Button>
             </div>
-            <Button variant="outline" className="w-full bg-lime-400 hover:bg-lime-500 text-black border-0">
-                Show More <ChevronDown className="ml-2 w-4 h-4" />
-            </Button>
+
             {validationErrors.selectedNiches && (
                 <p className="text-red-500 text-sm mt-4">{validationErrors.selectedNiches}</p>
             )}
@@ -251,19 +252,19 @@ export default function StepForm() {
     )
 
     const Step4 = () => (
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto bg-[#FAFAFA] p-8 rounded-lg">
             <h2 className="text-2xl font-semibold mb-8">Financial Data</h2>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="space-y-8">
                     {/* Listing Price */}
                     <div>
                         <div className="flex justify-between items-center mb-4">
-                            <label className="text-sm font-medium text-gray-700">Listing Price</label>
-                            <span className="text-sm text-gray-500">6y-15y</span>
+                            <label className="font-lufga text-xl font-medium text-black">Listing Price</label>
+                            <span className="font-lufga text-base font-medium text-black">6y-15y</span>
                         </div>
                         <div className="flex justify-between text-sm text-gray-500 mb-2">
-                            <span>500$</span>
-                            <span>5,000$</span>
+                            <span className="font-lufga text-base font-medium text-black">500$</span>
+                            <span className="font-lufga text-base font-medium text-black">5,000$</span>
                         </div>
                         <Slider
                             value={formData.listingPrice}
@@ -277,7 +278,7 @@ export default function StepForm() {
 
                     {/* Seller Location */}
                     <div>
-                        <label className="text-sm font-medium text-gray-700 mb-4 block">Seller Location</label>
+                        <label className="font-lufga text-xl font-medium text-black mb-4 block">Seller Location</label>
                         <Select
                             value={formData.sellerLocation}
                             onValueChange={(value) => setFormData((prev) => ({ ...prev, sellerLocation: value }))}
@@ -299,8 +300,8 @@ export default function StepForm() {
                     {/* Target Country */}
                     <div>
                         <div className="flex justify-between items-center mb-4">
-                            <label className="text-sm font-medium text-gray-700">Target Country</label>
-                            <span className="text-sm text-gray-500">min. 50%</span>
+                            <label className="font-lufga text-xl font-medium text-black">Target Country</label>
+                            <span className="font-lufga text-base font-medium text-black">min. 50%</span>
                         </div>
                         <Slider
                             value={formData.targetCountry}
@@ -331,10 +332,10 @@ export default function StepForm() {
 
                 <div className="space-y-8">
                     {/* Business Age */}
-                    <div>
+                    <div className="bg-white rounded-3xl p-6 gap-4">
                         <div className="flex justify-between items-center mb-4">
-                            <label className="text-sm font-medium text-gray-700">Business Age</label>
-                            <span className="text-sm text-gray-500">6y-15y</span>
+                            <label className="font-lufga text-xl font-medium text-black">Business Age</label>
+                            <span className="font-lufga text-base font-medium text-black">6y-15y</span>
                         </div>
                         <Slider
                             value={formData.businessAge}
@@ -347,10 +348,10 @@ export default function StepForm() {
                     </div>
 
                     {/* Yearly Profit */}
-                    <div>
+                    <div className="bg-white rounded-3xl p-6 gap-4">
                         <div className="flex justify-between items-center mb-4">
-                            <label className="text-sm font-medium text-gray-700">Yearly Profit $</label>
-                            <span className="text-sm text-gray-500">500$-5000$</span>
+                            <label className="font-lufga text-xl font-medium text-black">Yearly Profit $</label>
+                            <span className="font-lufga text-base font-medium text-black">500$-5000$</span>
                         </div>
                         <Slider
                             value={formData.yearlyProfit}
@@ -363,10 +364,10 @@ export default function StepForm() {
                     </div>
 
                     {/* Profit Multiple */}
-                    <div>
+                    <div className="bg-white rounded-3xl p-6 gap-4">
                         <div className="flex justify-between items-center mb-4">
-                            <label className="text-sm font-medium text-gray-700">✕ Profit Multiple</label>
-                            <span className="text-sm text-gray-500">5x-20x</span>
+                            <label className="font-lufga text-xl font-medium text-black flex items-center gap-2"><XSVG/> Profit Multiple</label>
+                            <span className="font-lufga text-base font-medium text-black">5x-20x</span>
                         </div>
                         <Slider
                             value={formData.profitMultiple}
@@ -379,10 +380,10 @@ export default function StepForm() {
                     </div>
 
                     {/* Revenue Multiple */}
-                    <div>
+                    <div className="bg-white rounded-3xl p-6 gap-4">
                         <div className="flex justify-between items-center mb-4">
-                            <label className="text-sm font-medium text-gray-700">✕ Revenue Multiple</label>
-                            <span className="text-sm text-gray-500">5x-20x</span>
+                            <label className="font-lufga text-xl font-medium text-black flex items-center gap-2"><XSVG/> Revenue Multiple</label>
+                            <span className="font-lufga text-base font-medium text-black">5x-20x</span>
                         </div>
                         <Slider
                             value={formData.revenueMultiple}

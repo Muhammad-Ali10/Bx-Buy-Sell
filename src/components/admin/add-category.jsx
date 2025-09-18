@@ -6,33 +6,52 @@ import { Input } from "@/components/ui/input"
 import { UploadSVG } from "@/svg"
 import { Button } from "@/components/ui/button"
 import { DialogClose } from "@/components/ui/dialog"
+import { useUploadCategory } from "@/hooks/categorys"
+
 const AddCategory = () => {
 
+    const { mutate: uploadCategory, isPending: uploadCategoryPending, isSuccess: uploadCategorySuccess, isError: uploadCategoryError, error: uploadCategoryErrorObj  } = useUploadCategory();
 
     const form = useForm({
         resolver: zodResolver(CategorySchema),
         defaultValues: {
-            title: "",
-            Image: "",
+            name: "",
+            image: "",
         },
     })
 
-    function handleSubmit(data) {
-        console.log(data)
-    }
+function handleSubmit(data) {
+    console.log("Form Data:", data)
 
+    const categoryData = new FormData()
+    categoryData.append("name", data.name)
+    categoryData.append("image_path", data.image)  
+    console.log("Category Data:", [...categoryData.entries()])
+
+
+    uploadCategory(categoryData, {
+      onSuccess: () => {
+        toast.success("Category created successfully")
+        form.reset()
+      },
+      onError: (err) => {
+        toast.error(`Category creation failed: ${err.response?.data?.message || err.message}`)
+        console.log("Error uploading category:", err)
+      },
+    })
+  }
 
     return (
         <Form className="flex flex-col justify-between h-full" {...form}>
             <form onSubmit={form.handleSubmit(handleSubmit)} className="flex flex-col gap-6">
                 <FormField
-                    name="title"
+                    name="name"
                     control={form.control}
                     render={({ field }) => (
                         <FormItem>
                             <FormLabel>Title</FormLabel>
                             <FormControl>
-                                <Input type="text" placeholder="Hero section title" className="bg-[#F4F4F4] h-14 border border-[#EBF0ED] placeholder:text-black placeholder:font-abeezee placeholder:font-normal" {...field} />
+                                <Input type="text" placeholder="Enter Category Title" className="bg-[#F4F4F4] h-14 border border-[#EBF0ED] placeholder:text-black placeholder:font-abeezee placeholder:font-normal" {...field} />
                             </FormControl>
                             <FormMessage />
                         </FormItem>

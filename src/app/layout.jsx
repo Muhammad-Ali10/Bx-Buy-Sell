@@ -7,7 +7,9 @@ import { Toaster } from "@/components/ui/sonner";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+import { AuthProvider } from "@/context/AuthContext";
 
+// Fonts
 const sora = Sora({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
@@ -47,7 +49,9 @@ export default function RootLayout({ children }) {
       <body>
         <Toaster richColors position="top-right" />
         <QueryClientProvider client={queryClient}>
-          {children}
+          <AuthProvider>
+            {children}
+          </AuthProvider>
         </QueryClientProvider>
       </body>
     </html>

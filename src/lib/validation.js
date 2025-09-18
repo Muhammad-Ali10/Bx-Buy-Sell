@@ -27,7 +27,7 @@ export const MemberCredentialSchema = z.object({
 
 export const LoginSchema = z.object({
     email: z.string().nonempty({ message: "Email is required" }).email({ message: "Invalid email address" }),
-    password: z.string().nonempty({ message: "Password is required" }).min(8, { message: "Password must be at least 8 characters" }),
+    password: z.string().nonempty({ message: "Password is required" }).min(6, { message: "Password must be at least 8 characters" }),
 })
 
 export const OtpSendedSchema = z.object({
@@ -40,7 +40,7 @@ const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/web
 
 
 export const CategorySchema = z.object({
-    title: z.string().nonempty({ message: "Category name is required" }),
+    name: z.string().nonempty({ message: "Category name is required" }),
     image: z
         .any()
         .refine((file) => file?.size <= MAX_FILE_SIZE, `Max image size is 5MB.`)
