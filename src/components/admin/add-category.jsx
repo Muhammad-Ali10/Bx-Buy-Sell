@@ -7,6 +7,8 @@ import { UploadSVG } from "@/svg"
 import { Button } from "@/components/ui/button"
 import { DialogClose } from "@/components/ui/dialog"
 import { useUploadCategory } from "@/hooks/categorys"
+import { uploadToCloudinary } from "@/utils/cloudinary"
+
 
 const AddCategory = () => {
 
@@ -20,26 +22,38 @@ const AddCategory = () => {
         },
     })
 
-function handleSubmit(data) {
-    console.log("Form Data:", data)
+async function handleSubmit(data) {
+  try {
+    console.log("Form Data:", data);
 
-    const categoryData = new FormData()
-    categoryData.append("name", data.name)
-    categoryData.append("image_path", data.image)  
-    console.log("Category Data:", [...categoryData.entries()])
 
+    const imageUrl = await uploadToCloudinary(data.image);
+
+    
+    const categoryData = {
+      name: data.name,
+      image_path: imageUrl, 
+    };
+
+    console.log("Category Data:", categoryData);
 
     uploadCategory(categoryData, {
       onSuccess: () => {
-        toast.success("Category created successfully")
-        form.reset()
+        toast.success("Category created successfully");
+        form.reset();
       },
       onError: (err) => {
-        toast.error(`Category creation failed: ${err.response?.data?.message || err.message}`)
-        console.log("Error uploading category:", err)
+        toast.error(
+          `Category creation failed: ${err.response?.data?.message || err.message}`
+        );
+        console.log("Error uploading category:", err);
       },
-    })
+    });
+  } catch (err) {
+    console.error("Cloudinary upload error:", err);
+    toast.error("Image upload failed");
   }
+}
 
     return (
         <Form className="flex flex-col justify-between h-full" {...form}>
