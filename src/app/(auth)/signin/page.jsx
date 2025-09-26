@@ -1,37 +1,43 @@
 "use client";
-
-import React from 'react'
-import Image from "next/image"
-import Link from "next/link"
-import { Mail, Lock, Star, ChevronLeft, ChevronRight, } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormMessage,
-} from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
-import { useForm } from "react-hook-form"
-import { LoginSchema } from "@/lib/validation"
-import { zodResolver } from "@hookform/resolvers/zod"
-
+import React from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import { toast } from "sonner";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { LoginSchema } from "@/lib/validation";
+import { Form, FormItem, FormField, FormControl, FormMessage } from "@/components/ui/form";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Mail, Lock } from "lucide-react";
+import { Star, ChevronLeft, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import Image from "next/image";
 const SigninForm = () => {
+  const router = useRouter();
+  const { login } = useAuth();
 
   const form = useForm({
     resolver: zodResolver(LoginSchema),
-    defaultValues: {
-      email: "",
-      password: "",
-    },
-  })
+    defaultValues: { email: "", password: "" },
+  });
 
+  const handleSubmit = async (values) => {
+    try {
+      const res = await login(values);
+      toast.success("User Login Successfully");
 
-  function handleSubmit(data) {
-    console.log(data)
-    form.reset()
-  }
+      const role = res?.user?.role
+
+      if (role === "ADMIN") router.push("/admin");
+      else if (role === "MODERATOR") router.push("/moderator");
+      else router.push("/user");
+
+      form.reset();
+    } catch (err) {
+      toast.error(`Login failed: ${err.message}`);
+    }
+  };
 
 
   return (

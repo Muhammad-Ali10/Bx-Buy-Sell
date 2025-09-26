@@ -1,11 +1,11 @@
 "use client";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AdminSidebar from "@/components/admin/admin-sidebar";
-import ProtectedRoute from "@/components/ProtectedRoute"; 
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function AdminLayout({ children }) {
   return (
-//    <ProtectedRoute role="ADMIN">
+  <ProtectedRoute roles={["MODERATOR"]}>
       <SidebarProvider>
         <div className="flex w-full">
           <AdminSidebar />
@@ -18,6 +18,6 @@ export default function AdminLayout({ children }) {
           </div>
         </div>
       </SidebarProvider>
-    //</ProtectedRoute>
+    </ProtectedRoute>
   );
 }

@@ -1,5 +1,5 @@
 "use client"
-import React from "react"
+import React, { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Search } from "lucide-react"
@@ -12,9 +12,25 @@ import {
 } from "@/components/ui/dialog"
 import AddCategory from "@/components/admin/add-category"
 import Image from "next/image"
-
-
+import { getCategories } from "@/services/categoryService"
+import { Skeleton } from "@/components/ui/skeleton"
 const Category = () => {
+
+    const { data: categories, isPending, error } = getCategories();
+
+
+    console.log(categories?.slice(11, 13));
+
+    const Categorydata = categories?.slice(11, 13).map((category, index) => {
+        return (
+            <div className="bg-[#FAFAFA] items-center justify-center rounded-[16px] px-6 py-[22px] flex flex-col gap-5 w-full max-w-[240px] h-[153px]" key={index}>
+                <Image src={category?.image_path} alt="E-commerce" width={56} height={56} />
+                <h3 className="font-lufga font-medium text-base text-center text-black">{category?.name}</h3>
+            </div>
+        )
+    })
+    console.log(Categorydata);
+
     return (
         <div className="w-full flex flex-col gap-10 relative">
             <div className="flex flex-row items-center justify-between">
@@ -52,25 +68,19 @@ const Category = () => {
             <div className="flex flex-col gap-6 w-full border border-black/10 rounded-4xl px-4 py-10">
                 <h3 className="font-lufga font-medium text-2xl text-black" >Added Categories</h3>
                 <div className="flex flex-row items-center justify-between flex-wrap" >
-                    <div className="bg-[#FAFAFA] items-center justify-center rounded-[16px] px-6 py-[22px] flex flex-col gap-5 w-full max-w-[240px] h-[153px]">
-                        <Image src={"/E-Commerce.png"} alt="E-commerce" width={56} height={56} />
-                        <h3 className="font-lufga font-medium text-base text-center text-black">E-Commerce</h3>
-                    </div>
-                    <div className="bg-[#FAFAFA] items-center justify-center rounded-[16px] px-6 py-[22px] flex flex-col gap-5 w-full max-w-[240px] h-[153px]">
-                        <Image src={"/E-Commerce.png"} alt="E-commerce" width={56} height={56} />
-                        <h3 className="font-lufga font-medium text-base text-center text-black">E-Commerce</h3>
-                    </div>
-                    <div className="bg-[#FAFAFA] items-center justify-center rounded-[16px] px-6 py-[22px] flex flex-col gap-5 w-full max-w-[240px] h-[153px]">
-                        <Image src={"/E-Commerce.png"} alt="E-commerce" width={56} height={56} />
-                        <h3 className="font-lufga font-medium text-base text-center text-black">E-Commerce</h3>
-                    </div>
-                    <div className="bg-[#FAFAFA] items-center justify-center rounded-[16px] px-6 py-[22px] flex flex-col gap-5 w-full max-w-[240px] h-[153px]">
-                        <Image src={"/E-Commerce.png"} alt="E-commerce" width={56} height={56} />
-                        <h3 className="font-lufga font-medium text-base text-center text-black">E-Commerce</h3>
-                    </div>
-                </div>
+                    {isPending ?
+                        Array(4).fill().map((_, index) => (
+                            <div className="bg-[#FAFAFA] items-center justify-center rounded-[16px] px-6 py-[22px] flex flex-col gap-5 w-full max-w-[240px] h-[153px]" key={index}>
+                                <Skeleton className="h-14 w-14 rounded-full" />
+                                <div className="space-y-2">
+                                    <Skeleton className="h-4 w-28" />
+                                </div>
+                            </div>
+                        )) :
+                        { Categorydata }
+                    }</div>
             </div>
-        </div>
+        </div >
     )
 }
 

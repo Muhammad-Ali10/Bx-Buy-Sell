@@ -3,16 +3,17 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-export default function ProtectedRoute({ children, role }) {
+const ProtectedRoute = ({ children, roles }) => {
   const { user } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!user) router.push("/signin");
-    else if (role && user.role !== role) router.push("/unauthorized");
-  }, [user]);
+    if (!user) router.replace("/signin");
+    else if (roles && !roles.includes(user.role)) router.replace("/unauthorized");
+  }, [user, router, roles]);
 
-  if (!user) return <div>Loading...</div>;
-  if (role && user.role !== role) return null;
-  return <>{children}</>;
-}
+  if (!user) return null;
+  return children;
+};
+
+export default ProtectedRoute;

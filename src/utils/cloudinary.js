@@ -1,4 +1,3 @@
-// utils/cloudinary.js
 export async function uploadToCloudinary(file) {
   if (!file) throw new Error("No file provided")
 
@@ -20,5 +19,5 @@ export async function uploadToCloudinary(file) {
   const data = await res.json()
   if (!res.ok) throw new Error(data.error?.message || "Upload failed")
 
-  return data.secure_url // ✅ ye URL backend/database me save hoga
+  return data.secure_url 
 }
