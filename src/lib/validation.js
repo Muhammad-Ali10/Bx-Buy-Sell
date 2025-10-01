@@ -40,7 +40,7 @@ const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/web
 
 
 export const CategorySchema = z.object({
-    name: z.string().nonempty({ message: "Category name is required" }),
+    name: z.string().nonempty({ message: "Name is required" }),
     image: z
         .any()
         .refine((file) => file?.size <= MAX_FILE_SIZE, `Max image size is 5MB.`)
@@ -52,12 +52,12 @@ export const CategorySchema = z.object({
 
 export const BrandInfoSchema = z.object({
     question: z.string().nonempty({ message: "Question is required" }),
-    answertype: z.string().nonempty({ message: "Answer type is required" })
+    answer_type: z.string().nonempty({ message: "Answer type is required" })
 })
 
 export const StatisticQuestionSchema = z.object({
     question: z.string().nonempty({ message: "Question is required" }),
-    hinttext: z.string().nonempty({ message: "Question is required" }),
+    // hinttext: z.string().nonempty({ message: "Question is required" }),
     answertype: z.string().nonempty({ message: "Answer type is required" })
 })
 

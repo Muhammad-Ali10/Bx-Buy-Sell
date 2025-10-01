@@ -6,22 +6,51 @@ import { Input } from "@/components/ui/input"
 import { UploadSVG } from "@/svg"
 import { Button } from "@/components/ui/button"
 import { DialogClose } from "@/components/ui/dialog"
-
+import { toast } from "sonner"
+import { useUploadTools } from "@/hooks/tools"
+import { uploadToCloudinary } from "@/utils/cloudinary"
 
 
 const AddTools = () => {
+
+    const { mutate: uploadTools, isPending: uploadToolsPending, isSuccess: uploadToolsSuccess, isError: uploadToolsError, error: uploadToolsErrorObj } = useUploadTools();
 
 
     const form = useForm({
         resolver: zodResolver(CategorySchema),
         defaultValues: {
-            title: "",
-            Image: "",
+            name: "",
+            image: "",
         },
     })
 
-    function handleSubmit(data) {
-        console.log(data)
+  async function handleSubmit(data) {
+        console.log("Form Data:", data);
+
+        try {
+
+            const imageUrl = await uploadToCloudinary(data.image);
+
+            const toolData = {
+                name: data.name,
+                image_path: imageUrl,
+            }
+            uploadTools(toolData, {
+                onSuccess: () => {
+                    toast.success("Tool created successfully");
+                    form.reset();
+                },
+                onError: (err) => {
+                    toast.error(
+                        `Tool creation failed: ${err.response?.data?.message || err.message}`
+                    );
+                }
+            })
+
+        } catch (error) {
+            console.error("Cloudinary upload error:", err);
+            toast.error("Image upload failed");
+        }
     }
 
 
@@ -29,13 +58,13 @@ const AddTools = () => {
         <Form className="flex flex-col justify-between h-full" {...form}>
             <form onSubmit={form.handleSubmit(handleSubmit)} className="flex flex-col gap-6">
                 <FormField
-                    name="title"
+                    name="name"
                     control={form.control}
                     render={({ field }) => (
                         <FormItem>
                             <FormLabel>Title</FormLabel>
                             <FormControl>
-                                <Input type="text" placeholder="Hero section title" {...field} className="bg-[#F4F4F4] h-14 border border-[#EBF0ED] placeholder:text-black placeholder:font-abeezee placeholder:font-normal"/>
+                                <Input type="text" placeholder="Hero section title" {...field} className="bg-[#F4F4F4] h-14 border border-[#EBF0ED] placeholder:text-black placeholder:font-abeezee placeholder:font-normal" />
                             </FormControl>
                             <FormMessage />
                         </FormItem>
@@ -67,6 +96,7 @@ const AddTools = () => {
                                         type="file"
                                         className="hidden"
                                         onChange={(e) => field.onChange(e.target.files?.[0])}
+                                        
                                     />
                                 </div>
                             </FormControl>

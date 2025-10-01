@@ -21,7 +21,7 @@ export const logoutUser = async () => {
 export const refreshToken = async () => {
   const session = getSession();
   const rt = session?.refreshToken;
-  console.log(rt);
+  // console.log(rt);
   if (!rt) throw new Error("No refresh token found");
   const { data } = await apiClient.patch(`/auth/refresh/${rt}`, {}, );
   const newSession = {

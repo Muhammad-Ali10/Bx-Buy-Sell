@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { DialogClose } from "@/components/ui/dialog"
 import { useUploadCategory } from "@/hooks/categorys"
 import { uploadToCloudinary } from "@/utils/cloudinary"
+import { toast } from "sonner"
 
 
 const AddCategory = () => {
@@ -35,7 +36,6 @@ async function handleSubmit(data) {
       image_path: imageUrl, 
     };
 
-    console.log("Category Data:", categoryData);
 
     uploadCategory(categoryData, {
       onSuccess: () => {

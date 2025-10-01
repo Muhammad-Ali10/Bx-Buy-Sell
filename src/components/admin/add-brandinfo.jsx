@@ -1,3 +1,4 @@
+import React, { useEffect } from "react"
 import { Form, FormControl, FormField, FormLabel, FormMessage, FormItem } from "@/components/ui/form"
 import {
     Select,
@@ -15,25 +16,68 @@ import { Input } from "@/components/ui/input"
 import { UploadSVG } from "@/svg"
 import { Button } from "@/components/ui/button"
 import { DialogClose } from "@/components/ui/dialog"
+import { useUploadAdminQuestion, useUpdateAdminQuestion } from "@/hooks/adminQuestions"
+import { toast } from "sonner"
 
 
 
 
-const AddBrandInformation = () => {
-
+const AddBrandInformation = ({ mode = "create", id, question, answer_type }) => {
+    const { mutate: uploadBrand } = useUploadAdminQuestion()
+    const { mutate: updateBrand } = useUpdateAdminQuestion()
 
     const form = useForm({
         resolver: zodResolver(BrandInfoSchema),
         defaultValues: {
-            question: "",
-            answertype: "",
+            question: question || "",
+            answer_type: answer_type || "",
         },
     })
 
-    function handleSubmit(data) {
-        console.log(data)
-    }
+    useEffect(() => {
+        if (mode === "edit") {
+            form.reset({
+                question: question || "",
+                answer_type: answer_type || "",
+            })
+        }
+    }, [mode, question, answer_type, form])
 
+    function handleSubmit(data) {
+        const brandData = {
+            question: data.question,
+            answer_type: data.answer_type,
+            answer_for: "BRAND",
+        }
+
+        if (mode === "create") {
+            uploadBrand(brandData, {
+                onSuccess: () => {
+                    toast.success("Brand info created successfully")
+                    form.reset()
+                },
+                onError: (err) => {
+                    toast.error(
+                        `Creation failed: ${err.response?.data?.message || err.message}`
+                    )
+                },
+            })
+        } else if (mode === "edit" && id) {
+            updateBrand(
+                { id, brandData },
+                {
+                    onSuccess: () => {
+                        toast.success("Brand info updated successfully")
+                    },
+                    onError: (err) => {
+                        toast.error(
+                            `Update failed: ${err.response?.data?.message || err.message}`
+                        )
+                    },
+                }
+            )
+        }
+    }
 
     return (
         <Form className="flex flex-col justify-between h-full" {...form}>
@@ -52,7 +96,7 @@ const AddBrandInformation = () => {
                     )}
                 />
                 <FormField
-                    name="answertype"
+                    name="answer_type"
                     control={form.control}
                     render={({ field }) => (
                         <FormItem>
@@ -64,10 +108,8 @@ const AddBrandInformation = () => {
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectGroup>
-                                            <SelectItem value="text">Text</SelectItem>
-                                            <SelectItem value="link">Link</SelectItem>
-                                            <SelectItem value="date">Date</SelectItem>
-                                            <SelectItem value="text">Text</SelectItem>
+                                            <SelectItem value="TEXT">Text</SelectItem>
+                                            <SelectItem value="DATE">Date</SelectItem>
                                         </SelectGroup>
                                     </SelectContent>
                                 </Select>
@@ -91,7 +133,8 @@ const AddBrandInformation = () => {
                         type="submit"
                         className="w-full py-5 bg-[#C5FD1F] text-black text-base font-medium font-lufga rounded-full shrink"
                     >
-                        Save
+                        {mode === "create" ? "Save" : "Update"}
+
                     </Button>
                 </div>
             </form>
