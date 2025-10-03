@@ -61,6 +61,10 @@ export const StatisticQuestionSchema = z.object({
     answertype: z.string().nonempty({ message: "Answer type is required" })
 })
 
+// export const WordDetectSchame = z.object({
+//     word: z.string().nonempty({ message: "Word is required" }),
+// })
+
 export const PlanSchema = z.object({
     name: z.string().nonempty({ message: "Title is required" }),
     description: z.string().nonempty({ message: "Description is required" }),

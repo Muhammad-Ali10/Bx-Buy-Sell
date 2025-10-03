@@ -16,7 +16,7 @@ const Statistics = () => {
     const { data, isPending, error } = useGetAdminQuestion("STATISTIC")
     const { mutate: DeleteAdminQuestions, isPending: DeletePending } =
         useDeleteAdminQuestion()
-
+    console.log(data)
     const handleDelete = (id) => {
 
         DeleteAdminQuestions(id, {

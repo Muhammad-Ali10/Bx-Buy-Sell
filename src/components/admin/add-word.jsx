@@ -1,59 +1,44 @@
 import React, { useEffect } from "react"
 import { Form, FormControl, FormField, FormLabel, FormMessage, FormItem } from "@/components/ui/form"
-import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectLabel,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { BrandInfoSchema } from "@/lib/validation"
+import { WordDetectSchame } from "@/lib/validation"
 import { useForm } from "react-hook-form"
 import { Input } from "@/components/ui/input"
-import { UploadSVG } from "@/svg"
 import { Button } from "@/components/ui/button"
 import { DialogClose } from "@/components/ui/dialog"
-import { useUploadAdminQuestion, useUpdateAdminQuestion } from "@/hooks/adminQuestions"
 import { toast } from "sonner"
+import { useAddWord,useUpdateWord } from "@/hooks/word"
 
 
 
-
-const AddBrandInformation = ({ mode = "create", id, question, answer_type }) => {
-    const { mutate: uploadStatics } = useUploadAdminQuestion()
-    const { mutate: updateStatics } = useUpdateAdminQuestion()
+const AddWords = ({ mode = "create", id, word }) => {
+    const { mutate: addWord } = useAddWord()
+    const { mutate: updateWord } = useUpdateWord()
 
     const form = useForm({
-        resolver: zodResolver(BrandInfoSchema),
+        resolver: zodResolver(WordDetectSchame),
         defaultValues: {
-            question: question || "",
-            answer_type: answer_type || "",
+            word: word || "",
         },
     })
 
     useEffect(() => {
         if (mode === "edit") {
             form.reset({
-                question: question || "",
-                answer_type: answer_type || "",
+                word: word || "",
             })
         }
-    }, [mode, question, answer_type, form])
+    }, [mode, word, form])
 
     function handleSubmit(data) {
-        const statisticsData = {
-            question: data.question,
-            answer_type: data.answer_type,
-            answer_for: "STATISTIC",
+        const Words = {
+            word: data.word,
         }
 
         if (mode === "create") {
-            uploadStatics(statisticsData, {
+            addWord(Words, {
                 onSuccess: () => {
-                    toast.success("Statistic Qusetion created successfully")
+                    toast.success("Word Add successfully")
                     form.reset()
                 },
                 onError: (err) => {
@@ -63,11 +48,11 @@ const AddBrandInformation = ({ mode = "create", id, question, answer_type }) => 
                 },
             })
         } else if (mode === "edit" && id) {
-            updateStatics(
-                { id, statisticsData },
+            updateWord(
+                { id, Words },
                 {
                     onSuccess: () => {
-                        toast.success("Statistic Qusetion updated successfully")
+                        toast.success("Word updat successfully")
                     },
                     onError: (err) => {
                         toast.error(
@@ -83,37 +68,13 @@ const AddBrandInformation = ({ mode = "create", id, question, answer_type }) => 
         <Form className="flex flex-col justify-between h-full" {...form}>
             <form onSubmit={form.handleSubmit(handleSubmit)} className="flex flex-col gap-6">
                 <FormField
-                    name="question"
+                    name="word"
                     control={form.control}
                     render={({ field }) => (
                         <FormItem>
                             <FormLabel>question</FormLabel>
                             <FormControl>
-                                <Input type="text" placeholder="Write question" className="bg-[#F4F4F4] h-14 border border-[#EBF0ED] placeholder:text-black placeholder:font-abeezee placeholder:font-normal" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )}
-                />
-                <FormField
-                    name="answer_type"
-                    control={form.control}
-                    render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Opitions</FormLabel>
-                            <FormControl>
-                                <Select className="w-full" onValueChange={field.onChange} defaultValue={field.value}>
-                                    <SelectTrigger className="w-full">
-                                        <SelectValue placeholder="Answer Type" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectGroup>
-                                            <SelectItem value="TEXT">Text</SelectItem>
-                                            <SelectItem value="DATE">Date</SelectItem>
-                                            <SelectItem value="NUMBER">Number</SelectItem>
-                                        </SelectGroup>
-                                    </SelectContent>
-                                </Select>
+                                <Input type="text" placeholder="Write word" className="bg-[#F4F4F4] h-14 border border-[#EBF0ED] placeholder:text-black placeholder:font-abeezee placeholder:font-normal" {...field} />
                             </FormControl>
                             <FormMessage />
                         </FormItem>
@@ -143,4 +104,4 @@ const AddBrandInformation = ({ mode = "create", id, question, answer_type }) => 
     )
 }
 
-export default AddBrandInformation
+export default AddWords

@@ -1,3 +1,4 @@
+import React, { useEffect } from "react"
 import { Form, FormControl, FormField, FormLabel, FormMessage, FormItem } from "@/components/ui/form"
 import {
     Select,
@@ -12,28 +13,70 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { BrandInfoSchema } from "@/lib/validation"
 import { useForm } from "react-hook-form"
 import { Input } from "@/components/ui/input"
-import { UploadSVG } from "@/svg"
 import { Button } from "@/components/ui/button"
 import { DialogClose } from "@/components/ui/dialog"
+import { useUploadAdminQuestion, useUpdateAdminQuestion } from "@/hooks/adminQuestions"
+import { toast } from "sonner"
 
 
 
 
-const AdInformation = () => {
-
+const AdsQuestion = ({ mode = "create", id, question, answer_type }) => {
+    const { mutate: uploadAdsQuestion } = useUploadAdminQuestion()
+    const { mutate: updateAdsQuestion } = useUpdateAdminQuestion()
 
     const form = useForm({
         resolver: zodResolver(BrandInfoSchema),
         defaultValues: {
-            question: "",
-            answertype: "",
+            question: question || "",
+            answer_type: answer_type || "",
         },
     })
 
-    function handleSubmit(data) {
-        console.log(data)
-    }
+    useEffect(() => {
+        if (mode === "edit") {
+            form.reset({
+                question: question || "",
+                answer_type: answer_type || "",
+            })
+        }
+    }, [mode, question, answer_type, form])
 
+    function handleSubmit(data) {
+        const adsData = {
+            question: data.question,
+            answer_type: data.answer_type,
+            answer_for: "ADVERTISMENT",
+        }
+
+        if (mode === "create") {
+            uploadAdsQuestion(adsData, {
+                onSuccess: () => {
+                    toast.success("Adds Qusetion created successfully")
+                    form.reset()
+                },
+                onError: (err) => {
+                    toast.error(
+                        `Creation failed: ${err.response?.data?.message || err.message}`
+                    )
+                },
+            })
+        } else if (mode === "edit" && id) {
+            updateAdsQuestion(
+                { id, adsData },
+                {
+                    onSuccess: () => {
+                        toast.success("Ads Qusetion updated successfully")
+                    },
+                    onError: (err) => {
+                        toast.error(
+                            `Update failed: ${err.response?.data?.message || err.message}`
+                        )
+                    },
+                }
+            )
+        }
+    }
 
     return (
         <Form className="flex flex-col justify-between h-full" {...form}>
@@ -52,7 +95,7 @@ const AdInformation = () => {
                     )}
                 />
                 <FormField
-                    name="answertype"
+                    name="answer_type"
                     control={form.control}
                     render={({ field }) => (
                         <FormItem>
@@ -64,9 +107,12 @@ const AdInformation = () => {
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectGroup>
-                                            <SelectItem value="text">Text</SelectItem>
-                                            <SelectItem value="Photo Upload">Photo Upload</SelectItem>
-                                            <SelectItem value="File Upload">File Upload</SelectItem>
+                                            <SelectItem value="TEXT">Text</SelectItem>
+                                            <SelectItem value="DATE">Date</SelectItem>
+                                            <SelectItem value="NUMBER">Number</SelectItem>
+                                            <SelectItem value="BOOLEAN">Boolean</SelectItem>
+                                            <SelectItem value="SELECT">Dropdown</SelectItem>
+                                            <SelectItem value="FILE">File</SelectItem>
                                         </SelectGroup>
                                     </SelectContent>
                                 </Select>
@@ -90,7 +136,8 @@ const AdInformation = () => {
                         type="submit"
                         className="w-full py-5 bg-[#C5FD1F] text-black text-base font-medium font-lufga rounded-full shrink"
                     >
-                        Save
+                        {mode === "create" ? "Save" : "Update"}
+
                     </Button>
                 </div>
             </form>
@@ -98,4 +145,4 @@ const AdInformation = () => {
     )
 }
 
-export default AdInformation
+export default AdsQuestion

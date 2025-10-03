@@ -1,5 +1,4 @@
-
-
+import React, { useEffect } from "react"
 import { Form, FormControl, FormField, FormLabel, FormMessage, FormItem } from "@/components/ui/form"
 import {
     Select,
@@ -11,32 +10,74 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { StatisticQuestionSchema } from "@/lib/validation"
+import { BrandInfoSchema } from "@/lib/validation"
 import { useForm } from "react-hook-form"
 import { Input } from "@/components/ui/input"
 import { UploadSVG } from "@/svg"
 import { Button } from "@/components/ui/button"
 import { DialogClose } from "@/components/ui/dialog"
+import { useUploadAdminQuestion, useUpdateAdminQuestion } from "@/hooks/adminQuestions"
+import { toast } from "sonner"
 
 
 
 
-const AddProductQuestion = () => {
-
+const AddProductQuestion = ({ mode = "create", id, question, answer_type }) => {
+    const { mutate: uploadProduct } = useUploadAdminQuestion()
+    const { mutate: updateProduct } = useUpdateAdminQuestion()
 
     const form = useForm({
-        resolver: zodResolver(StatisticQuestionSchema),
+        resolver: zodResolver(BrandInfoSchema),
         defaultValues: {
-            question: "",
-            hinttext: "",
-            answertype: "",
+            question: question || "",
+            answer_type: answer_type || "",
         },
     })
 
-    function handleSubmit(data) {
-        console.log(data)
-    }
+    useEffect(() => {
+        if (mode === "edit") {
+            form.reset({
+                question: question || "",
+                answer_type: answer_type || "",
+            })
+        }
+    }, [mode, question, answer_type, form])
 
+    function handleSubmit(data) {
+        const statisticsData = {
+            question: data.question,
+            answer_type: data.answer_type,
+            answer_for: "PRODUCT",
+        }
+
+        if (mode === "create") {
+            uploadProduct(statisticsData, {
+                onSuccess: () => {
+                    toast.success("Product Qusetion created successfully")
+                    form.reset()
+                },
+                onError: (err) => {
+                    toast.error(
+                        `Creation failed: ${err.response?.data?.message || err.message}`
+                    )
+                },
+            })
+        } else if (mode === "edit" && id) {
+            updateProduct(
+                { id, statisticsData },
+                {
+                    onSuccess: () => {
+                        toast.success("Product Qusetion updated successfully")
+                    },
+                    onError: (err) => {
+                        toast.error(
+                            `Update failed: ${err.response?.data?.message || err.message}`
+                        )
+                    },
+                }
+            )
+        }
+    }
 
     return (
         <Form className="flex flex-col justify-between h-full" {...form}>
@@ -55,20 +96,7 @@ const AddProductQuestion = () => {
                     )}
                 />
                 <FormField
-                    name="hinttext"
-                    control={form.control}
-                    render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Hint Text Field</FormLabel>
-                            <FormControl>
-                                <Input type="text" placeholder="Enter the percentage of visitors who make a purchase out of the total number of visitors." {...field}  className="bg-[#F4F4F4] h-14 border border-[#EBF0ED] placeholder:text-black placeholder:font-abeezee placeholder:font-normal"/>
-                            </FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )}
-                />
-                <FormField
-                    name="answertype"
+                    name="answer_type"
                     control={form.control}
                     render={({ field }) => (
                         <FormItem>
@@ -80,9 +108,11 @@ const AddProductQuestion = () => {
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectGroup>
-                                            <SelectItem value="number">Number</SelectItem>
-                                            <SelectItem value="dropdown">Dropdown</SelectItem>
-                                            <SelectItem value="boolean">Boolean</SelectItem>
+                                            <SelectItem value="TEXT">Text</SelectItem>
+                                            <SelectItem value="DATE">Date</SelectItem>
+                                            <SelectItem value="NUMBER">Number</SelectItem>
+                                            <SelectItem value="BOOLEAN">Boolean</SelectItem>
+                                            <SelectItem value="SELECT">Dropdown</SelectItem>
                                         </SelectGroup>
                                     </SelectContent>
                                 </Select>
@@ -106,7 +136,8 @@ const AddProductQuestion = () => {
                         type="submit"
                         className="w-full py-5 bg-[#C5FD1F] text-black text-base font-medium font-lufga rounded-full shrink"
                     >
-                        Save
+                        {mode === "create" ? "Save" : "Update"}
+
                     </Button>
                 </div>
             </form>
@@ -115,4 +146,3 @@ const AddProductQuestion = () => {
 }
 
 export default AddProductQuestion
-      
