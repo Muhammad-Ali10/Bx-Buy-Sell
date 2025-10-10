@@ -17,19 +17,31 @@ import { dummyTeamMembers } from "@/lib/dummy-data"
 import Stats from "@/components/admin/stats"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
+import { useGetUser } from "@/hooks/user"
+import { useParams } from "next/navigation"
+
+
 const MemberDetail = () => {
+
+    const {slug} = useParams()
+   
+
+    const { data, isLoading, error} = useGetUser(slug)
+
+    console.log(data)
+
 
     return (
         <div className="flex flex-col items-start gap-8 w-full">
-                <Link href={"/admin/team-members"} className="text-lg font-outfit font-medium text-black flex items-center gap-2 "><span className="bg-[#C6FE1F] p-1 rounded-sm size-8"><ArrowRightSVG /></span>Team Members</Link>
+            <Link href={"/admin/team-members"} className="text-lg font-outfit font-medium text-black flex items-center gap-2 "><span className="bg-[#C6FE1F] p-1 rounded-sm size-8"><ArrowRightSVG /></span>Team Members</Link>
             <Card className="w-full border-0">
                 <CardHeader className="text-black flex justify-between items-center w-full">
                     <div className="flex items-center gap-4">
                         <Avatar>
-                            <AvatarImage src="./avatar1.png" alt="Avatar" />
+                            <AvatarImage src={data?.profile_pic ? data?.profile_pic : "/avatar1.png"} alt="Avatar" />
                         </Avatar>
                         <div className="flex flex-col gap-2">
-                            <h3 className="flex items-center gap-1 font-lufga text-2xl font-bold">John Doe <VerifiedSVG /></h3>
+                            <h3 className="flex items-center gap-1 font-lufga text-2xl font-bold">{data?.first_name + " " + data?.last_name} {data?.verified && <VerifiedSVG />}</h3>
                             <div className="flex items-center gap-1">
                                 {Array(5).fill().map((_, index) => (
                                     <StarSVG key={index} />
@@ -47,31 +59,32 @@ const MemberDetail = () => {
                     </DropdownMenu>
                 </CardHeader>
                 <Separator />
-                <CardContent className="max-w-[468px] w-full flex flex-col gap-4">
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="font-lufga text-xl font-medium text-black">Member Information</span>
-                        <EditSVG />
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="font-abeezee text-lg font-normal text-black/50">Username</span>
-                        <span className="font-lufga text-lg font-medium text-black">Johnny</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="font-abeezee text-lg font-normal text-black/50">Email</span>
-                        <span className="font-lufga text-lg font-medium text-black">JennyWilson62@gmail.com</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="font-abeezee text-lg font-normal text-black/50">Password</span>
-                        <span className="font-lufga text-lg font-medium text-black">**********</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="font-abeezee text-lg font-normal text-black/50">User ID</span>
-                        <span className="font-lufga text-lg font-medium text-black">343fdft5</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="font-abeezee text-lg font-normal text-black/50">Role</span>
-                        <span className="font-lufga text-lg font-medium text-black">Chat Agent</span>
-                    </div>
+                <CardContent className="max-w-[500px] w-full flex flex-col gap-4">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-lufga text-xl font-medium text-black">Personal Information</span>
+                            <EditSVG />
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-abeezee text-lg font-normal text-black/50">Username</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.business_name}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-abeezee text-lg font-normal text-black/50">Email</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.email}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-abeezee text-lg font-normal text-black/50">Password</span>
+                            <span className="font-lufga text-lg font-medium text-black">**********</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-abeezee text-lg font-normal text-black/50">User ID</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.id}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-abeezee text-lg font-normal text-black/50">Role</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.role}</span>
+                        </div>
+      
                 </CardContent>
             </Card>
 

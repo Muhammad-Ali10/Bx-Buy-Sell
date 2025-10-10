@@ -17,4 +17,10 @@ export const getUser = async (id) => {
 };
 
 
+export const createUser =  async (userData) => {
+  console.log(userData);
+  const { data } = await apiClient.post("/user/create-by-admin", userData);
+  return data;
+};
+
 

@@ -8,57 +8,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react"
 import { useState } from "react"
 import { Chat1SVG, DeleteSVG, BlockSVG, ViewSVG, Edit1SVG } from "@/svg"
-
-
-
-// Dummy data matching the image
-const generateUsers = () => {
-    const baseUsers = [
-        { name: "Manuel Paigner", email: "m.paigner@ex.com", role: "Admin", status: "online" },
-        { name: "Bakhti", email: "Bakhti@email.com", role: "Moderator", status: "offline" },
-        { name: "Rehman", email: "Rehman@email.com", role: "Moderator", status: "offline" },
-        { name: "Ali Khan", email: "Ali.Khan@email.com", role: "Moderator", status: "offline" },
-        { name: "Sarah Johnson", email: "sarah.j@email.com", role: "User", status: "online" },
-        { name: "Mike Chen", email: "mike.chen@email.com", role: "Moderator", status: "online" },
-        { name: "Emma Wilson", email: "emma.w@email.com", role: "User", status: "offline" },
-        { name: "David Brown", email: "david.b@email.com", role: "User", status: "online" },
-        { name: "Manuel Paigner", email: "m.paigner@ex.com", role: "Admin", status: "online" },
-        { name: "Bakhti", email: "Bakhti@email.com", role: "Moderator", status: "offline" },
-        { name: "Rehman", email: "Rehman@email.com", role: "Moderator", status: "offline" },
-        { name: "Ali Khan", email: "Ali.Khan@email.com", role: "Moderator", status: "offline" },
-        { name: "Sarah Johnson", email: "sarah.j@email.com", role: "User", status: "online" },
-        { name: "Mike Chen", email: "mike.chen@email.com", role: "Moderator", status: "online" },
-        { name: "Emma Wilson", email: "emma.w@email.com", role: "User", status: "offline" },
-        { name: "David Brown", email: "david.b@email.com", role: "User", status: "online" },
-        { name: "Manuel Paigner", email: "m.paigner@ex.com", role: "Admin", status: "online" },
-        { name: "Bakhti", email: "Bakhti@email.com", role: "Moderator", status: "offline" },
-        { name: "Rehman", email: "Rehman@email.com", role: "Moderator", status: "offline" },
-        { name: "Ali Khan", email: "Ali.Khan@email.com", role: "Moderator", status: "offline" },
-        { name: "Sarah Johnson", email: "sarah.j@email.com", role: "User", status: "online" },
-        { name: "Mike Chen", email: "mike.chen@email.com", role: "Moderator", status: "online" },
-        { name: "Emma Wilson", email: "emma.w@email.com", role: "User", status: "offline" },
-        { name: "David Brown", email: "david.b@email.com", role: "User", status: "online" },
-    ]
-
-    const users = []
-    for (let i = 0; i < baseUsers.length; i++) {
-        const baseUser = baseUsers[i % baseUsers.length]
-        users.push({
-            id: i + 1,
-            name: `${baseUser.name}${i > 7 ? ` ${Math.floor(i / 8) + 1}` : ""}`,
-            email: baseUser.email,
-            role: baseUser.role,
-            lastOnline: "2025-07-10",
-            status: Math.random() > 0.6 ? "online" : "offline",
-            avatar: `/placeholder.svg?height=40&width=40&query=user-${i + 1}`,
-        })
-    }
-    return users
-}
-
-const allUsers = generateUsers()
+import { useFetchUsers } from "@/hooks/user"
+import Link from "next/link"
 
 const TeamTable = () => {
+
+    const { data: allUsers = [], isLoading } = useFetchUsers()
+
+
     const [currentPage, setCurrentPage] = useState(1)
     const itemsPerPage = 8
     const totalUsers = allUsers.length
@@ -80,6 +37,14 @@ const TeamTable = () => {
         setCurrentPage((prev) => Math.min(totalPages, prev + 1))
     }
 
+    console.log(currentUsers)
+
+    if (isLoading) {
+        return <div>Loading...</div>
+    }
+    
+
+
     return (
         <div className="space-y-4">
             <div className="rounded-md border">
@@ -96,26 +61,29 @@ const TeamTable = () => {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {currentUsers.map((user) => (
+                        {currentUsers.map((user, index) => (
                             <TableRow key={user.id}>
-                                <TableCell className="font-medium">{user.id}</TableCell>
+                                <TableCell className="font-medium">{index + 1}</TableCell>
                                 <TableCell>
-                                    <div className="flex items-center gap-3">
+                                    <Link href={`/admin/team-members/${user.id}`}  className="flex items-center gap-3">
                                         <Avatar className="h-10 w-10">
                                             <AvatarImage src={user.avatar || "/placeholder.svg"} alt={user.name} />
                                             <AvatarFallback>
-                                                {user.name
+                                                {user.first_name
                                                     .split(" ")
                                                     .map((n) => n[0])
                                                     .join("")}
                                             </AvatarFallback>
                                         </Avatar>
-                                        <span >{user.name}</span>
-                                    </div>
+                                        <span >{user.first_name + " " + user.last_name}</span>
+                                    </Link>
                                 </TableCell>
                                 <TableCell>{user.email}</TableCell>
                                 <TableCell>{user.role}</TableCell>
-                                <TableCell className="text-[#6C6C6C]">{user.lastOnline}</TableCell>
+                                <TableCell className="text-[#6C6C6C]">{user.is_online
+                                    ? <Button className="bg-[#15CA32]/8 border border-[#15CA32] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#15CA32] hover:bg-transparent">Online</Button>
+
+                                    : <Button className="bg-[#E5C74D]/8 border border-[#E5C74D] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#E5C74D] hover:bg-transparent">Offline</Button>}</TableCell>
                                 <TableCell>
                                     {user.status === "online" ? (
                                         <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border-green-200">Online</Badge>

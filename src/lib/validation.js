@@ -13,12 +13,13 @@ export const UserCredentialSchema = z.object({
 });
 
 export const MemberCredentialSchema = z.object({
-    username: z.string().nonempty({ message: "Username is required" }).min(2, { message: "Username must be at least 2 characters" }),
+    first_name: z.string().nonempty({ message: "First name is required" }).min(2, { message: "First Name must be at least 2 characters" }),
+    last_name: z.string().nonempty({ message: "Last name is required" }).min(2, { message: "Last Name must be at least 2 characters" }),
     email: z.string().nonempty({ message: "Email is required" }).email({ message: "Invalid email address" }),
     password: z.string().nonempty({ message: "Password is required" }).min(8, { message: "Password must be at least 8 characters" }),
     confirm_password: z.string().nonempty({ message: "Confirm password is required" }).min(8, { message: "Confirm password must be at least 8 characters" }),
-    status: z.enum(["active", "inactive"], { message: "Status is required" }),
-    role: z.enum(["moderator", "admin", "user"], { message: "Role is required" })
+    active: z.boolean({ message: "Status is required" }),
+    role: z.enum(["MONITER", "ADMIN", "USER"], { message: "Role is required" })
 }).refine((data) => data.password === data.confirm_password, {
     message: "Passwords do not match",
     path: ["confirmPassword"],

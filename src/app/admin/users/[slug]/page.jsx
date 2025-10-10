@@ -38,20 +38,22 @@ const UserDetail = () => {
                 <CardHeader className="text-black flex justify-between items-start w-full">
                     <div className="flex items-start gap-4">
                         <div className="flex flex-col items-center">
-                            <img src="/avatar1.png" className="size-[72px] rounded-[80px] object-cover" alt="user" />
+                            <img src={data?.profile_pic ? data?.profile_pic : "/avatar1.png"} className="size-[72px] rounded-[80px] object-cover" alt="user" />
                             <Badge className="text-[9px] font-lufga text-black bg-[#C6FE1F] -mt-2 flex items-center p-0 gap-1 w-10 h-3.5"><ProSVG className="size-2.5 mt-1" /> <span>Pro</span></Badge>
                         </div>
                         <div className="flex flex-col items-start gap-2 mt-2">
-                            <h3 className="flex items-center gap-1 font-lufga text-2xl font-bold">{data?.first_name + " " + data?.last_name} <VerifiedSVG /></h3>
+                            <h3 className="flex items-center gap-1 font-lufga text-2xl font-bold capitalize">{data?.first_name + " " + data?.last_name} <VerifiedSVG /></h3>
                             <div className="flex items-center gap-1">
                                 {Array(5).fill().map((_, index) => (
                                     <StarSVG key={index} />
                                 ))}
                             </div>
-                            <Button className="bg-[#15CA32]/8 border border-[#15CA32] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#15CA32] hover:bg-transparent">{data?.is_online
-                                ? "Online"
-                                : "Offline"}</Button>
+                            <Button className="bg-[#15CA32]/8 border border-[#15CA32] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#15CA32] hover:bg-transparent">{data?.is_online ? "Online" : "Offline"}</Button>
                         </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {data?.is_email_verified && <span className="text-sm font-normal text-black font-abeezee"> Email Verified <VerifiedSVG /></span>}
+                        {data?.is_phone_verified && <span className="text-sm font-normal text-black font-abeezee">Phone Verified <VerifiedSVG /></span>}
                     </div>
                     <DropdownMenu >
                         <DropdownMenuTrigger className="font-lufga font-medium text-lg text-black bg-[#C6FE1F] hover:bg-lime-500 rounded-[65px] py-2.5 px-5">Settings</DropdownMenuTrigger>

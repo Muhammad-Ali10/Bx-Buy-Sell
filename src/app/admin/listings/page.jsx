@@ -9,16 +9,18 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useState } from "react"
 import { Chat1SVG, DeleteSVG, BlockSVG, ViewSVG, Edit1SVG, AppIconSVG, Menu2SVG } from "@/svg"
 import { dummyAdminListings } from "@/lib/dummy-data"
+import { useListing } from "@/hooks/listing";
+import {useGetUser} from "@/hooks/user"
 
 
 // Dummy data matching the image
 const generateUsers = () => {
 
     const users = []
-    for (let i = 0; i < dummyAdminListings.length; i++) {
-        const baseUser = dummyAdminListings[i % dummyAdminListings.length]
+    for (let i = 0; i < useListing.length; i++) {
+        const baseUser = useListing[i % useListing.length]
         users.push({
-            name: `${baseUser.userName}${i > 7 ? ` ${Math.floor(i / 8) + 1}` : ""}`,
+            // name: `${baseUser.userName}${i > 7 ? ` ${Math.floor(i / 8) + 1}` : ""}`,
             title: baseUser.title,
             links: baseUser.link,
             Managed: baseUser.managed,
@@ -34,6 +36,10 @@ const generateUsers = () => {
 const allUsers = generateUsers()
 
 const ListingsTable = () => {
+
+    const {data, isLoading, error} = useListing();
+    console.log(data)
+
     const [currentPage, setCurrentPage] = useState(1)
     const itemsPerPage = 8
     const totalUsers = allUsers.length
@@ -125,7 +131,7 @@ const ListingsTable = () => {
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                             <Button variant="ghost" className="h-8 w-8 p-0">
-                                                <Menu2SVG/>
+                                                <Menu2SVG />
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="right" className="border border-[#C6FE1F] rounded-lg min-w-14 items-center gap-2 flex flex-col">
