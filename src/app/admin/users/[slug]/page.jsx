@@ -18,9 +18,19 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import Image from "next/image"
+import { useGetUser } from "@/hooks/user";
+import { useParams } from 'next/navigation'
+import { da } from "zod/v4/locales"
 
 
 const UserDetail = () => {
+    const { slug } = useParams()
+    console.log(slug)
+
+    const { data, isLoading, error } = useGetUser(slug);
+
+    console.log(data)
+
     return (
         <div className="flex flex-col items-start gap-8 w-full">
             <Link href={"/admin/team-members"} className="text-lg font-outfit font-medium text-black flex items-center gap-2 "><span className="bg-[#C6FE1F] p-1 rounded-sm size-8"><ArrowRightSVG /></span>Team Members</Link>
@@ -32,13 +42,15 @@ const UserDetail = () => {
                             <Badge className="text-[9px] font-lufga text-black bg-[#C6FE1F] -mt-2 flex items-center p-0 gap-1 w-10 h-3.5"><ProSVG className="size-2.5 mt-1" /> <span>Pro</span></Badge>
                         </div>
                         <div className="flex flex-col items-start gap-2 mt-2">
-                            <h3 className="flex items-center gap-1 font-lufga text-2xl font-bold">John Doe <VerifiedSVG /></h3>
+                            <h3 className="flex items-center gap-1 font-lufga text-2xl font-bold">{data?.first_name + " " + data?.last_name} <VerifiedSVG /></h3>
                             <div className="flex items-center gap-1">
                                 {Array(5).fill().map((_, index) => (
                                     <StarSVG key={index} />
                                 ))}
                             </div>
-                            <Button className="bg-[#15CA32]/8 border border-[#15CA32] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#15CA32] hover:bg-transparent">Online</Button>
+                            <Button className="bg-[#15CA32]/8 border border-[#15CA32] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#15CA32] hover:bg-transparent">{data?.is_online
+                                ? "Online"
+                                : "Offline"}</Button>
                         </div>
                     </div>
                     <DropdownMenu >
@@ -59,11 +71,11 @@ const UserDetail = () => {
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">Username</span>
-                            <span className="font-lufga text-lg font-medium text-black">Johnny</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.business_name}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">Email</span>
-                            <span className="font-lufga text-lg font-medium text-black">JennyWilson62@gmail.com</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.email}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">Password</span>
@@ -71,11 +83,11 @@ const UserDetail = () => {
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">User ID</span>
-                            <span className="font-lufga text-lg font-medium text-black">343fdft5</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.id}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">Role</span>
-                            <span className="font-lufga text-lg font-medium text-black">Chat Agent</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.role}</span>
                         </div>
                     </div>
                     <div className="max-w-[468px] w-full flex flex-col gap-4">
@@ -85,23 +97,23 @@ const UserDetail = () => {
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">Address</span>
-                            <span className="font-lufga text-lg font-medium text-black">898 Brooklyn Simmons</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.address}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">City</span>
-                            <span className="font-lufga text-lg font-medium text-black">Boston</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.city}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">Country</span>
-                            <span className="font-lufga text-lg font-medium text-black">United States</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.country}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">State</span>
-                            <span className="font-lufga text-lg font-medium text-black">Massachusetts</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.state}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-abeezee text-lg font-normal text-black/50">Zip Code</span>
-                            <span className="font-lufga text-lg font-medium text-black">02110</span>
+                            <span className="font-lufga text-lg font-medium text-black">{data?.zip_code}</span>
                         </div>
                     </div>
                 </CardContent>
@@ -172,13 +184,13 @@ const UserDetail = () => {
                             {section.fields.map((field, i) => (
                                 <div>
                                     <div key={i} className="flex flex-col gap-3">
-                                    <span className="font-lufga text-sm font-medium text-black">
-                                        {field.label}
-                                    </span>
-                                    <span className="font-abeezee text-sm  font-normal text-black">
-                                        {field.value || "—"}
-                                    </span>
-                                </div>
+                                        <span className="font-lufga text-sm font-medium text-black">
+                                            {field.label}
+                                        </span>
+                                        <span className="font-abeezee text-sm  font-normal text-black">
+                                            {field.value || "—"}
+                                        </span>
+                                    </div>
                                 </div>
                             ))}
                         </div>

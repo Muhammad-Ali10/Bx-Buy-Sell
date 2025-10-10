@@ -1,204 +1,171 @@
 "use client"
-import React from "react"
-import { Table, TableBody, TableHead, TableHeader, TableRow, TableCell } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
+import React, { useState, useEffect } from "react"
+import {
+    Table, TableBody, TableHead, TableHeader, TableRow, TableCell
+} from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
-import { VerifiedSVG, ProSVG, DeleteSVG, BlockSVG, ViewSVG,} from "@/svg"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal} from "lucide-react"
+import { MoreHorizontal } from "lucide-react"
+import { useFetchUsers } from "@/hooks/user"
+import { Skeleton } from "@/components/ui/skeleton"
+import { VerifiedSVG, ProSVG, DeleteSVG, BlockSVG, ViewSVG, } from "@/svg"
+import Link from "next/link"
 
-const userData = [
-    {
-        id: 1,
-        name: "User 1",
-        avatar: "/images/user1.jpg",
-        level: "pro",
-        phoneNumber: "+212600 000 001",
-        listings: 230,
-        registrationDate: "2025-07-10",
-        verification: ["phone", "email", "kc"],
-        status: "Online",
-        notes: "This user"
-    },
-    {
-        id: 2,
-        name: "User 2",
-        avatar: "/images/user2.jpg",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone", "email"],
-        status: "Offline",
-        notes: "-"
-    },
-    {
-        id: 3,
-        name: "User 3",
-        avatar: "/images/user3.jpg",
-        level: "pro",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone", "email"],
-        status: "Offline",
-        notes: "-"
-    },
-    {
-        id: 4,
-        name: "User 4",
-        avatar: "/images/user4.jpg",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone", "email", "kc"],
-        status: "Blocked",
-        notes: "is a scammer"
-    },
-    {
-        id: 5,
-        name: "User 5",
-        avatar: "/images/user5.jpg",
-        level: "pro",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone"],
-        status: "Online",
-        notes: "could be high risk"
-    },
-    {
-        id: 6,
-        name: "User 6",
-        avatar: "/images/user6.jpg",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone"],
-        status: "Online",
-        notes: "-"
-    },
-    {
-        id: 7,
-        name: "User 7",
-        avatar: "/images/user7.jpg",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone"],
-        status: "Online",
-        notes: "-"
-    },
-    {
-        id: 8,
-        name: "User 8",
-        avatar: "/images/user8.jpg",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone"],
-        status: "Online",
-        notes: "-"
-    },
-    {
-        id: 9,
-        name: "User 9",
-        avatar: "/images/user9.jpg",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone"],
-        status: "Online",
-        notes: "-"
-    },
-    {
-        id: 10,
-        name: "User 10",
-        avatar: "/images/user10.jpg",
-        phoneNumber: "+212600 000 001",
-        listings: 6,
-        registrationDate: "2025-07-10",
-        verification: ["phone"],
-        status: "Online",
-        notes: "Interesting person"
-    }
+
+const TableHaeding = [
+    "ID", "User name", "Phone Number", "Listings", "Registration Date", "Verification", "Status", "Notes", "Actions"
 ]
 
-const TableHaeding = ["ID", "User name", "Phone Number", "Listings", "Registration Date", "Verification", "Status", "Notes", "Actions"]
-
-
-const statusgenerate = (status) => {
-    switch (status) {
-        case "Online":
-            return <Button className="bg-[#15CA32]/8 border border-[#15CA32] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#15CA32] hover:bg-transparent">{status}</Button>
-            break;
-        case "Offline":
-            return <Button className="bg-[#E5C74D]/8 border border-[#E5C74D] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#E5C74D] hover:bg-transparent">{status}</Button>
-            break;
-        case "Blocked":
-            return <Button className="bg-[#FF1F1F]/8 border border-[#FF0004] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#FF0004] hover:bg-transparent">{status}</Button>
-            break;
-        default:
-            break;
-    }
-}
-
 const UserTables = () => {
+    const { data: allUsers = [], isLoading } = useFetchUsers()
+    const [currentPage, setCurrentPage] = useState(1)
+    const usersPerPage = 10
+
+    // Calculate pages
+    const totalUsers = allUsers?.length || 0
+    const totalPages = Math.ceil(totalUsers / usersPerPage)
+
+    // Slice data for pagination
+    const startIndex = (currentPage - 1) * usersPerPage
+    const currentUsers = allUsers.slice(startIndex, startIndex + usersPerPage)
+
+    // Handlers
+    const handleNext = () => {
+        if (currentPage < totalPages) setCurrentPage(currentPage + 1)
+    }
+    const handlePrev = () => {
+        if (currentPage > 1) setCurrentPage(currentPage - 1)
+    }
+    const handlePageClick = (pageNum) => setCurrentPage(pageNum)
+
+
+
+    const status = [
+        <Button className="bg-[#15CA32]/8 border border-[#15CA32] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#15CA32] hover:bg-transparent">Online</Button>,
+        <Button className="bg-[#E5C74D]/8 border border-[#E5C74D] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#E5C74D] hover:bg-transparent">Offline</Button>,
+        <Button className="bg-[#FF1F1F]/8 border border-[#FF0004] rounded-[80px] px-5 py-2.5 font-outfit font-bold text-[10px] text-[#FF0004] hover:bg-transparent">Blocked</Button>
+
+    ]
+
+    const notes = [
+        "This user h",
+        "could be high risk",
+        "is a scammer",
+        "Interesting person",
+        ""
+    ]
+
 
     return (
-        <Table className="border rounded-full">
-            <TableHeader>
-                <TableRow>
-                    {
-                        TableHaeding.map((item, index) => {
-                            return <TableHead className={`${index === 0 ? "w-14 text-center" : "w-14"} text-xs font-normal text-black opacity-50 font-outfit m-auto my-auto`} key={index}>{item}</TableHead>
-                        })
-                    }
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {
-                    userData.map((item, index) => {
-                        return (
+        <div className="flex flex-col gap-4">
+            <Table className="border rounded-full">
+                <TableHeader>
+                    <TableRow>
+                        {TableHaeding.map((item, index) => (
+                            <TableHead
+                                key={index}
+                                className={`text-xs font-normal text-black opacity-50 font-outfit ${index === 0 ? "w-14 text-center" : "w-14"
+                                    }`}
+                            >
+                                {item}
+                            </TableHead>
+                        ))}
+                    </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                    {isLoading
+                        ? Array(10)
+                            .fill(null)
+                            .map((_, index) => (
+                                <TableRow key={index}>
+                                    <TableCell><Skeleton className="h-4 w-6 mx-auto rounded" /></TableCell>
+                                    <TableCell><Skeleton className="h-4 w-20 rounded" /></TableCell>
+                                    <TableCell><Skeleton className="h-4 w-20 rounded" /></TableCell>
+                                    <TableCell><Skeleton className="h-4 w-20 rounded" /></TableCell>
+                                </TableRow>
+                            ))
+                        : currentUsers.map((item, index) => (
                             <TableRow key={index}>
-                                <TableCell className="w-14 text-center text-sm font-normal text-black font-outfit">{item.id}</TableCell>
+                                <TableCell className="text-center text-sm">{startIndex + index + 1}</TableCell>
                                 <TableCell className="text-sm font-normal text-black font-outfit">
-                                    <span className="flex flex-row items-center gap-2">
-                                        <div className="flex flex-col">
-                                            <img src="/avatar1.png" className="size-10 rounded-[80px] object-cover" alt={item.name} />
-                                            {item?.level && <Badge className="text-[9px] font-lufga text-black bg-[#C6FE1F] -mt-2 flex items-center p-0 gap-1 w-10 h-3.5"><ProSVG className="size-2.5 mt-1" /> <span>Pro</span></Badge>}
-                                        </div>
-                                        {item.name}</span>
+                                    <Link href={`/admin/users/${item.id}`} className="flex items-center gap-2">
+                                        <img src="/avatar1.png" className="size-10 rounded-full object-cover" alt="" />
+                                        {item.first_name} {item.last_name}
+                                    </Link>
                                 </TableCell>
-                                <TableCell className="text-sm font-normal text-black font-outfit">{item.phoneNumber}</TableCell>
-                                <TableCell className="  text-sm font-normal text-black font-outfit">{item.listings}</TableCell>
-                                <TableCell className="  text-sm font-normal text-[#6C6C6C] font-lufga">{item.registrationDate}</TableCell>
-                                <TableCell className="flex flex-col  text-sm font-normal text-[#6C6C6C] font-abeezee capitalize">{item.verification.map((item, index) => (
-                                    <span key={index} className="flex gap-1"><VerifiedSVG /> {item}</span>
-                                ))}</TableCell>
-                                <TableCell className="text-sm font-normal text-[#6C6C6C] font-lufga">{statusgenerate(item.status)}</TableCell>
-                                <TableCell className="text-sm font-normal text-[#6C6C6C] font-lufga">{item.notes}</TableCell>
-                                <TableCell className=" ">
+                                <TableCell>{item.phone}</TableCell>
+                                <TableCell>{Math.floor(Math.random() * 100)}</TableCell>
+                                <TableCell>{item.created_at?.slice(0, 10)}</TableCell>
+                                <TableCell>
+                                    {item.is_email_verified && <span className="flex gap-1"><VerifiedSVG /> E-Mail</span>}
+                                    {item.is_phone_verified && <span className="flex gap-1"><VerifiedSVG /> Phone</span>}
+                                </TableCell>
+                                <TableCell>{status[Math.floor(Math.random() * 3)]}</TableCell>
+                                <TableCell>{notes[Math.floor(Math.random() * 5)]}</TableCell>
+                                <TableCell>
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                             <Button variant="ghost" className="h-8 w-8 p-0">
                                                 <MoreHorizontal className="h-4 w-4" />
                                             </Button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="start" side="left"  className="border border-[#C6FE1F] rounded-lg min-w-14 items-center gap-2 flex flex-col">
+                                        <DropdownMenuContent align="start" side="left" className="border border-[#C6FE1F] rounded-lg flex flex-col gap-1">
                                             <DropdownMenuItem className="bg-[#F4F4F4] border border-[#EBF0ED] size-8 "><ViewSVG /></DropdownMenuItem>
                                             <DropdownMenuItem className="bg-[#F4F4F4] border border-[#EBF0ED] size-8 "><BlockSVG /></DropdownMenuItem>
                                             <DropdownMenuItem className="bg-[#F4F4F4] border border-[#EBF0ED] size-8 "><DeleteSVG /></DropdownMenuItem>
                                         </DropdownMenuContent>
                                     </DropdownMenu>
                                 </TableCell>
-
                             </TableRow>
+                        ))}
+                </TableBody>
+            </Table>
+
+            {/* Pagination */}
+            <div className="flex flex-row justify-between items-center mt-4">
+                <p className="text-sm text-gray-700">
+                    Showing {startIndex + 1}-{Math.min(startIndex + usersPerPage, totalUsers)} of {totalUsers}
+                </p>
+
+                <div className="flex flex-row items-center gap-2">
+                    <Button
+                        variant="outline"
+                        className="size-8 flex justify-center items-center rounded-lg"
+                        disabled={currentPage === 1}
+                        onClick={handlePrev}
+                    >
+                        &lt;
+                    </Button>
+
+                    {Array.from({ length: totalPages }).slice(0, 5).map((_, index) => {
+                        const page = index + 1
+                        return (
+                            <Button
+                                key={page}
+                                onClick={() => handlePageClick(page)}
+                                className={`size-8 rounded-lg ${currentPage === page
+                                    ? "bg-[#C6FE1F] text-black font-bold"
+                                    : "bg-white text-black border"
+                                    }`}
+                            >
+                                {page}
+                            </Button>
                         )
-                    })
-                }
-            </TableBody>
-        </Table>
+                    })}
+
+                    <Button
+                        variant="outline"
+                        className="size-8 flex justify-center items-center rounded-lg"
+                        disabled={currentPage === totalPages}
+                        onClick={handleNext}
+                    >
+                        &gt;
+                    </Button>
+                </div>
+            </div>
+        </div>
     )
 }
 
-export default UserTables   
+export default UserTables
