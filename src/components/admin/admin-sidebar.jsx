@@ -29,6 +29,9 @@ import {
   StatisticsSVG,
   ProductSVG,
   ManagementSVG,
+  LogoSVG,
+  SettingsSVG,
+  Log_OutSVG
 } from "@/svg"
 
 const menu = [
@@ -73,7 +76,12 @@ const menu = [
       { label: "Packages", href: "/admin/content-management/packages", icon: PackagesSVG, useFill: true },
     ],
   },
+  { label: "Settings", href: "/admin/settings", icon: SettingsSVG },
+  { label: "Log Out", href: "/admin/help", icon: Log_OutSVG },
 ]
+
+
+
 
 export default function AdminSidebar() {
   const pathname = usePathname()
@@ -85,8 +93,9 @@ export default function AdminSidebar() {
 
   return (
     <Sidebar className="w-64 bg-[#111] text-white flex flex-col">
-      <SidebarContent className="flex-1">
-        <nav className="flex flex-col gap-2 p-2">
+      <SidebarContent className="flex-1 px-2.5 py-4">
+        <LogoSVG />
+        <nav className="flex flex-col gap-2 ">
           {menu.map((item) => {
             const isActive = pathname === item.href
             const isAnySubActive = item.subMenu?.some((sub) => pathname === sub.href)

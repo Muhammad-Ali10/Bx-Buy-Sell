@@ -11,7 +11,7 @@ export const loginUser = async (userData) => {
   console.log(data);
   return data;
 };
-
+ 
 export const logoutUser = async () => {
   const { data } = await apiClient.post("/auth/logout");
   return data;
@@ -31,6 +31,6 @@ export const refreshToken = async () => {
     user: data?.data?.user ?? session.user,
   };
   setSession(newSession);
-  return newSession;
+  return newSession; 
 };
 

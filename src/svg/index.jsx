@@ -70,6 +70,9 @@ import Etsy from "./etsy.svg"
 import Big_Ecommerce from "./big-ecommerce.svg"
 import Magento from "./Magento.svg"
 import PrestaShop from "./PrestaShop.svg" 
+import Logo from "./logo.svg"
+import Settings from "./settings.svg"
+import Log_Out from "./log_out.svg"
 
 
 
@@ -146,6 +149,10 @@ export const EtsySVG = Etsy
 export const Big_EcommerceSVG = Big_Ecommerce
 export const MagentoSVG = Magento
 export const PrestaShopSVG = PrestaShop 
+export const LogoSVG = Logo
+export const SettingsSVG = Settings
+export const Log_OutSVG = Log_Out
+
 
 
 
