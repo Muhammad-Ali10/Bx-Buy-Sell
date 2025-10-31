@@ -9,7 +9,7 @@ export default function RevenueChart() {
   const options = {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: {
+    plugins: { 
       legend: {
         display: false,
       },

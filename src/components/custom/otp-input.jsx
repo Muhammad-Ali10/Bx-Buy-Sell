@@ -2,8 +2,9 @@
 
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
-import { OTPInput, SlotProps } from "input-otp";
+import  OTPInput  from "react-otp-input";
 import { useId, useState } from "react";
+import { fr } from "zod/v4/locales";
 
 function OTPInputComponent() {
   const id = useId();

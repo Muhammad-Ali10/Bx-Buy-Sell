@@ -4,7 +4,7 @@ import { getSession, setSession } from "@/utils/session";
 export const registerUser = async (userData) => {
   const { data } = await apiClient.post("/auth/signup", userData);
   return data;
-};
+}; 
 
 export const loginUser = async (userData) => {
   const { data } = await apiClient.post("/auth/signin", userData);
@@ -17,6 +17,12 @@ export const logoutUser = async () => {
   return data;
 };
 
+
+export const optsend = async (email) => {
+
+  const {data}= await apiClient.get(`auth/get-otp/{${email}`)
+  return data;
+}
 
 export const refreshToken = async () => {
   const session = getSession();

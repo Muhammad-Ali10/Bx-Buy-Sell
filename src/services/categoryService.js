@@ -11,7 +11,7 @@ export const uploadCategory = async (categoryData) => {
 };
 
 
-export const getCategories = () => {
+export const GetCategories = () => {
   return useQuery({
     queryKey: ["categories"],
     queryFn: async () => {

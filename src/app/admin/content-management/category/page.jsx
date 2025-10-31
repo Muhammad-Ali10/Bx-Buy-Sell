@@ -12,10 +12,10 @@ import {
 } from "@/components/ui/dialog"
 import AddCategory from "@/components/admin/add-category"
 import { Skeleton } from "@/components/ui/skeleton"
-import { getCategories } from "@/services/categoryService"
+import { GetCategories } from "@/services/categoryService"
 
 const Category = () => {
-  const { data, isPending, error } = getCategories()
+  const { data, isPending, error } = GetCategories()
   const [allCategories, setAllCategories] = useState([])
   const [categories, setCategories] = useState([])
 
