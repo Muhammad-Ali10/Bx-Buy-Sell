@@ -37,7 +37,7 @@ import Request from "./request.svg"
 import FaceScan from "./FaceScanSquare.svg"
 import Url from "./url.svg"
 import Alerts from "./Alerts.svg"
-import Searchlist from "./Searchlist.svg"
+import Searchlist from "./search.svg"
 import WordAlerts from "./wordalerts.svg"
 import Count from "./count.svg"
 import Upload from "./upload.svg"
@@ -72,7 +72,7 @@ import Magento from "./Magento.svg"
 import PrestaShop from "./PrestaShop.svg" 
 import Logo from "./logo.svg"
 import Settings from "./settings.svg"
-import Log_Out from "./log_out.svg"
+import Log_Out from "./log-out.svg"
 
 
 
