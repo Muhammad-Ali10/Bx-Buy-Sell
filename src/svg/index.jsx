@@ -71,8 +71,8 @@ import Big_Ecommerce from "./big-ecommerce.svg"
 import Magento from "./Magento.svg"
 import PrestaShop from "./PrestaShop.svg" 
 import Logo from "./logo.svg"
-import Settings from "./settings.svg"
-import Log_Out from "./log-out.svg"
+import Settings from "./gear.svg"
+import Log_Out from "./gear.svg"
 
 
 
