@@ -63,8 +63,8 @@
   --font-outfit: "Outfit", sans-serif;
   --font-lufga: "Lufga", sans-serif;
   --font-abeezee: "Abeezee", sans-serif;
-  --font-merriweather-sans: "Merriweather Sans", sans-serif
-  --font-helvetica-now: "Helvetica Now", "sans-serif";
+  --font-merriweather-sans: "Merriweather Sans", sans-serif;
+  --font-helvetica-now: "Helvetica Now", sans-serif;
   --breakpoint-sm: 300px;
   --size-1920: 1920px;
   --size-1630: 1630px;
@@ -148,6 +148,7 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -177,5 +178,5 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  
+
 }
