@@ -72,7 +72,7 @@ import Magento from "./Magento.svg"
 import PrestaShop from "./PrestaShop.svg" 
 import Logo from "./logo.svg"
 import Settings from "./Accounts.svg"
-import Log_Out from "./signout.svg"
+import Log_Out from "./Accounts.svg"
 
 
 
