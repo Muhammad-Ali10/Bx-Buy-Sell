@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -rf prisma/migrations)",
+      "Bash(npx prisma *)",
+      "Bash(grep -n 'UPDATE \"Listing\"\\\\|raw SQL\\\\|postgresql\\\\|\\\\$executeRaw`' src/listing/listing.service.ts)",
+      "Bash(npm install *)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId, @{n='CmdLine';e={$_.CommandLine}} | Format-Table -AutoSize -Wrap)",
+      "PowerShell(Stop-Process -Id 3452,9848,11336 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'ex-buy-sell|Bx-Buy-Sell|nest' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500; \"remaining app node procs: \" + \\(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'Bx-Buy-Sell|nest start' } | Measure-Object\\).Count)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'Bx-Buy-Sell|nest start' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; \"killed app node procs\")"
+    ]
+  }
+}

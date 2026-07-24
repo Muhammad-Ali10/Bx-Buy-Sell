@@ -1,0 +1,695 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  SELLER
+  USER
+  MONITER
+}
+
+enum RevenueType {
+  monthly
+  yearly
+}
+
+enum AnswerType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  SELECT
+  DATE
+  FILE
+  PHOTO
+  URL
+  CHECKBOX
+}
+
+enum AnswerFor {
+  BRAND
+  PRODUCT
+  MANAGEMENT
+  STATISTIC
+  HANDOVER
+  SOCIAL
+  ADVERTISMENT
+}
+
+enum TicketStatus {
+  OPEN
+  CLOSED
+  PENDING
+}
+
+enum ListingStatus {
+  PUBLISH
+  DRAFT
+}
+
+enum ChatStatus {
+  ACTIVE
+  CLOSED
+  FLAGGED
+  ARCHIVED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PAST_DUE
+  TRIALING
+  INCOMPLETE
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+model User {
+  id                String          @id @default(uuid()) @map("_id")
+  first_name        String?
+  last_name         String?
+  email             String
+  business_name     String?
+  contact_name      String?
+  phone             String?
+  country_code      String?
+  address           String?
+  country           String?
+  permissions       String[]
+  role              Role
+  city              String?
+  state             String?
+  refresh_token     String?
+  password_hash     String
+  otp_code          String?
+  profile_pic       String?
+  is_online         Boolean?        @default(false)
+  last_offline      DateTime?
+  zip_code          String?
+  background        String?
+  is_email_verified Boolean         @default(false)
+  support_ticket    SupportTicket[]
+  is_phone_verified Boolean         @default(false)
+  verified          Boolean         @default(false)
+  favourite         Favourite[]
+
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @updatedAt
+  deleted_at     DateTime?
+  buyer          Chat[]           @relation("Buyer")
+  seller         Chat[]           @relation("Seller")
+  listing        Listing[]
+  preferences    Preference?
+  chatRoomId     String?
+  chatlabels     ChatLabel[]
+  Message        Message[]        @relation("Sender")
+  ChatMonitor    ChatMonitor[]    @relation("ChatMonitor")
+  ActivityLog    ActivityLog[]
+  AdminFinancial AdminFinancial[]
+  Notification   Notification[]
+  MonitoringAlertReporter   MonitoringAlert[] @relation("AlertReporter")
+  MonitoringAlertProblematic MonitoringAlert[] @relation("AlertProblematic")
+  MonitoringAlertResponsible MonitoringAlert[] @relation("AlertResponsible")
+  subscription   UserSubscription?
+  payments       Payment[]
+  confidentialListingAccesses ListingConfidentialAccess[] @relation("ConfidentialAccessBuyer")
+  confidentialListingAccessGrants ListingConfidentialAccess[] @relation("ConfidentialAccessSeller")
+}
+
+model MonitoringAlert {
+  id                String   @id @default(uuid()) @map("_id")
+  problem_type      String
+  status            String   @default("unsolved")
+  notes             String?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  reporterId        String?
+  reporter          User?    @relation("AlertReporter", fields: [reporterId], references: [id])
+
+  problematicUserId String?
+  problematic_user  User?    @relation("AlertProblematic", fields: [problematicUserId], references: [id])
+
+  responsibleId     String?
+  responsible       User?    @relation("AlertResponsible", fields: [responsibleId], references: [id])
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid()) @map("_id")
+  actorId    String?
+  actorRole  Role?
+  action     String
+  entityType String
+  entityId   String?
+  message    String
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+}
+
+model Favourite {
+  id String @id @default(uuid()) @map("_id")
+
+  listingId  String
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  userId     String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([listingId])
+}
+
+model Preference {
+  id String @id @default(uuid()) @map("_id")
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  businessCategory BusinessCategory[]
+  niche            Niche[]
+  financial        Financial?
+}
+
+model Financial {
+  id              String  @id @default(uuid()) @map("_id")
+  seller_location String?
+
+  age_range              Range? @relation("ageRange")
+  yearly_profit_range    Range? @relation("yearlyProfitRange")
+  profit_multiple_range  Range? @relation("profitMultipleRange")
+  revenue_multiple_range Range? @relation("revenueMultipleRange")
+
+  preferenceId String?     @unique
+  preference   Preference? @relation(fields: [preferenceId], references: [id])
+}
+
+model Range {
+  id         String   @id @default(uuid()) @map("_id")
+  min        String
+  max        String
+  country    String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  age_id              String @unique
+  yearly_profit_id    String @unique
+  profit_multiple_id  String @unique
+  revenue_multiple_id String @unique
+
+  age              Financial? @relation("ageRange", fields: [age_id], references: [id])
+  yearly_profit    Financial? @relation("yearlyProfitRange", fields: [yearly_profit_id], references: [id])
+  profit_multiple  Financial? @relation("profitMultipleRange", fields: [profit_multiple_id], references: [id])
+  revenue_multiple Financial? @relation("revenueMultipleRange", fields: [revenue_multiple_id], references: [id])
+}
+
+model Listing {
+  id                 String            @id @default(uuid()) @map("_id")
+  status             ListingStatus
+  user               User              @relation(fields: [userId], references: [id])
+  userId             String
+  brand              ListingQuestion[] @relation("BrandQuestion")
+  category           ListingCategory[]
+  tools              ListingTool[]
+  financials         Revenue[]
+  statistics         ListingQuestion[] @relation("StatisticQuestion")
+  productQuestion    ListingQuestion[] @relation("ProductQuestion")
+  managementQuestion ListingQuestion[] @relation("ManageQuestion")
+  social_account     ListingQuestion[] @relation("SocialQuestion")
+  advertisement      ListingQuestion[] @relation("AdvertisementQuestion")
+  handover           ListingQuestion[] @relation("HandoverQuestion")
+  portfolioLink      String?
+  managed_by_ex      Boolean           @default(false)
+  confidentialControl Boolean          @default(false)
+  featuredOnCategoryPage Boolean       @default(false)
+  featuredOnStartPage Boolean          @default(false)
+  confidentialAccesses ListingConfidentialAccess[]
+  Favourite          Favourite[]
+  chats              Chat[]            @relation // CRITICAL: Link to chats for this listing
+  created_at         DateTime          @default(now())
+  updated_at         DateTime          @updatedAt
+  deleted_at         DateTime?
+
+  // Feed queries filter by status + userId and order by created_at desc.
+  @@index([status, created_at])
+  @@index([userId])
+}
+
+model ListingConfidentialAccess {
+  id               String   @id @default(uuid()) @map("_id")
+  listingId        String
+  buyerId          String
+  grantedBySellerId String
+  chatId           String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  listing          Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer            User     @relation("ConfidentialAccessBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  grantedBySeller  User     @relation("ConfidentialAccessSeller", fields: [grantedBySellerId], references: [id], onDelete: Cascade)
+  chat             Chat?    @relation(fields: [chatId], references: [id], onDelete: SetNull)
+
+  @@unique([listingId, buyerId])
+  @@index([listingId])
+  @@index([buyerId])
+}
+
+model ListingCategory {
+  id         String   @id @default(uuid()) @map("_id")
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  listingId  String
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+}
+
+model BusinessCategory {
+  id         String   @id @default(uuid()) @map("_id")
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  Preference   Preference? @relation(fields: [preferenceId], references: [id])
+  preferenceId String?
+}
+
+model BusinessCategoryOption {
+  id         String   @id @default(uuid()) @map("_id")
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model Niche {
+  id String @id @default(uuid()) @map("_id")
+
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  Preference   Preference? @relation(fields: [preferenceId], references: [id])
+  preferenceId String?
+}
+
+model NicheOption {
+  id         String   @id @default(uuid()) @map("_id")
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model Plan {
+  id            String   @id @default(uuid()) @map("_id")
+  name          String   @unique
+  slug          String   @unique
+  title         String
+  description   String
+  
+  // Legacy fields (keep for backward compatibility)
+  duration_type String?
+  type          String?
+  price         String?
+  feature       String[]  @default([])
+  
+  // New pricing fields
+  monthlyPrice          String  @default("0")
+  yearlyPrice           String  @default("0")
+  
+  // Stripe IDs
+  stripeMonthlyPriceId  String?
+  stripeYearlyPriceId   String?
+  stripeProductId       String?
+  
+  // Feature limits
+  maxListings       Int      @default(0)
+  maxPhotos         Int      @default(5)
+  maxVideoDuration  Int      @default(0)
+  canUseAnalytics   Boolean  @default(false)
+  prioritySupport   Boolean  @default(false)
+  featuredListing   Boolean  @default(false)
+  canBoostListing   Boolean  @default(false)
+  customBranding    Boolean  @default(false)
+  
+  // Metadata
+  isActive      Boolean  @default(true)
+  isDefault     Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  // Relations
+  subscriptions UserSubscription[]
+  payments      Payment[]
+}
+
+model EmailTemplate {
+  id         String   @id @default(uuid()) @map("_id")
+  subject    String
+  cc         String[]
+  body       String
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model Category {
+  id         String   @id @default(uuid()) @map("_id")
+  name       String
+  image_path String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model ServiceTool {
+  id         String   @id @default(uuid()) @map("_id")
+  name       String
+  image_path String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model ListingTool {
+  id         String   @id @default(uuid()) @map("_id")
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  Listing    Listing? @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  listingId  String?
+
+  @@index([listingId])
+}
+
+model Brand {
+  id                String   @id @default(uuid()) @map("_id")
+  name              String
+  domain            String[]
+  business_location String
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  listingId         String?  @unique
+}
+
+model Revenue {
+  id             String      @id @default(uuid()) @map("_id")
+  type           RevenueType
+  name           String
+  revenue_amount String
+  annual_cost    String
+  net_profit     String?
+  listingId      String
+  listing        Listing?    @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now())
+  updated_at     DateTime    @updatedAt
+
+  @@index([listingId])
+}
+
+model ListingQuestion {
+  id                   String      @id @default(uuid()) @map("_id")
+  question             String?
+  answer_for           String?
+  answer_type          AnswerType?
+  answer               String?
+  option               String[]
+  created_at           DateTime    @default(now())
+  updated_at           DateTime    @updatedAt
+  brandQuestionId      String?
+  brandQuestion        Listing?    @relation("BrandQuestion", fields: [brandQuestionId], references: [id], onDelete: Cascade)
+  productQuestion      Listing?    @relation("ProductQuestion", fields: [productQuestionId], references: [id], onDelete: Cascade)
+  productQuestionId    String?
+  managementQuestion   Listing?    @relation("ManageQuestion", fields: [managementQuestionId], references: [id], onDelete: Cascade)
+  managementQuestionId String?
+  handoverQuestion     Listing?    @relation("HandoverQuestion", fields: [handoverQuestionId], references: [id], onDelete: Cascade)
+  handoverQuestionId   String?
+  statistics           Listing?    @relation("StatisticQuestion", fields: [statisticsId], references: [id], onDelete: Cascade)
+  statisticsId         String?
+  advertisement        Listing?    @relation("AdvertisementQuestion", fields: [advertisementId], references: [id], onDelete: Cascade)
+  advertisementId      String?
+  social_account       Listing?    @relation("SocialQuestion", fields: [social_accountId], references: [id], onDelete: Cascade)
+  social_accountId     String?
+
+  // Each relation on Listing resolves by one of these FKs; index them all so
+  // including questions in the feed is a lookup instead of a collection scan.
+  @@index([brandQuestionId])
+  @@index([productQuestionId])
+  @@index([managementQuestionId])
+  @@index([handoverQuestionId])
+  @@index([statisticsId])
+  @@index([advertisementId])
+  @@index([social_accountId])
+}
+
+model AdminQuestion {
+  id          String     @id @default(uuid()) @map("_id")
+  question    String
+  answer_type AnswerType
+  answer_for  AnswerFor // brand, product, management
+  option      String[]   @default([])
+  created_at  DateTime   @default(now())
+  updated_at  DateTime   @updatedAt
+}
+
+model AdminSocialAccount {
+  id                    String   @id @default(uuid()) @map("_id")
+  social_account_option String
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+}
+
+model AdminFinancial {
+  id         String   @id @default(uuid()) @map("_id")
+  columns    String[] @default([])
+  rows       Json     @default("[]")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId     String   @unique
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model Question {
+  id          String     @id @default(uuid()) @map("_id")
+  question    String
+  answer_type AnswerType
+  option      String[]
+  created_at  DateTime   @default(now())
+  updated_at  DateTime   @updatedAt
+}
+
+// User Chat System
+model Chat {
+  id     String @id @default(uuid()) @map("_id")
+  user   User   @relation("Buyer", fields: [userId], references: [id])
+  userId String
+  seller User   @relation("Seller", fields: [sellerId], references: [id])
+
+  sellerId      String
+  listingId     String? // CRITICAL: Links chat to specific listing
+  listing       Listing?        @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  messages      Message[]
+  monitorViews  ChatMonitor[]   @relation("MoniteredChat")
+  isOffered     Boolean         @default(false)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  offer         String? // Optional offer text/ID made by seller
+  status        ChatStatus      @default(ACTIVE)
+  chatLabels    ChatLabel[]
+  SupportTicket SupportTicket[]
+  confidentialAccesses ListingConfidentialAccess[]
+
+  // Conversation list filters by buyer (userId) or seller (sellerId).
+  @@index([userId])
+  @@index([sellerId])
+}
+
+model ChatLabel {
+  id     String @id @default(uuid()) @map("_id")
+  chatId String
+  userId String
+
+  label      ChatLabelType?
+  chat       Chat           @relation(fields: [chatId], references: [id])
+  user       User           @relation(fields: [userId], references: [id])
+  created_at DateTime       @default(now())
+  updated_at DateTime       @updatedAt
+
+  @@unique([chatId, userId])
+}
+
+model Message {
+  id        String      @id @default(uuid()) @map("_id")
+  chat      Chat        @relation(fields: [chatId], references: [id])
+  chatId    String
+  sender    User        @relation("Sender", fields: [senderId], references: [id])
+  senderId  String
+  content   String?
+  type      MessageType @default(TEXT)
+  fileUrl   String? // for file/image type messages
+  metadata  Json?
+  delivered Boolean     @default(false)
+  read      Boolean     @default(false)
+  createdAt DateTime    @default(now())
+
+  @@index([chatId, senderId, createdAt])
+}
+
+model ProhibitedWord {
+  id        String   @id @default(uuid()) @map("_id")
+  word      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatMonitor {
+  id        String @id @default(uuid()) @map("_id")
+  monitor   User   @relation("ChatMonitor", fields: [monitorId], references: [id])
+  monitorId String
+
+  viewedAt DateTime @default(now())
+
+  chatId String
+  Chat   Chat   @relation("MoniteredChat", fields: [chatId], references: [id])
+
+  @@index([chatId, monitorId])
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  OFFER
+  ADMIN
+}
+
+enum ChatLabelType {
+  GOOD
+  BAD
+  MEDIUM
+}
+
+model SupportTicket {
+  id         String       @id @default(uuid()) @map("_id")
+  userId     String
+  chatRoomId String?
+  subject    String
+  message    String
+  status     TicketStatus @default(OPEN)
+  createdAt  DateTime     @default(now())
+
+  user     User        @relation(fields: [userId], references: [id])
+  chatRoom Chat?       @relation(fields: [chatRoomId], references: [id])
+  files    TicketFile?
+}
+
+model TicketFile {
+  id              String         @id @default(uuid()) @map("_id")
+  name            String?
+  path            String?
+  urls            String[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  SupportTicket   SupportTicket? @relation(fields: [supportTicketId], references: [id])
+  supportTicketId String?        @unique
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @map("_id")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("info") // info, success, warning, error, message
+  read      Boolean  @default(false)
+  link      String?
+  chatId    String?  // Link to chat if it's a message notification
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, read, createdAt])
+}
+
+model UserSubscription {
+  id                     String              @id @default(uuid()) @map("_id")
+  userId                 String              @unique
+  user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId                 String
+  plan                   Plan                @relation(fields: [planId], references: [id])
+  
+  // Stripe data
+  stripeCustomerId       String?             @unique
+  stripeSubscriptionId   String?             @unique
+  stripePriceId          String?
+  stripeCurrentPeriodEnd DateTime?
+  
+  // Subscription status
+  status                 SubscriptionStatus  @default(ACTIVE)
+  billingCycle           BillingCycle        @default(MONTHLY)
+  
+  // Dates
+  startDate              DateTime            @default(now())
+  endDate                DateTime?
+  cancelledAt            DateTime?
+  trialEndsAt            DateTime?
+  
+  created_at             DateTime            @default(now())
+  updated_at             DateTime            @updatedAt
+}
+
+model Payment {
+  id                    String         @id @default(uuid()) @map("_id")
+  userId                String
+  user                  User           @relation(fields: [userId], references: [id])
+  
+  // Stripe data
+  stripePaymentIntentId String?        @unique
+  stripeInvoiceId       String?
+  stripeChargeId        String?
+  
+  // Payment details
+  amount                String
+  currency              String         @default("usd")
+  status                PaymentStatus  @default(PENDING)
+  
+  // Related subscription
+  planId                String?
+  plan                  Plan?          @relation(fields: [planId], references: [id])
+  subscriptionId        String?
+  
+  billingCycle          BillingCycle?
+  description           String?
+  
+  // Metadata
+  metadata              Json?
+
+  created_at            DateTime       @default(now())
+  updated_at            DateTime       @updatedAt
+}

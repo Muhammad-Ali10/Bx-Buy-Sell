@@ -1,0 +1,309 @@
+@import url('https://fonts.googleapis.com/css2?family=Merriweather+Sans&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar for sidebar - positioned at the edge */
+.sidebar-scrollable::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Firefox scrollbar */
+.sidebar-scrollable {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-gutter: stable;
+}
+
+/* Admin sidebar scrollbar - dark, thin, positioned at right edge */
+.admin-sidebar-scroll::-webkit-scrollbar {
+  width: 2px;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 1px;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Firefox scrollbar for admin sidebar */
+.admin-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* Filter sidebar scrollbar - dark, thin, positioned at right edge */
+.filter-sidebar-scroll::-webkit-scrollbar {
+  width: 2px;
+}
+
+.filter-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.filter-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 1px;
+}
+
+.filter-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Firefox scrollbar for filter sidebar */
+.filter-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* Admin chat columns scrollbar - very thin, light */
+.admin-chat-scrollbar::-webkit-scrollbar {
+  width: 2px;
+}
+
+.admin-chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-chat-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+}
+
+.admin-chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Firefox scrollbar for admin chat columns */
+.admin-chat-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+}
+
+/* Fixed width for chat window on desktop */
+@media (min-width: 1280px) {
+  [data-desktop-width="688px"] {
+    width: 688px !important;
+    flex: none !important;
+  }
+}
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    /* Electric blue primary */
+    --primary: 225 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    
+    /* Neon green/yellow accent */
+    --accent: 72 100% 51%;
+    --accent-foreground: 0 0% 10%;
+
+    /* Dark background for contrast sections */
+    --dark: 0 0% 8%;
+    --dark-foreground: 0 0% 98%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 10%;
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 225 100% 50%;
+
+    --radius: 0.75rem;
+
+    /* Additional design tokens */
+    --gradient-primary: linear-gradient(135deg, hsl(225 100% 50%), hsl(240 100% 60%));
+    --shadow-glow: 0 0 30px hsl(72 100% 51% / 0.3);
+    --shadow-card: 0 4px 20px hsl(0 0% 0% / 0.08);
+  }
+
+  .dark {
+    --background: 0 0% 8%;
+    --foreground: 0 0% 98%;
+
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 225 100% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --accent: 72 100% 51%;
+    --accent-foreground: 0 0% 10%;
+
+    --dark: 0 0% 8%;
+    --dark-foreground: 0 0% 98%;
+
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 60%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 225 100% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Lufga Font Family - Local Font Files */
+@font-face {
+  font-family: 'Lufga';
+  src: url('/fonts/Lufga-Regular.eot');
+  src: url('/fonts/Lufga-Regular.eot?#iefix') format('embedded-opentype'),
+       url('/fonts/Lufga-Regular.woff2') format('woff2'),
+       url('/fonts/Lufga-Regular.woff') format('woff'),
+       url('/fonts/Lufga-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lufga';
+  src: url('/fonts/Lufga-Medium.eot');
+  src: url('/fonts/Lufga-Medium.eot?#iefix') format('embedded-opentype'),
+       url('/fonts/Lufga-Medium.woff2') format('woff2'),
+       url('/fonts/Lufga-Medium.woff') format('woff'),
+       url('/fonts/Lufga-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lufga';
+  src: url('/fonts/Lufga-SemiBold.eot');
+  src: url('/fonts/Lufga-SemiBold.eot?#iefix') format('embedded-opentype'),
+       url('/fonts/Lufga-SemiBold.woff2') format('woff2'),
+       url('/fonts/Lufga-SemiBold.woff') format('woff'),
+       url('/fonts/Lufga-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lufga';
+  src: url('/fonts/Lufga-Bold.eot');
+  src: url('/fonts/Lufga-Bold.eot?#iefix') format('embedded-opentype'),
+       url('/fonts/Lufga-Bold.woff2') format('woff2'),
+       url('/fonts/Lufga-Bold.woff') format('woff'),
+       url('/fonts/Lufga-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ABeeZee Font Family - Local Font Files */
+@font-face {
+  font-family: 'ABeeZee';
+  src: url('/fonts/ABeeZee-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'ABeeZee';
+  src: url('/fonts/ABeeZee-Italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Font Families - Available via Tailwind utilities: font-outfit, font-lufga, font-sora, font-abeezee */
+/* These are configured in tailwind.config.ts and can be used with className="font-outfit", etc. */
+
+/* Force green color for sliders in filter sidebar - override blue primary color */
+.filter-sidebar [role="slider"] {
+  background-color: rgba(24, 24, 26, 1) !important;
+  border: 5px solid rgba(197, 253, 31, 1) !important;
+  width: 20px !important;
+  height: 20px !important;
+}
+
+/* Target slider tracks - override bg-secondary and bg-primary */
+.filter-sidebar .relative.h-2.w-full.grow.overflow-hidden.rounded-full {
+  background-color: rgba(58, 58, 59, 1) !important;
+  height: 6px !important;
+  border-radius: 10px !important;
+}
+
+/* Target slider range (active portion) - override bg-primary */
+.filter-sidebar .absolute.h-full {
+  background-color: rgba(197, 253, 31, 1) !important;
+  height: 6px !important;
+  border-radius: 10px !important;
+}
+
+/* Message input placeholder styling */
+.message-input-placeholder::placeholder {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+/* Desktop message text typography - ONLY on desktop screens (xl: 1280px+) */
+@media (min-width: 1280px) {
+  .chat-message-text-desktop {
+    font-family: 'Lufga' !important;
+    font-weight: 500 !important;
+    font-size: 14px !important;
+    line-height: 160% !important;
+    letter-spacing: 0% !important;
+  }
+}

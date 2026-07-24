@@ -1,0 +1,2286 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "AppController_getHello",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "App"
+        ]
+      }
+    },
+    "/auth/signup": {
+      "post": {
+        "operationId": "AuthController_signUp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignUpSchemaDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/signin": {
+      "post": {
+        "operationId": "AuthController_signIn",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInSchemaDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/logout/{id}": {
+      "get": {
+        "operationId": "AuthController_logout",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "User ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/get-otp/{email}": {
+      "get": {
+        "operationId": "AuthController_getOTP",
+        "parameters": [
+          {
+            "name": "email",
+            "required": true,
+            "in": "path",
+            "description": "User Email",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/verify-otp": {
+      "put": {
+        "operationId": "AuthController_verifyOTP",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/refresh/{id}": {
+      "patch": {
+        "operationId": "AuthController_refreshTokens",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "User ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshSchemaDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/user": {
+      "get": {
+        "operationId": "UserController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      },
+      "post": {
+        "operationId": "UserController_createUser",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserSchemaDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      }
+    },
+    "/user/{id}": {
+      "get": {
+        "operationId": "UserController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "User ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      },
+      "patch": {
+        "operationId": "UserController_updateUser",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "User ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdateSchemaDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      },
+      "delete": {
+        "operationId": "UserController_deleteUser",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "User ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      }
+    },
+    "/plan": {
+      "get": {
+        "operationId": "PlanController_getAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Plan"
+        ]
+      },
+      "post": {
+        "operationId": "PlanController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlanDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Plan"
+        ]
+      }
+    },
+    "/plan/{id}": {
+      "get": {
+        "operationId": "PlanController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Plan ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Plan"
+        ]
+      },
+      "put": {
+        "operationId": "PlanController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Plan ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlanDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Plan"
+        ]
+      },
+      "delete": {
+        "operationId": "PlanController_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Plan ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Plan"
+        ]
+      }
+    },
+    "/email-template": {
+      "get": {
+        "operationId": "EmailTemplateController_getAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "EmailTemplate"
+        ]
+      },
+      "post": {
+        "operationId": "EmailTemplateController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEmailDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "EmailTemplate"
+        ]
+      }
+    },
+    "/email-template/{id}": {
+      "get": {
+        "operationId": "EmailTemplateController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Email Template ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "EmailTemplate"
+        ]
+      },
+      "patch": {
+        "operationId": "EmailTemplateController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Email Template ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateEmailDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "EmailTemplate"
+        ]
+      },
+      "delete": {
+        "operationId": "EmailTemplateController_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Email Template ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "EmailTemplate"
+        ]
+      }
+    },
+    "/category": {
+      "get": {
+        "operationId": "CategoryController_getAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Category"
+        ]
+      },
+      "post": {
+        "operationId": "CategoryController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Category"
+        ]
+      }
+    },
+    "/category/{id}": {
+      "get": {
+        "operationId": "CategoryController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Category ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Category"
+        ]
+      },
+      "patch": {
+        "operationId": "CategoryController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Category ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Category"
+        ]
+      },
+      "delete": {
+        "operationId": "CategoryController_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Category ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Category"
+        ]
+      }
+    },
+    "/service-tool": {
+      "get": {
+        "operationId": "ServiceToolController_getAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "ServiceTool"
+        ]
+      },
+      "post": {
+        "operationId": "ServiceToolController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServiceToolDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "ServiceTool"
+        ]
+      }
+    },
+    "/service-tool/{id}": {
+      "get": {
+        "operationId": "ServiceToolController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Service Tool ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "ServiceTool"
+        ]
+      },
+      "put": {
+        "operationId": "ServiceToolController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Service Tool ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateServiceToolDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "ServiceTool"
+        ]
+      },
+      "delete": {
+        "operationId": "ServiceToolController_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Service Tool ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "ServiceTool"
+        ]
+      }
+    },
+    "/niche": {
+      "get": {
+        "operationId": "NicheController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Niche"
+        ]
+      },
+      "post": {
+        "operationId": "NicheController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NicheOptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Niche"
+        ]
+      }
+    },
+    "/niche/{id}": {
+      "get": {
+        "operationId": "NicheController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Niche ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Niche"
+        ]
+      },
+      "patch": {
+        "operationId": "NicheController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Niche ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NicheOptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Niche"
+        ]
+      },
+      "delete": {
+        "operationId": "NicheController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Niche ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Niche"
+        ]
+      }
+    },
+    "/listing": {
+      "get": {
+        "operationId": "ListingController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Listing"
+        ]
+      },
+      "post": {
+        "operationId": "ListingController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListingSchemaDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Listing"
+        ]
+      }
+    },
+    "/listing/{id}": {
+      "get": {
+        "operationId": "ListingController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Listing Id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Listing"
+        ]
+      },
+      "patch": {
+        "operationId": "ListingController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Listing Id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateListingDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Listing"
+        ]
+      },
+      "delete": {
+        "operationId": "ListingController_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Listing Id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Listing"
+        ]
+      }
+    },
+    "/chat/fetch/user/{userId}": {
+      "get": {
+        "operationId": "ChatController_getChatRoomsByUserId",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "description": "User ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Chat"
+        ]
+      }
+    },
+    "/chat/fetch/seller/{sellerId}": {
+      "get": {
+        "operationId": "ChatController_getChatRoomsBySellerId",
+        "parameters": [
+          {
+            "name": "sellerId",
+            "required": true,
+            "in": "path",
+            "description": "Seller ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Chat"
+        ]
+      }
+    },
+    "/chat/fetch/{userId}/{sellerId}": {
+      "get": {
+        "operationId": "ChatController_fetchChatRoom",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "description": "User ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sellerId",
+            "required": true,
+            "in": "path",
+            "description": "Seller ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Chat"
+        ]
+      }
+    },
+    "/chat/create/{userId}/{sellerId}": {
+      "get": {
+        "operationId": "ChatController_createChatRoom",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "description": "User ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sellerId",
+            "required": true,
+            "in": "path",
+            "description": "Seller ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Chat"
+        ]
+      }
+    },
+    "/chat/update/label": {
+      "put": {
+        "operationId": "ChatController_updateChatLabelStatus",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLabelDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Chat"
+        ]
+      }
+    },
+    "/support": {
+      "get": {
+        "operationId": "SupportController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Support"
+        ]
+      },
+      "post": {
+        "operationId": "SupportController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSupportSchemaDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Support"
+        ]
+      }
+    },
+    "/support/user": {
+      "get": {
+        "operationId": "SupportController_getAllByUserId",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Support Ticket Id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Support"
+        ]
+      }
+    },
+    "/support/{id}": {
+      "get": {
+        "operationId": "SupportController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Support Ticket Id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Support"
+        ]
+      },
+      "patch": {
+        "operationId": "SupportController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Support Ticket Id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSupportSchemaDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Support"
+        ]
+      },
+      "delete": {
+        "operationId": "SupportController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Support"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "ExBuySell - Api Documentation",
+    "description": "",
+    "version": "1.0",
+    "contact": {
+
+    }
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "schemas": {
+      "SignUpSchemaDTO": {
+        "type": "object",
+        "properties": {
+          "first_name": {
+            "type": "string",
+            "minLength": 4
+          },
+          "last_name": {
+            "type": "string",
+            "minLength": 3
+          },
+          "password": {
+            "type": "string",
+            "minLength": 4
+          },
+          "confirm_password": {
+            "type": "string",
+            "minLength": 4
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "minLength": 4
+          }
+        },
+        "required": [
+          "first_name",
+          "last_name",
+          "password",
+          "confirm_password",
+          "email"
+        ]
+      },
+      "SignInSchemaDTO": {
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 4
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "minLength": 4
+          }
+        },
+        "required": [
+          "password",
+          "email"
+        ]
+      },
+      "RefreshSchemaDTO": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "minLength": 4
+          }
+        },
+        "required": [
+          "refreshToken"
+        ]
+      },
+      "UserSchemaDTO": {
+        "type": "object",
+        "properties": {
+          "first_name": {
+            "type": "string",
+            "minLength": 4
+          },
+          "last_name": {
+            "type": "string",
+            "minLength": 4
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "USER",
+              "MONITER"
+            ]
+          },
+          "businessName": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "permissions": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "zip_code": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "background": {
+            "type": "string"
+          },
+          "is_online": {
+            "default": false,
+            "type": "boolean"
+          },
+          "password_hash": {
+            "type": "string"
+          },
+          "refresh_token": {
+            "type": "string",
+            "nullable": true
+          },
+          "otp_code": {
+            "type": "string"
+          },
+          "approved": {
+            "default": false,
+            "type": "boolean"
+          },
+          "is_email_verified": {
+            "default": false,
+            "type": "boolean"
+          },
+          "is_phone_verified": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "first_name",
+          "last_name",
+          "role",
+          "contactName",
+          "email",
+          "background",
+          "password_hash"
+        ]
+      },
+      "UserUpdateSchemaDTO": {
+        "type": "object",
+        "properties": {
+          "first_name": {
+            "type": "string",
+            "minLength": 4
+          },
+          "last_name": {
+            "type": "string",
+            "minLength": 4
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "USER",
+              "MONITER"
+            ]
+          },
+          "businessName": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "permissions": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "zip_code": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "background": {
+            "type": "string"
+          },
+          "is_online": {
+            "default": false,
+            "type": "boolean"
+          },
+          "password_hash": {
+            "type": "string"
+          },
+          "refresh_token": {
+            "type": "string",
+            "nullable": true
+          },
+          "otp_code": {
+            "type": "string"
+          },
+          "approved": {
+            "default": false,
+            "type": "boolean"
+          },
+          "is_email_verified": {
+            "default": false,
+            "type": "boolean"
+          },
+          "is_phone_verified": {
+            "default": false,
+            "type": "boolean"
+          }
+        }
+      },
+      "CreatePlanDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 4
+          },
+          "description": {
+            "type": "string",
+            "minLength": 4
+          },
+          "duration": {
+            "type": "string",
+            "minLength": 4
+          },
+          "type": {
+            "type": "string",
+            "minLength": 4
+          },
+          "price": {
+            "type": "string",
+            "minLength": 4
+          },
+          "features": {
+            "items": {
+              "type": "array"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "duration",
+          "type",
+          "price"
+        ]
+      },
+      "CreateEmailDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 4
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 4
+          },
+          "cc": {
+            "items": {
+              "type": "array"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 4
+          }
+        },
+        "required": [
+          "name",
+          "subject",
+          "body"
+        ]
+      },
+      "UpdateEmailDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 4
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 4
+          },
+          "cc": {
+            "items": {
+              "type": "array"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 4
+          }
+        }
+      },
+      "CreateCategoryDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2
+          },
+          "image_path": {
+            "type": "string",
+            "minLength": 4,
+            "nullable": true
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "CreateServiceToolDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2
+          },
+          "image_path": {
+            "type": "string",
+            "minLength": 4,
+            "nullable": true
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "UpdateServiceToolDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2
+          },
+          "image_path": {
+            "type": "string",
+            "minLength": 4,
+            "nullable": true
+          }
+        }
+      },
+      "NicheOptionDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "ListingSchemaDTO": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "PUBLISH",
+              "DRAFT"
+            ]
+          },
+          "brand": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "name": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "domain": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "minItems": 1,
+                "required": true,
+                "isArray": true
+              },
+              "business_location": {
+                "type": "string",
+                "minLength": 3,
+                "required": true
+              }
+            }
+          },
+          "category": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "financials": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "statistics": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "conversion_rate": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "customer_base": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "average_order_value": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "returning_customer": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "email_subscribers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "required": false,
+                "isArray": true
+              },
+              "refund_rate": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "required": true,
+                "isArray": true
+              },
+              "sales_channel": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": false
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    },
+                    "percentage": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "percentage"
+                  ]
+                },
+                "required": true,
+                "isArray": true
+              },
+              "adverstising_channel": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": false
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    },
+                    "percentage": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "percentage"
+                  ]
+                },
+                "required": true,
+                "isArray": true
+              },
+              "sales_countries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": false
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    },
+                    "percentage": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "percentage"
+                  ]
+                },
+                "required": true,
+                "isArray": true
+              }
+            }
+          },
+          "productQuestion": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "managementQuestion": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "social_account": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "advertisement": {
+            "type": "object",
+            "properties": {
+              "price": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "title": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "usp": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "description": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              }
+            }
+          },
+          "handover": {
+            "type": "object",
+            "properties": {
+              "handover_option": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "minItems": 1,
+                "required": true,
+                "isArray": true
+              },
+              "is_sale_support": {
+                "type": "string",
+                "minLength": 4,
+                "maxLength": 4,
+                "required": true
+              },
+              "total_month": {
+                "type": "string",
+                "minLength": 1,
+                "required": true
+              }
+            }
+          }
+        },
+        "required": [
+          "status",
+          "brand",
+          "category",
+          "tools",
+          "financials",
+          "statistics",
+          "productQuestion",
+          "managementQuestion",
+          "social_account",
+          "advertisement",
+          "handover"
+        ]
+      },
+      "UpdateListingDTO": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "PUBLISH",
+              "DRAFT"
+            ]
+          },
+          "brand": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "name": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "domain": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "minItems": 1,
+                "required": true,
+                "isArray": true
+              },
+              "business_location": {
+                "type": "string",
+                "minLength": 3,
+                "required": true
+              }
+            }
+          },
+          "category": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "financials": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "statistics": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "conversion_rate": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "customer_base": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "average_order_value": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "returning_customer": {
+                "type": "string",
+                "minLength": 2,
+                "required": false
+              },
+              "email_subscribers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "required": false,
+                "isArray": true
+              },
+              "refund_rate": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "required": true,
+                "isArray": true
+              },
+              "sales_channel": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": false
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    },
+                    "percentage": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "percentage"
+                  ]
+                },
+                "required": true,
+                "isArray": true
+              },
+              "adverstising_channel": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": false
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    },
+                    "percentage": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "percentage"
+                  ]
+                },
+                "required": true,
+                "isArray": true
+              },
+              "sales_countries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": false
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    },
+                    "percentage": {
+                      "type": "string",
+                      "minLength": 2,
+                      "required": true
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "percentage"
+                  ]
+                },
+                "required": true,
+                "isArray": true
+              }
+            }
+          },
+          "productQuestion": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "managementQuestion": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "social_account": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "advertisement": {
+            "type": "object",
+            "properties": {
+              "price": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "title": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "usp": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              },
+              "description": {
+                "type": "string",
+                "minLength": 2,
+                "required": true
+              }
+            }
+          },
+          "handover": {
+            "type": "object",
+            "properties": {
+              "handover_option": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "minItems": 1,
+                "required": true,
+                "isArray": true
+              },
+              "is_sale_support": {
+                "type": "string",
+                "minLength": 4,
+                "maxLength": 4,
+                "required": true
+              },
+              "total_month": {
+                "type": "string",
+                "minLength": 1,
+                "required": true
+              }
+            }
+          }
+        }
+      },
+      "UpdateLabelDTO": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "GOOD",
+              "BAD",
+              "MEDIUM"
+            ]
+          },
+          "userId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chatId",
+          "label",
+          "userId"
+        ]
+      },
+      "CreateSupportSchemaDTO": {
+        "type": "object",
+        "properties": {
+          "chatRoomId": {
+            "type": "string",
+            "minLength": 4
+          },
+          "message": {
+            "type": "string",
+            "minLength": 4
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 4
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "CLOSED",
+              "PENDING"
+            ]
+          }
+        },
+        "required": [
+          "chatRoomId",
+          "message",
+          "subject"
+        ]
+      },
+      "UpdateSupportSchemaDTO": {
+        "type": "object",
+        "properties": {
+          "chatRoomId": {
+            "type": "string",
+            "minLength": 4
+          },
+          "message": {
+            "type": "string",
+            "minLength": 4
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 4
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "CLOSED",
+              "PENDING"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

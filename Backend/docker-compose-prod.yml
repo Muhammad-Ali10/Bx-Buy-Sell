@@ -1,0 +1,56 @@
+networks:
+  nest_network:   # explicitly defined network
+    driver: bridge
+
+services:
+
+  api:
+    container_name: ex-buy-sell-api
+    image: faizanraodev/ex-buy-sell-api:latest
+    ports:
+      - "1230:1230"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      PORT: 1230
+      DEFAULT_ROLE: USER
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      RABBIT_MQ: rabbitmq:5672
+      REDIS_HOST: redis:6379
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      EMAIL_SERVICE_FROM: ${EMAIL_SERVICE_FROM}
+      AGORA_APP_ID: ${AGORA_APP_ID}
+      AGORA_APP_CERTIFICATE: ${AGORA_APP_CERTIFICATE}
+    depends_on:
+      - redis
+      - rabbitmq
+    networks:
+      - nest_network
+    restart: unless-stopped
+  rabbitmq: # RabbitMQ
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    restart: unless-stopped
+    depends_on:
+      - redis
+    networks:
+      - nest_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis_data:/data
+    command: redis-server --appendonly yes  # Enables data persistence (AOF)
+    networks:
+      - nest_network
+volumes:
+  redis_data:
