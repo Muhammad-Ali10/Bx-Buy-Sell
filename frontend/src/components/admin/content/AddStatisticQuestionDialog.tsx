@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useAddStatisticQuestion } from "@/hooks/useAddStatisticQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 
 interface AddStatisticQuestionDialogProps {
   open: boolean;
@@ -27,6 +28,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange }: AddStatisticQ
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  const [required, setRequired] = useState(true);
   const addQuestion = useAddStatisticQuestion();
 
   const handleSave = () => {
@@ -47,6 +49,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange }: AddStatisticQ
         question: question.trim(),
         answer_type: questionType,
         options: optionsArray,
+        required,
       },
       {
         onSuccess: () => {
@@ -54,6 +57,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange }: AddStatisticQ
           setHintText("");
           setQuestionType("TEXT");
           setOptions("");
+          setRequired(true);
           onOpenChange(false);
         },
       }
@@ -65,6 +69,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange }: AddStatisticQ
     setHintText("");
     setQuestionType("TEXT");
     setOptions("");
+    setRequired(true);
     onOpenChange(false);
   };
 
@@ -119,6 +124,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange }: AddStatisticQ
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

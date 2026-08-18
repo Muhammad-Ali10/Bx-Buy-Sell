@@ -11,16 +11,42 @@ import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
 import { toast } from "sonner";
 import { uploadToCloudinary, uploadMultipleToCloudinary } from "@/lib/cloudinary";
+import {
+  ALLOWED_ATTACHMENT_LABEL,
+  ATTACHMENT_ACCEPT,
+  formatMaxSize,
+  maxBytesFor,
+  isAllowedAttachment,
+} from "@/lib/fileTypes";
 import { isValidListingDateAnswer } from "@/lib/dateUtils";
+import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
+
+// Keep only digits and a single decimal point (blocks + - ` e and other symbols).
+const sanitizeNumberInput = (raw: string): string => {
+  let v = raw.replace(/[^0-9.]/g, "");
+  const dot = v.indexOf(".");
+  if (dot !== -1) {
+    v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "");
+  }
+  return v;
+};
+
+// Percentage fields cannot exceed 100.
+const clampPercent = (v: string): string => {
+  if (v === "" || v === ".") return v;
+  const n = parseFloat(v);
+  return !Number.isNaN(n) && n > 100 ? "100" : v;
+};
 
 interface AdditionalInformationStepProps {
   formData?: any;
   onNext: (data: any) => void;
   onBack: () => void;
   defaultTab?: "statistics" | "products" | "management";
+  onPersist?: (data: any) => void;
 }
 
-export const AdditionalInformationStep = ({ formData: parentFormData, onNext, onBack, defaultTab = "statistics" }: AdditionalInformationStepProps) => {
+export const AdditionalInformationStep = ({ formData: parentFormData, onNext, onBack, defaultTab = "statistics", onPersist }: AdditionalInformationStepProps) => {
   const [activeTab, setActiveTab] = useState<"statistics" | "products" | "management">(defaultTab);
   
   // Update active tab when defaultTab changes
@@ -38,14 +64,31 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
   const [formData, setFormData] = useState<Record<string, any>>(parentFormData || {});
   const [uploadingFiles, setUploadingFiles] = useState<Record<string, boolean>>({});
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  usePersistOnUnmount(onPersist, () => formData);
 
   const isSplitQuestion = (questionText: string) => {
     const text = (questionText || "").toLowerCase();
     return (
       text.includes("sales channels") ||
       text.includes("sales countries") ||
-      text.includes("advertising channels")
+      text.includes("advertising channels") ||
+      // Customer Type is the same shape: named segments that add up to 100%.
+      text.includes("customer type")
     );
+  };
+
+  /**
+   * Customer Type always splits between exactly these two segments, so the rows
+   * are fixed and the seller only fills in the percentages.
+   */
+  const FIXED_SPLIT_ROWS: Record<string, string[]> = {
+    "customer type": ["B2B", "B2C"],
+  };
+
+  const fixedRowsFor = (questionText: string): string[] | null => {
+    const text = (questionText || "").toLowerCase();
+    const key = Object.keys(FIXED_SPLIT_ROWS).find((k) => text.includes(k));
+    return key ? FIXED_SPLIT_ROWS[key] : null;
   };
 
   const isInventoryQuestion = (questionText: string) => {
@@ -70,6 +113,31 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
 
   const isInventoryYes = (value: any) => {
     return value === "yes" || value === "true" || value === true;
+  };
+
+  const normalizeAnswerForMatch = (value: any): string => {
+    const s = String(value ?? "").trim().toLowerCase();
+    if (s === "true") return "yes";
+    if (s === "false") return "no";
+    return s;
+  };
+
+  // A question is hidden when its admin-configured dependency isn't satisfied.
+  // Falls back to the legacy inventory keyword rule if no dependency is set,
+  // so existing questions keep behaving exactly as before.
+  const isQuestionHidden = (question: any, questions: any[]): boolean => {
+    if (question?.dependsOnQuestionId) {
+      const parentAnswer = formData[question.dependsOnQuestionId];
+      const expected = normalizeAnswerForMatch(question.dependsOnValue);
+      const actual = normalizeAnswerForMatch(parentAnswer);
+      if (!expected) return !actual; // no value set -> just require an answer
+      return actual !== expected;
+    }
+    const inventoryAnswer = getInventoryAnswer(questions);
+    return (
+      isInventoryDependentQuestion(question.question) &&
+      !isInventoryYes(inventoryAnswer)
+    );
   };
 
   const normalizeSplitRow = (row: any) => {
@@ -99,8 +167,21 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     return [];
   };
 
-  const normalizeSplitValue = (questionId: string) => {
+  const normalizeSplitValue = (questionId: string, questionText?: string) => {
     const rows = getSplitValue(questionId);
+    const fixed = questionText ? fixedRowsFor(questionText) : null;
+
+    // Questions with fixed segments (Customer Type) always show those rows, in
+    // order, so the seller only fills in the percentages.
+    if (fixed) {
+      return fixed.map((name) => {
+        const existing = rows.find(
+          (r: any) => String(r?.name || "").trim().toLowerCase() === name.toLowerCase(),
+        );
+        return { name, percent: existing?.percent ?? "" };
+      });
+    }
+
     if (rows.length > 0) return rows;
     return [
       { percent: "", name: "" },
@@ -152,8 +233,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     
     // Check if all questions have answers
     questionsToValidate.forEach((question: any) => {
-      const inventoryAnswer = getInventoryAnswer(questionsToValidate);
-      if (isInventoryDependentQuestion(question.question) && !isInventoryYes(inventoryAnswer)) {
+      if (isQuestionHidden(question, questionsToValidate)) {
         return;
       }
 
@@ -184,9 +264,12 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
         return;
       }
       
-      // Required fields validation
-      if (!value || (typeof value === 'string' && value.trim() === '') || 
-          (Array.isArray(value) && value.length === 0)) {
+      // Required fields validation (skip when admin marked the question optional)
+      if (
+        question.required !== false &&
+        (!value || (typeof value === 'string' && value.trim() === '') ||
+          (Array.isArray(value) && value.length === 0))
+      ) {
         errors.push(`${question.question} is required`);
       }
       
@@ -254,8 +337,19 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
   };
 
   const handleFileUpload = async (questionId: string, file: File) => {
+    // Guard here too, so no caller can slip an unsupported file past the input.
+    if (!isAllowedAttachment(file.name)) {
+      toast.error(`This file type is not supported. Allowed: ${ALLOWED_ATTACHMENT_LABEL}`);
+      return;
+    }
+    const limit = maxBytesFor(file.name);
+    if (file.size > limit) {
+      toast.error(`File must be less than ${formatMaxSize(limit)}`);
+      return;
+    }
+
     setUploadingFiles(prev => ({ ...prev, [questionId]: true }));
-    
+
     try {
       const result = await uploadToCloudinary(file, 'listings/attachments');
       
@@ -281,7 +375,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     const value = formData[question.id] || "";
 
     if (isSplitQuestion(question.question)) {
-      const rows = normalizeSplitValue(question.id);
+      const rows = normalizeSplitValue(question.id, question.question);
       const total = rows.reduce((sum: number, row: any) => sum + (Number(row?.percent) || 0), 0);
 
       return (
@@ -324,13 +418,15 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                     alignItems: "center",
                   }}
                 >
-                  <div className="relative w-full">
+                  <div style={{ display: "flex", alignItems: "center", gap: "2px", width: "100%" }}>
                     <Input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       value={row?.percent || ""}
                       onChange={(e) => {
+                        const val = clampPercent(sanitizeNumberInput(e.target.value));
                         const next = [...rows];
-                        next[index] = { ...next[index], percent: e.target.value };
+                        next[index] = { ...next[index], percent: val };
                         const nextTotal = next.reduce((sum: number, r: any) => sum + (Number(r?.percent) || 0), 0);
                         if (nextTotal > 100) {
                           toast.error("Total must be 100% or less");
@@ -339,8 +435,10 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                         setFormData({ ...formData, [question.id]: next });
                       }}
                       placeholder="0"
-                      className="border-none bg-transparent h-full w-full p-0 pr-6 focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none placeholder:text-black/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      className="border-none bg-transparent h-full p-0 focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none placeholder:text-black/50"
                       style={{
+                        width: `${Math.max(1, String(row?.percent || "").length)}ch`,
+                        minWidth: "1ch",
                         fontFamily: "Lufga",
                         fontWeight: 400,
                         fontSize: "18px",
@@ -353,10 +451,6 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                     />
                     <span
                       style={{
-                        position: "absolute",
-                        right: 0,
-                        top: "50%",
-                        transform: "translateY(-50%)",
                         fontFamily: "Lufga",
                         fontWeight: 400,
                         fontSize: "18px",
@@ -406,7 +500,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
             <button
               type="button"
               onClick={() => {
@@ -443,6 +537,16 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                 Add
               </span>
             </button>
+            <span
+              style={{
+                fontFamily: "Lufga",
+                fontWeight: 500,
+                fontSize: "14px",
+                color: total > 100 ? "#b00020" : "rgba(0, 0, 0, 0.55)",
+              }}
+            >
+              Total: {total}% / 100%
+            </span>
           </div>
         </div>
       );
@@ -485,9 +589,14 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
               </span>
             )}
             <Input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={value}
-              onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
+              onChange={(e) => {
+                let v = sanitizeNumberInput(e.target.value);
+                if (affix.prefix === "%") v = clampPercent(v);
+                setFormData({ ...formData, [question.id]: v });
+              }}
               placeholder="Enter a number"
               className="h-11 sm:h-12 border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none"
               style={{
@@ -671,12 +780,20 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             <div className="border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center hover:border-accent/50 transition-colors bg-muted/30">
               <input
                 type="file"
-                accept="*"
+                accept={ATTACHMENT_ACCEPT}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
+                  // `accept` is only a browser hint — this is the real check.
                   if (file) {
-                    if (file.size > 10 * 1024 * 1024) {
-                      toast.error("File must be less than 10MB");
+                    if (!isAllowedAttachment(file.name)) {
+                      toast.error(`This file type is not supported. Allowed: ${ALLOWED_ATTACHMENT_LABEL}`);
+                      e.target.value = "";
+                      return;
+                    }
+                    const limit = maxBytesFor(file.name);
+                    if (file.size > limit) {
+                      toast.error(`File must be less than ${formatMaxSize(limit)}`);
+                      e.target.value = "";
                       return;
                     }
                     handleFileUpload(question.id, file);
@@ -757,8 +874,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             </div>
           ) : (
             statisticQuestions.map((question: any) => {
-              const inventoryAnswer = getInventoryAnswer(statisticQuestions);
-              if (isInventoryDependentQuestion(question.question) && !isInventoryYes(inventoryAnswer)) {
+              if (isQuestionHidden(question, statisticQuestions)) {
                 return null;
               }
 
@@ -787,8 +903,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             </div>
           ) : (
             productQuestions.map((question: any) => {
-              const inventoryAnswer = getInventoryAnswer(productQuestions);
-              if (isInventoryDependentQuestion(question.question) && !isInventoryYes(inventoryAnswer)) {
+              if (isQuestionHidden(question, productQuestions)) {
                 return null;
               }
 
@@ -817,8 +932,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             </div>
           ) : (
             managementQuestions.map((question: any) => {
-              const inventoryAnswer = getInventoryAnswer(managementQuestions);
-              if (isInventoryDependentQuestion(question.question) && !isInventoryYes(inventoryAnswer)) {
+              if (isQuestionHidden(question, managementQuestions)) {
                 return null;
               }
 

@@ -17,6 +17,48 @@ export class CategoryService {
     });
   }
 
+  /**
+   * The categories buyers can actually find something in, busiest first.
+   *
+   * The home page used to list four hand-typed topics, three of which matched
+   * no category at all and opened an empty page. Reading them from the
+   * listings instead means a topic can never point at nothing, and the row
+   * keeps itself up to date as the marketplace fills out.
+   *
+   * Listings store their category by name rather than by id, and the filter
+   * matches on that name — so the name is what gets counted and returned.
+   */
+  async getTrending(limit = 4) {
+    const rows = await this.prisma.listingCategory.findMany({
+      where: {
+        listing: {
+          status: 'PUBLISH',
+          deleted_at: null,
+        },
+      },
+      select: { name: true },
+    });
+
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const name = String(row.name || '').trim();
+      // The same rubbish the category list has picked up over time; a topic
+      // called "undefined" on the home page would be worse than none at all.
+      if (!name || /^(undefined|string|null)$/i.test(name)) continue;
+      // Some listings stored the category's id instead of its name. Until that
+      // data is cleaned up, a raw uuid must never surface as a topic.
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name)) {
+        continue;
+      }
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, limit)
+      .map(([name, listings]) => ({ name, listings }));
+  }
+
   async getById(id: string) {
     return await this.prisma.category.findUnique({
       where: {

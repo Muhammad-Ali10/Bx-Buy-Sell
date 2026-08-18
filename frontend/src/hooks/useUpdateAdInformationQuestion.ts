@@ -6,11 +6,12 @@ export const useUpdateAdInformationQuestion = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { 
-      id: string; 
-      question: string; 
+    mutationFn: async (data: {
+      id: string;
+      question: string;
       answer_type: string;
       options?: string[];
+      required?: boolean | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -26,6 +27,7 @@ export const useUpdateAdInformationQuestion = () => {
         answer_type: mappedAnswerType,
         answer_for: "ADVERTISMENT",
         options: data.options,
+        required: data.required ?? null,
       });
 
       if (!response.success) {

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Eye, ExternalLink, AlertCircle, User as UserIcon, List, MessageSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { Link } from "react-router-dom";
 import {
   Select,
   SelectContent,
@@ -14,21 +15,27 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 const AssignResponsibleDialog = lazy(() =>
-  import("./AssignResponsibleDialog").then((m) => ({ default: m.AssignResponsibleDialog }))
+  // The same dialog Listings uses: it has the team search the client asked
+  // for. The local copy was a plain dropdown.
+  import("@/components/admin/AssignResponsibleDialog").then((m) => ({
+    default: m.AssignResponsibleDialog,
+  }))
 );
 
 interface Alert {
   id: string;
   problem_type: string;
+  chat_id?: string | null;
+  listing_id?: string | null;
   reporter_id: string | null;
   problematic_user_id: string | null;
   status: string;
   responsible_id: string | null;
   notes: string | null;
   created_at: string;
-  reporter?: { full_name: string | null; avatar_url: string | null };
-  problematic_user?: { full_name: string | null; avatar_url: string | null };
-  responsible?: { full_name: string | null; avatar_url: string | null };
+  reporter?: { id?: string | null; full_name: string | null; avatar_url: string | null };
+  problematic_user?: { id?: string | null; full_name: string | null; avatar_url: string | null };
+  responsible?: { id?: string | null; full_name: string | null; avatar_url: string | null };
 }
 
 interface MonitoringAlertsTableProps {
@@ -59,6 +66,9 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
         if (!user) return null;
         const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
         return {
+          // Needed to link to the person's profile, which is where clicking a
+          // name now goes.
+          id: user.id ?? null,
           full_name: fullName || null,
           avatar_url: user.profile_pic || null,
         };
@@ -67,6 +77,8 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
       const normalizedAlerts: Alert[] = rawAlerts.map((alert: any) => ({
         id: alert.id,
         problem_type: alert.problem_type,
+        chat_id: alert.chatId ?? alert.chat?.id ?? null,
+        listing_id: alert.listingId ?? alert.listing?.id ?? null,
         reporter_id: alert.reporterId || alert.reporter_id || null,
         problematic_user_id: alert.problematicUserId || alert.problematic_user_id || null,
         status: alert.status || "unsolved",
@@ -92,6 +104,14 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
   };
 
   const updateStatus = async (alertId: string, newStatus: string) => {
+    // Shown straight away rather than after the round-trip. The old version
+    // only told the server, so the row kept its old status until the page was
+    // reloaded. If the save fails the previous value goes back.
+    const previous = alerts.find((entry) => entry.id === alertId)?.status;
+    setAlerts((current) =>
+      current.map((entry) => (entry.id === alertId ? { ...entry, status: newStatus } : entry)),
+    );
+
     try {
       const response = await apiClient.updateMonitoringAlertStatus(alertId, newStatus);
       if (!response.success) {
@@ -103,11 +123,50 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
         description: "Alert status updated successfully"
       });
     } catch (error) {
+      if (previous !== undefined) {
+        setAlerts((current) =>
+          current.map((entry) =>
+            entry.id === alertId ? { ...entry, status: previous } : entry,
+          ),
+        );
+      }
       console.error('Error updating status:', error);
       toast({
         title: "Error",
         description: "Failed to update alert status",
         variant: "destructive"
+      });
+    }
+  };
+
+  /**
+   * Save who is responsible, and show it at once.
+   *
+   * The row updates before the request returns for the same reason the status
+   * does: the team should not have to reload the page to see what they just did.
+   */
+  const handleAssignResponsible = async (alertId: string, teamMemberId: string | null) => {
+    const previous = alerts.find((entry) => entry.id === alertId);
+
+    try {
+      const response = await apiClient.assignMonitoringAlert(alertId, teamMemberId);
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to assign the alert');
+      }
+      // Read back rather than guess the member's name and avatar from here.
+      await fetchAlerts();
+      toast({ title: 'Success', description: 'Responsible team member updated' });
+    } catch (error) {
+      console.error('Error assigning alert:', error);
+      if (previous) {
+        setAlerts((current) =>
+          current.map((entry) => (entry.id === alertId ? previous : entry)),
+        );
+      }
+      toast({
+        title: 'Error',
+        description: 'Could not update the responsible team member',
+        variant: 'destructive',
       });
     }
   };
@@ -178,7 +237,7 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
         <table className="w-full">
           <thead>
             <tr className="border-b">
-              {["Problem", "Reporter", "Problematic User", "Status", "Date", "Responsible", "Notes", "Edit"].map((label) => (
+              {["Problem", "Reporter", "Problematic User", "Status", "Date", "Responsible", "Notes", "View"].map((label) => (
                 <th
                   key={label}
                   className="text-left py-4 px-4"
@@ -215,7 +274,6 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
                     >
                       {alert.problem_type}
                     </span>
-                    <ExternalLink className="h-3 w-3 text-muted-foreground" />
                   </div>
                 </td>
                 <td className="py-4 px-4">
@@ -246,38 +304,36 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
                       <AvatarImage src={alert.problematic_user?.avatar_url || ''} />
                       <AvatarFallback>{alert.problematic_user?.full_name?.[0] || 'U'}</AvatarFallback>
                     </Avatar>
-                    {getChatIdFromNotes(alert.notes) ? (
-                      <a
-                        href={`/admin/chats?chatId=${encodeURIComponent(getChatIdFromNotes(alert.notes) || '')}`}
+                    {/* The person, not the conversation. Clicking someone
+                        used to open a chat whose id had been scraped out of the
+                        note text; the eye icon below is where the chat belongs. */}
+                    {alert.problematic_user?.id ? (
+                      <Link
+                        to={`/admin/users/${alert.problematic_user.id}`}
                         className="hover:underline"
-                        title="Open chat"
+                        title="Open this user's profile"
+                        style={{
+                          fontFamily: 'Lufga',
+                          fontWeight: 500,
+                          fontSize: '14px',
+                          lineHeight: '150%',
+                          color: '#000000',
+                        }}
                       >
-                        <span
-                          style={{
-                            fontFamily: 'Lufga',
-                            fontWeight: 500,
-                            fontSize: '14px',
-                            lineHeight: '150%',
-                            letterSpacing: '0%',
-                            color: '#000000',
-                          }}
-                        >
-                          {alert.problematic_user?.full_name || 'Unknown'}
-                        </span>
-                      </a>
+                        {alert.problematic_user.full_name || 'Unknown'}
+                      </Link>
                     ) : (
-                    <span
-                      style={{
-                        fontFamily: 'Lufga',
-                        fontWeight: 500,
-                        fontSize: '14px',
-                        lineHeight: '150%',
-                        letterSpacing: '0%',
-                        color: '#000000',
-                      }}
-                    >
-                      {alert.problematic_user?.full_name || 'Unknown'}
-                    </span>
+                      <span
+                        style={{
+                          fontFamily: 'Lufga',
+                          fontWeight: 500,
+                          fontSize: '14px',
+                          lineHeight: '150%',
+                          color: '#000000',
+                        }}
+                      >
+                        {alert.problematic_user?.full_name || 'Unknown'}
+                      </span>
                     )}
                   </div>
                 </td>
@@ -311,7 +367,15 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
                 </td>
                 <td className="py-4 px-4">
                   {alert.responsible ? (
-                    <div className="flex items-center gap-2">
+                    // Was a plain label, so once someone was assigned the
+                    // assignment could never be changed. Work moves between
+                    // people; this has to stay editable.
+                    <button
+                      type="button"
+                      onClick={() => handleAssign(alert)}
+                      title="Change who is responsible"
+                      className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-muted"
+                    >
                       <Avatar className="h-8 w-8">
                         <AvatarImage src={alert.responsible.avatar_url || ''} />
                         <AvatarFallback>{alert.responsible.full_name?.[0] || 'R'}</AvatarFallback>
@@ -328,7 +392,7 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
                       >
                         {alert.responsible.full_name}
                       </span>
-                    </div>
+                    </button>
                   ) : (
                     <Button 
                       variant="outline" 
@@ -339,8 +403,11 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
                     </Button>
                   )}
                 </td>
+                {/* Was `max-w-xs truncate`, which cut the note off mid-word.
+                    Wraps instead: the note is the only explanation of what
+                    happened, so it has to be readable in full. */}
                 <td
-                  className="py-4 px-4 max-w-xs truncate"
+                  className="py-4 px-4 min-w-[240px] max-w-[380px] whitespace-normal break-words"
                   style={{
                     fontFamily: 'Lufga',
                     fontWeight: 500,
@@ -353,9 +420,34 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
                   {alert.notes || '-'}
                 </td>
                 <td className="py-4 px-4">
-                  <Button variant="ghost" size="icon">
-                    <Eye className="h-4 w-4" />
-                  </Button>
+                  {/* Had no handler at all. Opens whatever the alert is about:
+                      the conversation for a reported chat, the listing for a
+                      reported listing, otherwise the person. */}
+                  {(() => {
+                    const target = alert.chat_id
+                      ? `/admin/chats?chatId=${encodeURIComponent(alert.chat_id)}`
+                      : alert.listing_id
+                        ? `/admin/listings/${alert.listing_id}`
+                        : alert.problematic_user?.id
+                          ? `/admin/users/${alert.problematic_user.id}`
+                          : null;
+
+                    if (!target) {
+                      return (
+                        <Button variant="ghost" size="icon" disabled title="Nothing to open">
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      );
+                    }
+
+                    return (
+                      <Button variant="ghost" size="icon" asChild title="View">
+                        <Link to={target}>
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    );
+                  })()}
                 </td>
               </tr>
             ))}
@@ -438,8 +530,9 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
         <AssignResponsibleDialog
           open={assignDialogOpen}
           onOpenChange={setAssignDialogOpen}
-          alert={selectedAlert}
-          onAssigned={fetchAlerts}
+          targetId={selectedAlert?.id || ''}
+          currentResponsibleId={selectedAlert?.responsible_id || null}
+          onAssign={handleAssignResponsible}
         />
       </Suspense>
     </>

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useUpdateTool } from "@/hooks/useUpdateTool";
 import { Tool } from "@/hooks/useTools";
+import { resolveImageUrl } from "@/lib/imageUtils";
 import { toast } from "sonner";
 
 interface EditToolDialogProps {
@@ -43,7 +44,7 @@ export const EditToolDialog = ({ open, onOpenChange, tool }: EditToolDialogProps
     }
 
     if (!imageFile && !logo.trim()) {
-      toast.error("Please provide a logo URL or upload an image");
+      toast.error("Please upload a logo image");
       return;
     }
 
@@ -84,19 +85,19 @@ export const EditToolDialog = ({ open, onOpenChange, tool }: EditToolDialogProps
             />
           </div>
           
-          <div className="space-y-2">
-            <Label htmlFor="edit-logo">Logo URL</Label>
-            <Input
-              id="edit-logo"
-              value={logo}
-              onChange={(e) => setLogo(e.target.value)}
-              placeholder="Enter logo URL"
-              className="bg-[#F5F5F5]"
-            />
-          </div>
+          {logo && !imageFile && (
+            <div className="space-y-2">
+              <Label>Current Logo</Label>
+              <img
+                src={resolveImageUrl(logo)}
+                alt={name || "Tool logo"}
+                className="h-16 w-16 rounded-md border border-border object-contain bg-[#F5F5F5] p-1"
+              />
+            </div>
+          )}
 
           <div className="space-y-2">
-            <Label htmlFor="edit-image">Or Upload New Image</Label>
+            <Label htmlFor="edit-image">Upload New Logo</Label>
             <Input
               id="edit-image"
               type="file"

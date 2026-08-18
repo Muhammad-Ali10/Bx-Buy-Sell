@@ -3,17 +3,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
-const data = [
-  { day: "01", listings: 4000 },
-  { day: "03", listings: 5500 },
-  { day: "06", listings: 6000 },
-  { day: "09", listings: 7000 },
-  { day: "12", listings: 6500 },
-  { day: "15", listings: 7200 },
-  { day: "18", listings: 6800 },
-];
+interface NewListingsPoint {
+  label: string;
+  count: number;
+}
 
-export const NewListingsChart = () => {
+
+export const NewListingsChart = ({ data = [] }: { data?: NewListingsPoint[] }) => {
   return (
     <Card className="shadow-lg border-border">
       <CardHeader className="flex flex-row items-center justify-between pb-4">
@@ -43,7 +39,7 @@ export const NewListingsChart = () => {
             <BarChart data={data} margin={{ top: 10, right: 15, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
               <XAxis 
-                dataKey="day" 
+                dataKey="label" 
                 stroke="hsl(var(--muted-foreground))"
                 fontSize={11}
                 tickLine={false}
@@ -53,17 +49,24 @@ export const NewListingsChart = () => {
               <YAxis 
                 stroke="hsl(var(--muted-foreground))"
                 fontSize={11}
+                // Listings are whole things; half a listing is not a quantity.
+                allowDecimals={false}
                 tickLine={false}
                 axisLine={false}
                 width={45}
-                tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+                // Thousands only once the numbers are in the thousands. Dividing
+                // everything by 1000 turned a chart of ones and twos into five
+                // rows all reading "0k".
+                tickFormatter={(value) =>
+                  value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k` : String(value)
+                }
               />
               <ChartTooltip 
                 content={<ChartTooltipContent />}
                 cursor={{ fill: "hsl(var(--accent) / 0.1)" }}
               />
               <Bar 
-                dataKey="listings" 
+                dataKey="count" 
                 fill="hsl(var(--accent))" 
                 radius={[6, 6, 0, 0]}
                 stroke="hsl(var(--accent))"

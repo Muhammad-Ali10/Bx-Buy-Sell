@@ -30,7 +30,7 @@ export class AuthService {
 
     const payload = {
       role: process.env.DEFAULT_ROLE || 'USER',
-      email,
+      email: UserService.normalizeEmail(email),
       password_hash: hash,
       first_name: body.first_name,
       last_name: body.last_name,
@@ -60,15 +60,54 @@ export class AuthService {
     const { email, password } = body;
     const user = await this.userService.findOneByEmail(email);
 
-    const isMatch = user
+    // Accounts registered through the public signup pages had their password
+    // lowercased in the browser before it ever reached here, so their stored
+    // hash is of the folded text. Those pages now send what the person typed,
+    // which would lock every one of those accounts out — so a failed match is
+    // tried once more against the folded form, and a hit is re-hashed on the
+    // spot. Each of those accounts repairs itself the next time its owner
+    // signs in, and new ones are never folded at all.
+    let isMatch = user
       ? await bcrypt.compare(password, user.password_hash)
       : false;
+
+    if (user && !isMatch) {
+      const folded = password.toLowerCase().trim();
+      if (folded !== password && (await bcrypt.compare(folded, user.password_hash))) {
+        isMatch = true;
+        await this.userService
+          .updateUser(user.id, { password_hash: await this.hashData(password) })
+          .catch(() => {
+            // Signing in matters more than the migration; it will be retried
+            // on the next successful sign-in.
+          });
+      }
+    }
 
     // Same message and status for unknown user and wrong password (no user enumeration).
     if (!user || !isMatch) {
       throw new HttpException(
         'Invalid email or password',
         HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    // A closed account must stay closed. Without this the "delete my account"
+    // button would only hide the row — the same password would still sign
+    // straight back in.
+    if ((user as any).deleted_at) {
+      throw new HttpException(
+        'This account has been closed. Please contact support if this is a mistake.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    // Correct credentials are not enough: a blocked account must not get in.
+    // Said plainly, because the person needs to know who to contact.
+    if ((user as any).blocked) {
+      throw new HttpException(
+        'This account has been blocked. Please contact support.',
+        HttpStatus.FORBIDDEN,
       );
     }
 
@@ -137,6 +176,15 @@ export class AuthService {
   async updateRefreshToken(userId: string, refreshToken: string) {
     const user = await this.userService.findOneByID(userId);
 
+    // Blocking clears the stored refresh token, but check anyway so a token
+    // captured beforehand cannot be traded for a fresh session.
+    if ((user as any)?.blocked) {
+      throw new HttpException(
+        'This account has been blocked. Please contact support.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const isValid = await bcrypt.compare(
       refreshToken,
       user?.refresh_token as string,
@@ -161,16 +209,16 @@ export class AuthService {
   }
 
   // Helper Functions
+  /** True when the two do not match. Compared exactly: "Pass" and "pass" are
+   *  different passwords, and treating them as equal let someone confirm a
+   *  password they had not actually typed twice. */
   checkPassword(password: string, confirm_password: string) {
-    if (password.toLowerCase().trim() !== confirm_password.toLowerCase().trim())
-      return true;
+    if (password !== confirm_password) return true;
     return false;
   }
 
   async sendEmail(email: string, otp: string) {
     const sendgrid = new MailService();
-
-    console.log(process.env.SENDGRID_API_KEY);
 
     sendgrid.setApiKey(process.env.SENDGRID_API_KEY!);
 
@@ -212,9 +260,24 @@ export class AuthService {
     return await bcrypt.hash(password, saltOrRounds);
   }
 
+  /**
+   * What the browser is allowed to see of a user row.
+   *
+   * Deleting only the password and refresh token left every verification code
+   * in the payload — and those end up in localStorage. A code mailed to a new
+   * address is only a proof of ownership while it stays in that inbox.
+   */
   formatResponse(data: any) {
-    delete data['password_hash'];
-    if (data['refresh_token']) delete data['refresh_token'];
+    if (!data || typeof data !== 'object') return data;
+    for (const secret of [
+      'password_hash',
+      'refresh_token',
+      'otp_code',
+      'phone_otp',
+      'email_otp',
+    ]) {
+      delete data[secret];
+    }
     return data;
   }
 

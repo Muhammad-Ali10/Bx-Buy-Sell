@@ -53,6 +53,13 @@ export const UserUpdateSchema = z.object({
   zip_code: z.string().optional().nullable(),
   background: z.string().optional().nullable(),
   profile_pic: z.string().optional().nullable(),
+  // Plain calendar date, YYYY-MM-DD. Rejected rather than silently reshaped so
+  // a bad value never reaches the column.
+  birthday: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Birthday must be a date in YYYY-MM-DD form')
+    .optional()
+    .nullable(),
   is_online: z.boolean().optional(),
   last_offline: z.date().optional().nullable(),
 

@@ -2,8 +2,22 @@ import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, ScrollRestoration } from "react-router-dom";
 import { AdminProtectedRoute } from "./components/AdminProtectedRoute";
+import { usePresence } from "@/hooks/usePresence";
+
+/**
+ * Wraps every route so a new page opens at the top instead of keeping the
+ * scroll position of the one before it — clicking a listing from halfway down
+ * the feed used to land you halfway down the listing. Going back still returns
+ * you to where you were.
+ */
+const RootLayout = () => (
+  <>
+    <ScrollRestoration />
+    <Outlet />
+  </>
+);
 
 const queryClient = new QueryClient();
 
@@ -28,8 +42,8 @@ const PhoneVerification = lazy(() => import("./pages/PhoneVerification"));
 const VerifyOTP = lazy(() => import("./pages/VerifyOTP"));
 const Register = lazy(() => import("./pages/Register"));
 const Profile = lazy(() => import("./pages/Profile"));
-const Settings = lazy(() => import("./pages/Settings"));
 const Pricing = lazy(() => import("./pages/Pricing"));
+const ManageSubscription = lazy(() => import("./pages/ManageSubscription"));
 const CheckoutSuccess = lazy(() => import("./pages/CheckoutSuccess"));
 const CheckoutCancel = lazy(() => import("./pages/CheckoutCancel"));
 const ManualSync = lazy(() => import("./pages/ManualSync"));
@@ -38,7 +52,6 @@ const AdminForgotPassword = lazy(() => import("./pages/admin/AdminForgotPassword
 const AdminVerifyOTP = lazy(() => import("./pages/admin/AdminVerifyOTP"));
 const AdminResetPassword = lazy(() => import("./pages/admin/AdminResetPassword"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
-const AdminTeamMembers = lazy(() => import("./pages/admin/AdminTeamMembers"));
 const AdminMemberDetails = lazy(() => import("./pages/admin/AdminMemberDetails"));
 const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
 const AdminUserDetails = lazy(() => import("./pages/admin/AdminUserDetails"));
@@ -49,6 +62,7 @@ const AdminListings = lazy(() => import("./pages/admin/AdminListings"));
 const AdminListingDetails = lazy(() => import("./pages/admin/AdminListingDetails"));
 const AdminChats = lazy(() => import("./pages/admin/AdminChats"));
 const AdminMonitoringAlerts = lazy(() => import("./pages/admin/AdminMonitoringAlerts"));
+const AdminAcquisitionCapacity = lazy(() => import("./pages/admin/AdminAcquisitionCapacity"));
 const AdminDetectWords = lazy(() => import("./pages/admin/AdminDetectWords"));
 const AdminChatList = lazy(() => import("./pages/admin/AdminChatList"));
 const AdminChatAnalytics = lazy(() => import("./pages/admin/AdminChatAnalytics"));
@@ -60,6 +74,9 @@ const HowToBuy = lazy(() => import("./pages/HowToBuy"));
 const HowToSell = lazy(() => import("./pages/HowToSell"));
 const router = createBrowserRouter(
   [
+    {
+      element: <RootLayout />,
+      children: [
     { path: "/", element: <Index /> },
     { path: "/all-listings", element: <AllListings /> },
     { path: "/listing/:id", element: <ListingDetail /> },
@@ -76,8 +93,8 @@ const router = createBrowserRouter(
     { path: "/chat", element: <Chat /> },
     { path: "/verify-account", element: <VerifyAccount /> },
     { path: "/profile", element: <Profile /> },
-    { path: "/settings", element: <Settings /> },
     { path: "/pricing", element: <Pricing /> },
+    { path: "/manage-subscription", element: <ManageSubscription /> },
     { path: "/checkout/success", element: <CheckoutSuccess /> },
     { path: "/checkout/cancel", element: <CheckoutCancel /> },
     { path: "/manual-sync", element: <ManualSync /> },
@@ -98,12 +115,10 @@ const router = createBrowserRouter(
       ),
     },
     {
+      // Team members are managed on the Users screen now. Kept as a redirect so
+      // bookmarks and older links still land somewhere useful.
       path: "/admin/team",
-      element: (
-        <AdminProtectedRoute>
-          <AdminTeamMembers />
-        </AdminProtectedRoute>
-      ),
+      element: <Navigate to="/admin/users?role=team" replace />,
     },
     {
       path: "/admin/team/:id",
@@ -202,6 +217,14 @@ const router = createBrowserRouter(
       ),
     },
     {
+      path: "/admin/acquisition-capacity",
+      element: (
+        <AdminProtectedRoute>
+          <AdminAcquisitionCapacity />
+        </AdminProtectedRoute>
+      ),
+    },
+    {
       path: "/admin/detect-words",
       element: (
         <AdminProtectedRoute>
@@ -226,23 +249,31 @@ const router = createBrowserRouter(
       ),
     },
     { path: "*", element: <NotFound /> },
+      ],
+    },
   ],
   {
     future: { v7_startTransition: true, v7_relativeSplatPath: true },
   },
 );
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <Toaster />
-    <Sonner />
-    <Suspense fallback={<PageLoader />}>
-      <RouterProvider
-        router={router}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      />
-    </Suspense>
-  </QueryClientProvider>
-);
+const App = () => {
+  // One presence connection for the whole session, so a signed-in member counts
+  // as online wherever they are on the platform.
+  usePresence();
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Toaster />
+      <Sonner />
+      <Suspense fallback={<PageLoader />}>
+        <RouterProvider
+          router={router}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        />
+      </Suspense>
+    </QueryClientProvider>
+  );
+};
 
 export default App;

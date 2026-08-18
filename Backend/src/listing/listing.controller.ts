@@ -18,7 +18,8 @@ import { ListingService } from './listing.service';
 import { listingSchema, ListingSchemaDTO } from './dto/create-listing.dto';
 import { ZodValidationPipe } from 'common/validator/zod.validator';
 import { UpdateListing, UpdateListingDTO } from './dto/update-listing.dto';
-import { ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { subscriptionConfig } from '../config/stripe.config';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { CACHE_TTL } from 'common/config/cache.config';
 import { Public } from 'common/decorator/public.decorator';
@@ -81,7 +82,7 @@ export class ListingController {
     }
     
     const filters = {
-      status: (status as 'PUBLISH' | 'DRAFT' | undefined) || 'PUBLISH',
+      status: (status as 'PUBLISH' | 'DRAFT' | 'SOLD' | undefined) || 'PUBLISH',
       category,
       userId,
       page: page ? parseInt(page, 10) : undefined,
@@ -109,6 +110,33 @@ export class ListingController {
     }
 
     return data;
+  }
+
+  // Declared above @Get(':id') on purpose — Nest matches in order, so the
+  // wildcard would otherwise swallow "off-market" as an id.
+  @Public()
+  @Get('off-market')
+  @ApiOperation({
+    summary: 'Listings still inside the early-access window, with a countdown',
+  })
+  async findOffMarket(@Req() req: Request) {
+    const currentUser = (req as any).user;
+    const viewer = await this.listingService.resolveViewerContext(
+      currentUser?.id,
+      currentUser?.role,
+    );
+    return this.listingService.findOffMarket(viewer);
+  }
+
+  // Same reason as off-market above: Nest matches in order, so this has to be
+  // declared before @Get(':id') or the wildcard reads it as a listing id.
+  @Get('confidential-requests')
+  @ApiOperation({
+    summary: 'Buyers waiting on this seller to approve confidential access',
+  })
+  async getPendingConfidentialRequests(@Req() req: Request) {
+    const { id: sellerId } = (req as any).user;
+    return this.listingService.getPendingConfidentialRequests(sellerId);
   }
 
   @Public()
@@ -165,7 +193,7 @@ export class ListingController {
       currentUser?.role,
     );
     const filters = {
-      status: status as 'PUBLISH' | 'DRAFT' | undefined,
+      status: status as 'PUBLISH' | 'DRAFT' | 'SOLD' | undefined,
       category,
       userId,
       page: page ? parseInt(page, 10) : undefined,
@@ -216,6 +244,21 @@ export class ListingController {
     }
   }
 
+  @Post(':id/confidential/decline')
+  @ApiOperation({ summary: 'Turn down a buyer request for confidential access' })
+  async declineConfidentialAccess(
+    @Req() req: Request,
+    @Param('id') listingId: string,
+    @Body() body: { buyerId: string },
+  ) {
+    const { id: sellerId } = (req as any).user;
+    return this.listingService.declineConfidentialAccess(
+      listingId,
+      sellerId,
+      body.buyerId,
+    );
+  }
+
   @Post(':id/confidential/grant')
   async grantConfidentialAccess(
     @Req() req: Request,
@@ -243,6 +286,19 @@ export class ListingController {
       sellerId,
       buyerId,
     );
+  }
+
+  @Post(':id/confidential/accept-agreement')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id', required: true })
+  @ApiOperation({
+    summary: 'Buyer accepts the confidentiality agreement for a listing',
+  })
+  async acceptConfidentialityAgreement(
+    @Req() req: Request,
+    @Param('id') listingId: string,
+  ) {
+    const { id: buyerId } = (req as any).user;
+    return this.listingService.acceptConfidentialityAgreement(listingId, buyerId);
   }
 
   @Get(':id/confidential/access/me')
@@ -283,6 +339,69 @@ export class ListingController {
     };
   }
 
+  @Post(':id/package-checkout')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id', required: true })
+  @ApiOperation({
+    summary: 'Start Stripe checkout for the listing package and add-on',
+  })
+  async createPackageCheckout(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      packageId: 'MINIMUM' | 'STARTER' | 'PREMIUM';
+      addon?: 'NONE' | 'CATEGORY_PAGE' | 'START_PAGE' | 'BUNDLE';
+      billingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
+    },
+  ) {
+    const { id: userId } = (req as any).user;
+    const frontendUrl = subscriptionConfig.frontendUrl;
+
+    const result = await this.listingService.createPackageCheckout(id, userId, {
+      packageId: body.packageId,
+      addon: body.addon || 'NONE',
+      billingCycle: body.billingCycle || 'MONTHLY',
+      successUrl: `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${frontendUrl}/dashboard/listing/${id}`,
+    });
+
+    await this.clearListingCaches(id);
+    return result;
+  }
+
+  @Get(':id/package')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id', required: true })
+  @ApiOperation({
+    summary: "A listing's current package and add-on, with its own price tier",
+  })
+  async getPackageState(@Req() req: Request, @Param('id') id: string) {
+    const { id: userId } = (req as any).user;
+    return this.listingService.getPackageState(id, userId);
+  }
+
+  @Post(':id/addon')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id', required: true })
+  @ApiOperation({
+    summary: "Add, replace or cancel a listing's add-on after it is published",
+  })
+  async changeAddon(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: { addon: 'NONE' | 'CATEGORY_PAGE' | 'START_PAGE' | 'BUNDLE' },
+  ) {
+    const { id: userId } = (req as any).user;
+    const frontendUrl = subscriptionConfig.frontendUrl;
+
+    const result = await this.listingService.changeAddon(id, userId, {
+      addon: body.addon,
+      successUrl: `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${frontendUrl}/my-listings`,
+    });
+
+    await this.clearListingCaches(id);
+    return result;
+  }
+
   @Patch(':id')
   @ApiParam({
     name: 'id',
@@ -296,8 +415,8 @@ export class ListingController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateListing)) body,
   ) {
-    const { id: userId } = (req as any).user;
-    const data = await this.listingService.update(id, userId, body);
+    const { id: userId, role } = (req as any).user;
+    const data = await this.listingService.update(id, userId, body, role);
 
     // Invalidate the specific listing and every cached feed page so updates
     // show up on the next read.

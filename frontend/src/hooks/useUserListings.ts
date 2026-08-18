@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
+import { resolveListingTitle } from "@/lib/listingTitle";
+import { parseMediaUrls } from "@/lib/mediaUtils";
 
 export const useUserListings = (userId: string | undefined) => {
   return useQuery({
@@ -31,29 +33,9 @@ export const useUserListings = (userId: string | undefined) => {
           });
 
           const mappedListings = userListings.map((listing: any) => {
-            // Title
-            let title = "Untitled Listing";
-            if (listing.brand && Array.isArray(listing.brand) && listing.brand.length > 0) {
-              const brandNameQuestion = listing.brand.find((b: any) =>
-                b.question?.toLowerCase().includes("brand name") ||
-                b.question?.toLowerCase().includes("business name") ||
-                b.question?.toLowerCase().includes("name") ||
-                b.question?.toLowerCase().includes("company")
-              );
-              if (brandNameQuestion?.answer) {
-                title = brandNameQuestion.answer;
-              } else if (listing.brand[0]?.answer) {
-                title = listing.brand[0].answer;
-              }
-            }
-            if (listing.advertisement && Array.isArray(listing.advertisement) && listing.advertisement.length > 0) {
-              const titleQuestion = listing.advertisement.find((a: any) =>
-                a.question?.toLowerCase().includes("title")
-              );
-              if (titleQuestion?.answer && String(titleQuestion.answer).trim()) {
-                title = titleQuestion.answer;
-              }
-            }
+            // Title comes from Ad Information; never from an unrelated brand
+            // answer, which used to turn values like "EUR" into the title.
+            const title = resolveListingTitle(listing);
 
             // Status
             let normalizedStatus = listing.status?.toLowerCase() || "draft";
@@ -113,9 +95,7 @@ export const useUserListings = (userId: string | undefined) => {
                 a.answer_type === "PHOTO"
               );
               if (photoQuestion?.answer) {
-                image_url = Array.isArray(photoQuestion.answer)
-                  ? photoQuestion.answer[0]
-                  : photoQuestion.answer;
+                image_url = parseMediaUrls(photoQuestion.answer)[0] || "";
               }
             }
             if (!image_url && listing.brand && Array.isArray(listing.brand)) {

@@ -8,6 +8,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useBrandQuestions } from "@/hooks/useBrandQuestions";
 import { toast } from "sonner";
 import FlagIcon from "@/components/FlagIcon";
+import { CountrySelect } from "@/components/CountrySelect";
+import { MonthYearPicker } from "@/components/MonthYearPicker";
 import { isValidListingDateAnswer } from "@/lib/dateUtils";
 import {
   DOMAIN_VALIDATION_MESSAGE,
@@ -15,16 +17,19 @@ import {
   isValidDomain,
   normalizeDomain,
 } from "@/lib/domainUtils";
+import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 
 interface BrandInformationStepProps {
   formData?: any;
   onNext: (data: any) => void;
   onBack: () => void;
+  onPersist?: (data: any) => void;
 }
 
-export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack }: BrandInformationStepProps) => {
+export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack, onPersist }: BrandInformationStepProps) => {
   const { data: questions = [], isLoading } = useBrandQuestions();
   const [formData, setFormData] = useState<Record<string, any>>(parentFormData || {});
+  usePersistOnUnmount(onPersist, () => formData);
 
   useEffect(() => {
     if (parentFormData) {
@@ -39,8 +44,8 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack 
     questions.forEach((question: any) => {
       const value = formData[question.id];
       
-      // Required fields validation
-      if (!value || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0)) {
+      // Required fields validation (skip when admin marked the question optional)
+      if (question.required !== false && (!value || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0))) {
         errors.push(`${question.question} is required`);
       }
       
@@ -112,11 +117,22 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack 
     
     switch (question.answer_type) {
       case "TEXT": {
-        // Check if this is a location field (Business Location or similar)
-        const isLocationField = question.question.toLowerCase().includes('location') || 
-                                question.question.toLowerCase().includes('address') ||
-                                question.question.toLowerCase().includes('country');
-        
+        const questionText = question.question.toLowerCase();
+        // Country / location fields become a searchable country dropdown.
+        const isCountryField =
+          questionText.includes('location') || questionText.includes('country');
+        // Address fields stay free-text but keep the flag hint.
+        const isAddressField = questionText.includes('address');
+
+        if (isCountryField) {
+          return (
+            <CountrySelect
+              value={value}
+              onChange={(val) => setFormData({ ...formData, [question.id]: val })}
+            />
+          );
+        }
+
         return (
           <div className="relative">
             <Input
@@ -128,9 +144,9 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack 
                   : "Enter your answer"
               }
               className="bg-muted/50"
-              style={isLocationField && value ? { paddingRight: '40px' } : {}}
+              style={isAddressField && value ? { paddingRight: '40px' } : {}}
             />
-            {isLocationField && value && (
+            {isAddressField && value && (
               <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                 <FlagIcon country={value} className="w-5 h-4" />
               </div>
@@ -162,15 +178,9 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack 
       
       case "DATE":
         return (
-          <Input
-            type="month"
+          <MonthYearPicker
             value={value}
-            onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
-            className="bg-muted/50 border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none"
-            style={{
-              outline: "none",
-              boxShadow: "none",
-            }}
+            onChange={(val) => setFormData({ ...formData, [question.id]: val })}
           />
         );
       
@@ -266,7 +276,7 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack 
 
   if (isLoading) {
     return (
-      <div className="max-w-4xl w-full">
+      <div className="max-w-4xl w-full mx-auto">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-4 sm:mb-6 md:mb-8">Brand Information</h1>
         <div className="text-sm sm:text-base text-muted-foreground">Loading questions...</div>
       </div>
@@ -274,7 +284,7 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack 
   }
 
   return (
-    <div className="max-w-4xl w-full">
+    <div className="max-w-4xl w-full mx-auto">
 
       <div className="bg-card rounded-xl p-4 sm:p-6 md:p-8 border border-border space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-4 sm:mb-6 md:mb-8">Brand Information</h1>

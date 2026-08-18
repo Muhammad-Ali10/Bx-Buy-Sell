@@ -6,16 +6,18 @@ export const useAddStatisticQuestion = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { 
-      question: string; 
+    mutationFn: async (data: {
+      question: string;
       answer_type: string;
       options?: string[];
+      required?: boolean | null;
     }) => {
       const response = await apiClient.createAdminQuestion({
         question: data.question,
         answer_type: data.answer_type,
         answer_for: "STATISTIC",
         options: data.options || [],
+        required: data.required,
       });
 
       if (!response.success) {

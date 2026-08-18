@@ -53,6 +53,16 @@ export class CategoryController {
     await this.cacheManager.set(`${this.constructor.name}`, data, CACHE_TTL);
     return data;
   }
+  // Must stay above `@Get(':id')`, or "trending" is read as a category id.
+  @Public()
+  @Roles(['ADMIN', 'MONITER', 'USER'])
+  @Get('trending')
+  async getTrending(@Query('limit') limit?: string) {
+    const parsed = Number.parseInt(limit ?? '', 10);
+    const count = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 12) : 4;
+    return this.categoryService.getTrending(count);
+  }
+
   @Public()
   @ApiParam({ name: 'id', description: 'Category ID', type: String })
   @Get(':id')

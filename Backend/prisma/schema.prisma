@@ -56,6 +56,13 @@ enum TicketStatus {
 enum ListingStatus {
   PUBLISH
   DRAFT
+  // Set by the platform team once the business has been sold. A sold listing
+  // leaves the public marketplace and its package billing stops.
+  SOLD
+  // Taken off the marketplace by the team. Unlike SOLD this is a moderation
+  // action: the owner still sees it under My Listings, can edit it to fix
+  // whatever was wrong, but cannot publish it again themselves.
+  BLOCKED
 }
 
 enum ChatStatus {
@@ -76,6 +83,10 @@ enum SubscriptionStatus {
 
 enum BillingCycle {
   MONTHLY
+  // The client's cycles: three months at 10% off, six at 20%.
+  THREE_MONTH
+  SIX_MONTH
+  // Kept so existing rows stay readable; not offered on the new page.
   YEARLY
 }
 
@@ -92,7 +103,10 @@ model User {
   id                String          @id @default(uuid()) @map("_id")
   first_name        String?
   last_name         String?
-  email             String
+  /// Enforced by the database, not only by the application. A duplicate
+  /// address makes every account but the oldest unreachable at sign-in, which
+  /// looks like "the password change did nothing".
+  email             String          @unique
   business_name     String?
   contact_name      String?
   phone             String?
@@ -110,11 +124,56 @@ model User {
   is_online         Boolean?        @default(false)
   last_offline      DateTime?
   zip_code          String?
+  /// Plain `YYYY-MM-DD`, not a DateTime. A birthday has no time of day, and
+  /// storing one lets a timezone shift move it to the day before.
+  birthday          String?
   background        String?
   is_email_verified Boolean         @default(false)
   support_ticket    SupportTicket[]
   is_phone_verified Boolean         @default(false)
+  /// The number waiting to be confirmed. `phone` only changes once the code
+  /// checks out, so a typo cannot leave someone with an unreachable number.
+  pending_phone      String?
+  phone_otp          String?
+  /// Codes expire. Without this a code stays valid forever, which turns one
+  /// intercepted SMS into a permanent key.
+  phone_otp_expires_at DateTime?
+  /// Guesses used on the current code. Six digits with unlimited tries is not
+  /// a secret.
+  phone_otp_attempts Int            @default(0)
+  /// The address waiting to be confirmed. `email` — which is how someone signs
+  /// in — only changes once a code sent to the new address comes back, so a
+  /// typo cannot lock its owner out of their own account.
+  pending_email      String?
+  email_otp          String?
+  email_otp_expires_at DateTime?
+  email_otp_attempts Int            @default(0)
+  /// Identity check with didit.me. `verified` above is the platform's own
+  /// answer; these record where the provider's session got to, so a webhook
+  /// arriving out of order can be matched to the right attempt.
+  /// Not `@unique`: MongoDB counts every null as the same value in a plain
+  /// unique index, so the constraint cannot be built while most accounts have
+  /// no session. Nothing relies on it — the webhook looks the session up with
+  /// findFirst, and the ids are provider-generated UUIDs.
+  identity_session_id String?
+  /// The provider's own wording — "Approved", "Declined", "In Review"… kept
+  /// verbatim rather than flattened, so support can see what they saw.
+  identity_status     String?
+  identity_checked_at DateTime?
   verified          Boolean         @default(false)
+
+  /// Moderation state. Kept separate from `verified`, which is a KYC flag:
+  /// an unverified user is not a blocked one.
+  blocked           Boolean         @default(false)
+  blocked_at        DateTime?
+  blocked_reason    String?
+  /// Who pulled the trigger, for the audit trail.
+  blocked_by        String?
+
+  /// Last sign of life. Presence is "socket connected OR active recently", so
+  /// moving between tabs no longer drops a user to offline.
+  last_seen         DateTime?
+
   favourite         Favourite[]
 
   created_at     DateTime         @default(now())
@@ -123,6 +182,10 @@ model User {
   buyer          Chat[]           @relation("Buyer")
   seller         Chat[]           @relation("Seller")
   listing        Listing[]
+  // Listings this team member has been assigned to look after.
+  assignedListings Listing[] @relation("ListingResponsible")
+  // Conversations this team member has been assigned to look after.
+  assignedChats    Chat[]    @relation("ChatResponsible")
   preferences    Preference?
   chatRoomId     String?
   chatlabels     ChatLabel[]
@@ -134,10 +197,87 @@ model User {
   MonitoringAlertReporter   MonitoringAlert[] @relation("AlertReporter")
   MonitoringAlertProblematic MonitoringAlert[] @relation("AlertProblematic")
   MonitoringAlertResponsible MonitoringAlert[] @relation("AlertResponsible")
+
+  acquisitionCapacity        AcquisitionCapacity?  @relation("CapacityBuyer")
+  reviewedCapacities         AcquisitionCapacity[] @relation("CapacityReviewer")
   subscription   UserSubscription?
   payments       Payment[]
   confidentialListingAccesses ListingConfidentialAccess[] @relation("ConfidentialAccessBuyer")
   confidentialListingAccessGrants ListingConfidentialAccess[] @relation("ConfidentialAccessSeller")
+}
+
+/// Status of a buyer's proof-of-funds review.
+enum AcquisitionCapacityStatus {
+  UNASSIGNED
+  IN_REVIEW
+  COMPLETED
+}
+
+/// A buyer's verified purchasing power.
+///
+/// The buyer uploads proof of funds; a moderator reviews it and records the
+/// amount they could verify. Listings then compare that amount against their
+/// asking price to show how realistic the buyer is. One record per buyer.
+model AcquisitionCapacity {
+  id            String                    @id @default(uuid()) @map("_id")
+  buyerId       String                    @unique
+  buyer         User                      @relation("CapacityBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+
+  /// Uploaded proof-of-funds files, as bare URLs. Superseded by the
+  /// `uploads` relation, which carries a name, a date and its own status —
+  /// kept only so nothing already stored is lost.
+  documents     String[]                  @default([])
+  /// One row per uploaded file, each reviewed on its own.
+  uploads       AcquisitionDocument[]
+  /// Amount the moderator could actually verify. Null until reviewed.
+  verifiedFunds Float?
+  status        AcquisitionCapacityStatus @default(UNASSIGNED)
+  /// Internal moderator notes; never shown to sellers or buyers.
+  notes         String?
+
+  reviewerId    String?
+  reviewer      User?                     @relation("CapacityReviewer", fields: [reviewerId], references: [id])
+  reviewedAt    DateTime?
+
+  created_at    DateTime                  @default(now())
+  updated_at    DateTime                  @updatedAt
+
+  @@index([status])
+  @@index([reviewerId])
+}
+
+/// Where one uploaded proof-of-funds file stands.
+enum AcquisitionDocumentStatus {
+  IN_REVIEW
+  VERIFIED
+  DECLINED
+}
+
+/// A single proof-of-funds file.
+///
+/// Documents are judged one at a time: a buyer may send a bank statement that
+/// checks out and a screenshot that does not, and the account page shows each
+/// with its own outcome rather than one verdict over the pile.
+model AcquisitionDocument {
+  id         String                    @id @default(uuid()) @map("_id")
+  capacityId String
+  capacity   AcquisitionCapacity       @relation(fields: [capacityId], references: [id], onDelete: Cascade)
+  /// What the buyer's file was called, e.g. "IMG3483.png".
+  name       String
+  url        String
+  status     AcquisitionDocumentStatus @default(IN_REVIEW)
+  /// Why it was declined, if it was. Shown to the buyer.
+  note       String?
+  /// What this one document actually proves, as judged by the moderator. The
+  /// case total is the sum of these across verified documents — it is never
+  /// typed by hand, so the figure and its evidence cannot drift apart.
+  verifiedCapital Float?
+  reviewedAt DateTime?
+  created_at DateTime                  @default(now())
+  updated_at DateTime                  @updatedAt
+
+  @@index([capacityId])
+  @@index([status])
 }
 
 model MonitoringAlert {
@@ -156,6 +296,20 @@ model MonitoringAlert {
 
   responsibleId     String?
   responsible       User?    @relation("AlertResponsible", fields: [responsibleId], references: [id])
+
+  // Set when the alert is a report about a listing rather than about a user.
+  listingId         String?
+  listing           Listing? @relation("AlertListing", fields: [listingId], references: [id], onDelete: Cascade)
+
+  /// Set when the alert is about a conversation. Until now the chat id was
+  /// scraped out of the `notes` text, which meant the link broke the moment
+  /// anyone reworded a note — and a reported chat had nowhere to be recorded.
+  chatId            String?
+  chat              Chat?    @relation("AlertChat", fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([chatId])
+  @@index([status])
 }
 
 model ActivityLog {
@@ -235,6 +389,14 @@ model Listing {
   status             ListingStatus
   user               User              @relation(fields: [userId], references: [id])
   userId             String
+  // Team member this listing is assigned to. The admin table was already
+  // sending this, but there was nowhere to store it, so every assignment was
+  // silently discarded.
+  responsible        User?             @relation("ListingResponsible", fields: [responsibleId], references: [id])
+  responsibleId      String?
+  // Why the team blocked it, shown to the owner so a blocked listing does not
+  // simply become a support ticket.
+  blockedReason      String?
   brand              ListingQuestion[] @relation("BrandQuestion")
   category           ListingCategory[]
   tools              ListingTool[]
@@ -250,9 +412,32 @@ model Listing {
   confidentialControl Boolean          @default(false)
   featuredOnCategoryPage Boolean       @default(false)
   featuredOnStartPage Boolean          @default(false)
+  // Package the seller chose for this listing. These record the selection and
+  // the success-fee rate quoted at that moment (so a later listing-price change
+  // does not silently re-price the deal). The paid features themselves are
+  // switched on once payment is wired up. Null = legacy listing / no package.
+  selectedPackage       String?
+  packageBillingCycle   String?
+  packageAddons         String[]       @default([])
+  successFeePercent     Float?
+  approveBuyersManually Boolean?
+  /** When the team marked this listing as sold. Null while it is still for sale. */
+  soldAt                DateTime?
+  // Paid state of the package. `selectedPackage` above is only what the seller
+  // picked; these say whether it was actually paid for and until when. Premium
+  // features are gated on packageActive, so an expired package silently loses
+  // them while the listing itself stays public.
+  packageActive             Boolean?
+  packageExpiresAt          DateTime?
+  packageStripeSubscriptionId String?
+  addonStripeSubscriptionId   String?
+  // A cancelled add-on keeps its placement until the month it was paid for
+  // runs out. This is when that happens; null means no removal is pending.
+  addonEndsAt                 DateTime?
   confidentialAccesses ListingConfidentialAccess[]
   Favourite          Favourite[]
   chats              Chat[]            @relation // CRITICAL: Link to chats for this listing
+  reports            MonitoringAlert[] @relation("AlertListing")
   created_at         DateTime          @default(now())
   updated_at         DateTime          @updatedAt
   deleted_at         DateTime?
@@ -262,12 +447,25 @@ model Listing {
   @@index([userId])
 }
 
+/// Where a buyer's request for the confidential details currently stands.
+enum ConfidentialAccessStatus {
+  /// The seller vets buyers by hand and has not decided yet.
+  PENDING
+  APPROVED
+  DECLINED
+}
+
 model ListingConfidentialAccess {
   id               String   @id @default(uuid()) @map("_id")
   listingId        String
   buyerId          String
   grantedBySellerId String
   chatId           String?
+  /// Defaults to APPROVED because every row written before this existed was a
+  /// grant — a stricter default would revoke access people already had.
+  status           ConfidentialAccessStatus @default(APPROVED)
+  /// When the seller approved or declined. Null while still waiting.
+  decidedAt        DateTime?
   created_at       DateTime @default(now())
   updated_at       DateTime @updatedAt
 
@@ -347,6 +545,10 @@ model Plan {
   // Stripe IDs
   stripeMonthlyPriceId  String?
   stripeYearlyPriceId   String?
+  // The client's discounted cycles bill a different amount, so each needs its
+  // own Stripe price. Without these the 3- and 6-month options cannot be sold.
+  stripeThreeMonthPriceId String?
+  stripeSixMonthPriceId   String?
   stripeProductId       String?
   
   // Feature limits
@@ -475,6 +677,13 @@ model AdminQuestion {
   answer_type AnswerType
   answer_for  AnswerFor // brand, product, management
   option      String[]   @default([])
+  // Optional conditional display: show this question only when another question's
+  // answer equals dependsOnValue. Both null = always show (default, unchanged behavior).
+  dependsOnQuestionId String?
+  dependsOnValue      String?
+  // Whether the seller must answer this question. Null = legacy behaviour
+  // (each step keeps its current default), so existing questions are unchanged.
+  required    Boolean?
   created_at  DateTime   @default(now())
   updated_at  DateTime   @updatedAt
 }
@@ -523,12 +732,20 @@ model Chat {
   offer         String? // Optional offer text/ID made by seller
   status        ChatStatus      @default(ACTIVE)
   chatLabels    ChatLabel[]
+  reports       MonitoringAlert[] @relation("AlertChat")
   SupportTicket SupportTicket[]
   confidentialAccesses ListingConfidentialAccess[]
+
+  /// Team member who looks after this conversation. Mirrors the same idea on
+  /// Listing, so "chats managed by X" is a real filter and not a guess from
+  /// who happened to open it (that is what ChatMonitor records).
+  responsible   User?           @relation("ChatResponsible", fields: [responsibleId], references: [id])
+  responsibleId String?
 
   // Conversation list filters by buyer (userId) or seller (sellerId).
   @@index([userId])
   @@index([sellerId])
+  @@index([responsibleId])
 }
 
 model ChatLabel {
@@ -549,8 +766,12 @@ model Message {
   id        String      @id @default(uuid()) @map("_id")
   chat      Chat        @relation(fields: [chatId], references: [id])
   chatId    String
-  sender    User        @relation("Sender", fields: [senderId], references: [id])
-  senderId  String
+  // Optional because the platform itself posts messages — a blocked-message
+  // notice, the periodic reminder — and those have no human behind them.
+  // A stand-in "system" user account was the alternative, but it would then
+  // turn up in participant lists, member counts and moderation screens.
+  sender    User?       @relation("Sender", fields: [senderId], references: [id])
+  senderId  String?
   content   String?
   type      MessageType @default(TEXT)
   fileUrl   String? // for file/image type messages
@@ -562,11 +783,31 @@ model Message {
   @@index([chatId, senderId, createdAt])
 }
 
+/// How a prohibited word is grouped on the Detect Words screen. The four the
+/// admin UI already offers — not invented here.
+enum ProhibitedWordCategory {
+  CONTACT_INFO
+  PAYMENT_METHODS
+  EXTERNAL_PLATFORMS
+  OTHER
+}
+
 model ProhibitedWord {
   id        String   @id @default(uuid()) @map("_id")
   word      String
+  /// The admin screen has always offered a category and a filter; there was no
+  /// column behind either, so choosing one saved nothing and filtering by one
+  /// matched nothing.
+  category  ProhibitedWordCategory @default(OTHER)
+  /// How many messages this word has stopped. Counted once per blocked message,
+  /// not once per occurrence: the number answers "is this rule earning its
+  /// place", and three hits in one message would treble the same event.
+  usageCount Int     @default(0)
+  lastUsedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([category])
 }
 
 model ChatMonitor {
@@ -588,6 +829,9 @@ enum MessageType {
   FILE
   OFFER
   ADMIN
+  // Posted by the platform, not by a person. Persisted like any other message
+  // so it is still there after a refresh.
+  SYSTEM
 }
 
 enum ChatLabelType {
@@ -659,7 +903,14 @@ model UserSubscription {
   endDate                DateTime?
   cancelledAt            DateTime?
   trialEndsAt            DateTime?
-  
+
+  // A downgrade takes effect at the end of the paid period, not on the click.
+  // Until then the member keeps what they paid for, the page can say
+  // "Downgrade starts in N days", and they can still change their mind —
+  // none of which is possible without remembering the pending change.
+  pendingPlanId          String?
+  pendingBillingCycle    BillingCycle?
+  pendingChangeAt        DateTime?
   created_at             DateTime            @default(now())
   updated_at             DateTime            @updatedAt
 }

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUpdateBrandQuestion } from "@/hooks/useUpdateBrandQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 import { toast } from "sonner";
 
 interface BrandQuestion {
@@ -13,6 +14,7 @@ interface BrandQuestion {
   answer_type: string;
   answer_for: string;
   option?: string[];
+  required?: boolean | null;
 }
 
 interface EditBrandQuestionDialogProps {
@@ -35,6 +37,7 @@ export const EditBrandQuestionDialog = ({ open, onOpenChange, question }: EditBr
   const [questionText, setQuestionText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState(""); // For SELECT type - comma separated options
+  const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateBrandQuestion();
 
   useEffect(() => {
@@ -54,6 +57,7 @@ export const EditBrandQuestionDialog = ({ open, onOpenChange, question }: EditBr
       } else {
         setOptions("");
       }
+      setRequired(question.required !== false);
     }
   }, [question]);
 
@@ -85,6 +89,7 @@ export const EditBrandQuestionDialog = ({ open, onOpenChange, question }: EditBr
         question: questionText.trim(),
         answer_type: questionType,
         option: optionsArray.length > 0 ? optionsArray : undefined,
+        required,
       },
       {
         onSuccess: () => {
@@ -152,6 +157,7 @@ export const EditBrandQuestionDialog = ({ open, onOpenChange, question }: EditBr
               </SelectContent>
             </Select>
           </div>
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
 
         {/* Action Buttons */}

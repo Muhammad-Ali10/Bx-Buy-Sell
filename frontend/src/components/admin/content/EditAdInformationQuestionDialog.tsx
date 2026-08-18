@@ -4,18 +4,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUpdateAdInformationQuestion } from "@/hooks/useUpdateAdInformationQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 import { useState, useEffect } from "react";
 
 interface EditAdInformationQuestionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  question: { id: string; question: string; answer_type: string; option?: string[] } | null;
+  question: { id: string; question: string; answer_type: string; option?: string[]; required?: boolean | null } | null;
 }
 
 export const EditAdInformationQuestionDialog = ({ open, onOpenChange, question }: EditAdInformationQuestionDialogProps) => {
   const [questionText, setQuestionText] = useState("");
   const [answerType, setAnswerType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateAdInformationQuestion();
 
   useEffect(() => {
@@ -27,6 +29,7 @@ export const EditAdInformationQuestionDialog = ({ open, onOpenChange, question }
       };
       setAnswerType(answerTypeMap[question.answer_type] || question.answer_type);
       setOptions(question.option && Array.isArray(question.option) ? question.option.join(", ") : "");
+      setRequired(question.required !== false);
     }
   }, [question]);
 
@@ -41,7 +44,7 @@ export const EditAdInformationQuestionDialog = ({ open, onOpenChange, question }
         : [];
 
     updateQuestion.mutate(
-      { id: question.id, question: questionText, answer_type: answerType, options: optionsArray },
+      { id: question.id, question: questionText, answer_type: answerType, options: optionsArray, required },
       {
         onSuccess: () => {
           onOpenChange(false);
@@ -98,6 +101,7 @@ export const EditAdInformationQuestionDialog = ({ open, onOpenChange, question }
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
           <div className="flex gap-2 justify-end">
             <Button
               type="button"

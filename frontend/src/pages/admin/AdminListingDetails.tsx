@@ -13,7 +13,7 @@ export default function AdminListingDetails() {
   return (
     <div className="flex min-h-screen w-full bg-background">
       <AdminSidebar />
-      <main className="flex-1">
+      <main className="flex-1 min-w-0">
         <AdminHeader title="Edit Listing" />
         <div className="p-8">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-4">

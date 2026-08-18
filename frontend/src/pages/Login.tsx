@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mail, Lock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { normalizePublicSignupPassword } from "@/lib/authCredentials";
 import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
 import { toast } from "sonner";
 
@@ -39,10 +38,9 @@ const Login = () => {
     setLoading(true);
 
     try {
-      const result = await login(
-        email.toLowerCase().trim(),
-        normalizePublicSignupPassword(password)
-      );
+      // Sent exactly as typed. Accounts whose stored hash predates this are
+      // recognised and repaired by the server on the way through.
+      const result = await login(email.toLowerCase().trim(), password);
 
       if (result.success) {
         toast.success("Successfully logged in!");

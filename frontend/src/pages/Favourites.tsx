@@ -1,42 +1,25 @@
 import { useEffect, useState } from "react";
+import { resolveListingTitle } from "@/lib/listingTitle";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ListingsSidebar } from "@/components/listings/ListingsSidebar";
-import { DashboardHeader } from "@/components/listings/DashboardHeader";
+import Header from "@/components/Header";
 import ListingCard from "@/components/ListingCard";
+import { parseMediaUrls } from "@/lib/mediaUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Heart, Search } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api";
 import { readPersisted, writePersisted } from "@/lib/persistentCache";
 import { formatBusinessAge } from "@/lib/dateUtils";
-import { useCategories } from "@/hooks/useCategories";
 
+import { formatNumber } from "@/lib/formatNumber";
+import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 const Favourites = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
-  const [priceRange, setPriceRange] = useState("all");
-  const [location, setLocation] = useState("all");
-  const [age, setAge] = useState("all");
-  const [niche, setNiche] = useState("all");
-
-  // Get categories for niche filter
-  const { data: categoriesData = [] } = useCategories({ nocache: true });
-  const categories = ["All", ...categoriesData.map((c: any) => c.name).filter((name: string) =>
-    name !== "Managed by EX" &&
-    name !== "🤝 Managed by EX" &&
-    name !== "managed by ex" &&
-    name?.trim() !== ""
-  )];
 
   // Redirect unauthenticated users to login.
   useEffect(() => {
@@ -104,9 +87,11 @@ const Favourites = () => {
     <div className="flex min-h-screen bg-background">
       <ListingsSidebar />
 
-      <div className="flex-1 w-full md:w-auto lg:ml-[240px] xl:ml-[280px]">
+      <div className="flex-1 min-w-0 md:w-auto lg:ml-[240px] xl:ml-[280px]">
         {/* Header - Shared across all tabs */}
-        <DashboardHeader />
+        <Header sidebarOffset />
+        {/* Clears the fixed bar floating above. */}
+        <div className="h-20 sm:h-24" />
 
         {/* Main Content */}
         <main className="px-4 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-6 md:py-8">
@@ -129,7 +114,9 @@ const Favourites = () => {
                   Your favorite listings will appear here. Start browsing to save companies you're interested in.
                 </p>
                 <Button
-                  onClick={() => navigate("/")}
+                  // Same destination as "+ Add Favourites" above — both are
+                  // "go and find something to save", not "go to the home page".
+                  onClick={() => navigate("/all-listings")}
                   className="bg-[#D3FC50] text-black rounded-full text-sm sm:text-base"
                 >
                   Browse Listings
@@ -160,67 +147,6 @@ const Favourites = () => {
                       }}
                     />
                   </div>
-
-                  {/* Price Range */}
-                  <Select value={priceRange} onValueChange={setPriceRange}>
-                    <SelectTrigger className="w-full sm:w-[120px] md:w-[140px] lg:w-[160px] h-[44px] sm:h-[48px] md:h-[50px] px-3 sm:px-4 md:px-4 rounded-full border border-black/10 bg-[rgba(250,250,250,1)] text-[11px] sm:text-xs md:text-sm text-black/50">
-                      <SelectValue placeholder="Price Range" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Price Range</SelectItem>
-                      <SelectItem value="0-10000">$0 - $10,000</SelectItem>
-                      <SelectItem value="10000-50000">$10,000 - $50,000</SelectItem>
-                      <SelectItem value="50000-100000">$50,000 - $100,000</SelectItem>
-                      <SelectItem value="100000+">$100,000+</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {/* Location */}
-                  <Select value={location} onValueChange={setLocation}>
-                    <SelectTrigger className="w-full sm:w-[140px] md:w-[160px] lg:w-[180px] h-[44px] sm:h-[48px] md:h-[50px] px-3 sm:px-4 md:px-4 rounded-full border border-black/10 bg-[rgba(250,250,250,1)] text-[11px] sm:text-xs md:text-sm text-black/50">
-                      <SelectValue placeholder="Location" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Location</SelectItem>
-                      <SelectItem value="United States">United States</SelectItem>
-                      <SelectItem value="United Kingdom">United Kingdom</SelectItem>
-                      <SelectItem value="India">India</SelectItem>
-                      <SelectItem value="Canada">Canada</SelectItem>
-                      <SelectItem value="Australia">Australia</SelectItem>
-                      <SelectItem value="Germany">Germany</SelectItem>
-                      <SelectItem value="France">France</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {/* Age */}
-                  <Select value={age} onValueChange={setAge}>
-                    <SelectTrigger className="w-full sm:w-[100px] md:w-[120px] lg:w-[130px] h-[44px] sm:h-[48px] md:h-[50px] px-3 sm:px-4 md:px-4 rounded-full border border-black/10 bg-[rgba(250,250,250,1)] text-[11px] sm:text-xs md:text-sm text-black/50">
-                      <SelectValue placeholder="Age" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Age</SelectItem>
-                      <SelectItem value="0-1">0-1 years</SelectItem>
-                      <SelectItem value="1-3">1-3 years</SelectItem>
-                      <SelectItem value="3-5">3-5 years</SelectItem>
-                      <SelectItem value="5-10">5-10 years</SelectItem>
-                      <SelectItem value="10+">10+ years</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {/* Niche */}
-                  <Select value={niche} onValueChange={setNiche}>
-                    <SelectTrigger className="w-full sm:w-[120px] md:w-[140px] lg:w-[160px] h-[44px] sm:h-[48px] md:h-[50px] px-3 sm:px-4 md:px-4 rounded-full border border-black/10 bg-[rgba(250,250,250,1)] text-[11px] sm:text-xs md:text-sm text-black/50">
-                      <SelectValue placeholder="Niche" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((category) => (
-                        <SelectItem key={category} value={category === "All" ? "all" : category}>
-                          {category}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 {/* Right Side - Add Favourites Button */}
@@ -244,10 +170,7 @@ const Favourites = () => {
                       return question?.answer || null;
                     };
                     
-                    const businessName = getBrandAnswer(['business name', 'company name', 'brand name', 'name']) || 
-                                        brandQuestions[0]?.answer || 
-                                        listing.title || 
-                                        'Unnamed Business';
+                    const businessName = resolveListingTitle(listing, 'Unnamed Business');
                     const listingLocation = getBrandAnswer(['country', 'location', 'address']) || 
                                            listing.location || 
                                            'Not specified';
@@ -261,11 +184,6 @@ const Favourites = () => {
                           !listingLocation.toLowerCase().includes(searchLower)) {
                         return false;
                       }
-                    }
-                    
-                    // Niche filter
-                    if (niche !== "all" && categoryName !== niche) {
-                      return false;
                     }
                     
                     return true;
@@ -283,10 +201,7 @@ const Favourites = () => {
                     return question?.answer || null;
                   };
                   
-                  const businessName = getBrandAnswer(['business name', 'company name', 'brand name', 'name']) || 
-                                      brandQuestions[0]?.answer || 
-                                      listing.title || 
-                                      'Unnamed Business';
+                  const businessName = resolveListingTitle(listing, 'Unnamed Business');
                   const businessDescription = getBrandAnswer(['description', 'about', 'business description']) || 
                                              listing.description || 
                                              '';
@@ -320,7 +235,7 @@ const Favourites = () => {
                     a.question?.toLowerCase().includes('photo') || a.answer_type === 'PHOTO'
                   );
                   if (photoQuestion?.answer) {
-                    imageUrl = Array.isArray(photoQuestion.answer) ? photoQuestion.answer[0] : photoQuestion.answer;
+                    imageUrl = parseMediaUrls(photoQuestion.answer)[0] || '';
                   }
                   if (!imageUrl) {
                     const brandInfo = brandQuestions[0];
@@ -460,15 +375,16 @@ const Favourites = () => {
                         category={categoryInfo?.name || 'Other'}
                         name={businessName}
                         description={adDescription || businessDescription}
-                        price={`$${Number(askingPrice).toLocaleString()}`}
+                        price={`${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`}
                         profitMultiple={profitMultiple}
                         revenueMultiple={revenueMultiple}
                         location={location}
                         locationFlag={location}
                         businessAge={businessAge}
-                        netProfit={avgNetProfit > 0 ? `$${Math.round(avgNetProfit).toLocaleString()}` : undefined}
-                        revenue={avgRevenue > 0 ? `$${Math.round(avgRevenue).toLocaleString()}` : undefined}
+                        netProfit={avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined}
+                        revenue={avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined}
                         managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
+                        isPremium={String(listing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
                         listingId={listingId}
                         sellerId={listing.userId || listing.user_id}
                       />

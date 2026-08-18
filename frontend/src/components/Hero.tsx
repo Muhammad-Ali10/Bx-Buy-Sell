@@ -2,7 +2,10 @@ import { Search, ChevronDown, SlidersHorizontal, ArrowUpRight, Layers } from "lu
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { apiClient } from "@/lib/api";
 import heroCard1 from "@/assets/hero-card-1.png";
 import heroCard2 from "@/assets/hero-card-2.png";
 import heroCard3 from "@/assets/hero-card-3.png";
@@ -14,7 +17,24 @@ interface HeroProps {
 
 const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const trendingTopics = ["Shopify", "E-Commerce", "YouTube Automation", "SaaS"];
+  const navigate = useNavigate();
+  /**
+   * Read from the listings rather than typed in here.
+   *
+   * The four topics that used to be hardcoded had to match a category name
+   * exactly, and three of them matched nothing — Shopify, SaaS and YouTube
+   * Automation all opened an empty page. Coming from the data, a topic can
+   * only appear if there is something behind it.
+   */
+  const { data: trendingTopics = [] } = useQuery<{ name: string; listings: number }[]>({
+    queryKey: ["trending-categories"],
+    queryFn: async () => {
+      const response = await apiClient.getTrendingCategories();
+      const rows = (response as any)?.data ?? response;
+      return Array.isArray(rows) ? rows : [];
+    },
+    staleTime: 5 * 60_000,
+  });
 
   const handleSearch = () => {
     if (searchQuery.trim()) {
@@ -100,19 +120,28 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 px-4">
-            <span className="text-xs sm:text-sm text-primary-foreground/70 mr-2">Trending Topics</span>
-            {trendingTopics.map((topic) => (
-              <Button
-                key={topic}
-                variant="ghost"
-                className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border border-primary-foreground/20 rounded-full px-3 py-1.5 sm:px-5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
-              >
-                {topic}
-                <ArrowUpSvg className="w-3 h-3 sm:w-4 sm:h-4 ml-1 sm:ml-2" />
-              </Button>
-            ))}
-          </div>
+          {/* An empty marketplace has no trending topics; a row reading
+              "Trending Topics" with nothing after it looks broken. */}
+          {trendingTopics.length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 px-4">
+              <span className="text-xs sm:text-sm text-primary-foreground/70 mr-2">Trending Topics</span>
+              {trendingTopics.map((topic) => (
+                <Button
+                  key={topic.name}
+                  variant="ghost"
+                  // Opens the listings page already filtered to this category.
+                  onClick={() =>
+                    navigate(`/all-listings?category=${encodeURIComponent(topic.name)}`)
+                  }
+                  className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border border-primary-foreground/20 rounded-full px-3 py-1.5 sm:px-5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+                >
+                  {topic.name}
+                  {/* Stroked with currentColor, so it stays white with the label. */}
+                  <ArrowUpSvg className="w-3 h-3 sm:w-4 sm:h-4 ml-1 sm:ml-2" />
+                </Button>
+              ))}
+            </div>
+          )}
 
           <div className="relative w-full max-w-7xl mx-auto mt-4 sm:mt-8 flex items-end justify-center mb-0 px-4">
             {/* Large center image - positioned at bottom */}

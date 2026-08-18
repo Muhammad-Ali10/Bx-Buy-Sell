@@ -1,9 +1,11 @@
 import { useNavigate, useParams } from "react-router-dom";
+import { resolveListingTitle } from "@/lib/listingTitle";
 import { useState } from "react";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { parseMediaUrls } from "@/lib/mediaUtils";
 import {
   Select,
   SelectContent,
@@ -17,6 +19,8 @@ import { useCategories } from "@/hooks/useCategories";
 import { formatBusinessAge } from "@/lib/dateUtils";
 import ListingCard from "@/components/ListingCard";
 
+import { formatNumber } from "@/lib/formatNumber";
+import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 export default function AdminUserFavorites() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -38,7 +42,7 @@ export default function AdminUserFavorites() {
     <div className="flex min-h-screen w-full bg-background">
       <AdminSidebar />
       
-      <main className="flex-1">
+      <main className="flex-1 min-w-0">
         <AdminHeader title="User Details" />
 
         <div className="p-8">
@@ -166,10 +170,7 @@ export default function AdminUserFavorites() {
                       return question?.answer || null;
                     };
 
-                    const businessName = getBrandAnswer(['business name', 'company name', 'brand name', 'name']) ||
-                                        brandQuestions[0]?.answer ||
-                                        listing.title ||
-                                        'Unnamed Business';
+                    const businessName = resolveListingTitle(listing, 'Unnamed Business');
                     const listingLocation = getBrandAnswer(['country', 'location', 'address']) ||
                                            listing.location ||
                                            'Not specified';
@@ -202,10 +203,7 @@ export default function AdminUserFavorites() {
                     return question?.answer || null;
                   };
 
-                  const businessName = getBrandAnswer(['business name', 'company name', 'brand name', 'name']) ||
-                                      brandQuestions[0]?.answer ||
-                                      listing.title ||
-                                      'Unnamed Business';
+                  const businessName = resolveListingTitle(listing, 'Unnamed Business');
                   const businessDescription = getBrandAnswer(['description', 'about', 'business description']) ||
                                              listing.description ||
                                              '';
@@ -235,7 +233,7 @@ export default function AdminUserFavorites() {
                     a.question?.toLowerCase().includes('photo') || a.answer_type === 'PHOTO'
                   );
                   if (photoQuestion?.answer) {
-                    imageUrl = Array.isArray(photoQuestion.answer) ? photoQuestion.answer[0] : photoQuestion.answer;
+                    imageUrl = parseMediaUrls(photoQuestion.answer)[0] || '';
                   }
                   if (!imageUrl) {
                     const brandInfo = brandQuestions[0];
@@ -302,15 +300,16 @@ export default function AdminUserFavorites() {
                         category={categoryInfo?.name || 'Other'}
                         name={businessName}
                         description={adDescription || businessDescription}
-                        price={`$${Number(askingPrice).toLocaleString()}`}
+                        price={`${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`}
                         profitMultiple={profitMultiple}
                         revenueMultiple={revenueMultiple}
                         location={listingLocation}
                         locationFlag={listingLocation}
                         businessAge={businessAge}
-                        netProfit={avgNetProfit > 0 ? `$${Math.round(avgNetProfit).toLocaleString()}` : undefined}
-                        revenue={avgRevenue > 0 ? `$${Math.round(avgRevenue).toLocaleString()}` : undefined}
+                        netProfit={avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined}
+                        revenue={avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined}
                         managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
+                        isPremium={String(listing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
                         listingId={listingId}
                         sellerId={listing.userId || listing.user_id}
                       />

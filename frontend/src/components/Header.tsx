@@ -9,11 +9,25 @@ import { NotificationDropdown } from "./NotificationDropdown";
 import { toast } from "sonner";
 import logo from "@/assets/_App Icon 1 (2).png";
 import { Sheet, SheetContent, SheetTrigger } from "./ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
-const Header = () => {
+interface HeaderProps {
+  /**
+   * Set on pages that render the dashboard sidebar, so the floating bar centres
+   * in the content area instead of drifting over the sidebar.
+   */
+  sidebarOffset?: boolean;
+}
+
+const Header = ({ sidebarOffset = false }: HeaderProps) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const [favoritesCount, setFavoritesCount] = useState(0);
   
   // Determine active route
@@ -41,6 +55,16 @@ const Header = () => {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success("Logged out successfully");
+      navigate("/");
+    } catch (error) {
+      toast.error("Error logging out");
+    }
+  };
+
   const handleFavoritesClick = () => {
     if (!isAuthenticated || !user) {
       toast.error("Please login to view your favorites");
@@ -53,18 +77,38 @@ const Header = () => {
 
   const isHowToBuyActive = location.pathname === "/how-to-buy";
   const isHowToSellActive = location.pathname === "/how-to-sell";
-  const isListingDetailPage = location.pathname.startsWith("/listing/");
+  /**
+   * Pages that sit on a light background get the translucent bar. The home page
+   * is deliberately not in this list — its hero is blue, and the dark text this
+   * treatment uses would not read against it.
+   */
+  const LIGHT_BAR_PREFIXES = [
+    "/listing/",
+    "/all-listings",
+    "/my-listings",
+    "/favourites",
+    "/chat",
+    "/profile",
+    "/verify-account",
+  ];
+  const useLightBar = LIGHT_BAR_PREFIXES.some((prefix) =>
+    location.pathname.startsWith(prefix),
+  );
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 flex justify-center pt-2 sm:pt-4">
+    <header
+      className={`fixed top-0 left-0 right-0 z-50 flex justify-center pt-2 sm:pt-4 ${
+        sidebarOffset ? "lg:pl-[240px] xl:pl-[280px]" : ""
+      }`}
+    >
       <div className="w-full max-w-6xl mx-auto px-3 sm:px-4">
         <div 
           className={`rounded-full px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between shadow-2xl ${
-            isListingDetailPage ? '' : 'bg-primary backdrop-blur-xl'
+            useLightBar ? '' : 'bg-primary backdrop-blur-xl'
           }`}
-          style={isListingDetailPage ? {
+          style={useLightBar ? {
             background: 'rgba(0, 0, 0, 0.05)',
             border: '1px solid rgba(0, 0, 0, 0.05)',
             backdropFilter: 'blur(10px)'
@@ -85,7 +129,7 @@ const Header = () => {
             <Button 
               size="sm" 
               className={`rounded-full px-4 py-2 font-lufga ${
-                isListingDetailPage 
+                useLightBar 
                   ? (isHomeActive 
                       ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 font-medium" 
                       : "hover:bg-[#D3FC50] hover:text-black")
@@ -93,7 +137,7 @@ const Header = () => {
                       ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 font-medium" 
                       : "bg-[#FFFFFF0D] text-white hover:bg-[#D3FC50] hover:text-black")
               }`}
-              style={isListingDetailPage && !isHomeActive ? {
+              style={useLightBar && !isHomeActive ? {
                 background: 'rgba(0, 0, 0, 0.05)',
                 color: 'rgba(0, 0, 0, 0.7)',
                 fontFamily: 'Lufga',
@@ -111,7 +155,7 @@ const Header = () => {
             <Button 
               size="sm" 
               className={`rounded-full px-4 py-2 font-lufga ${
-                isListingDetailPage 
+                useLightBar 
                   ? (isAllListingsActive 
                       ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 font-medium" 
                       : "hover:bg-[#D3FC50] hover:text-black")
@@ -119,7 +163,7 @@ const Header = () => {
                       ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 font-medium" 
                       : "bg-[#FFFFFF0D] text-white hover:bg-[#D3FC50] hover:text-black")
               }`}
-              style={isListingDetailPage && !isAllListingsActive ? {
+              style={useLightBar && !isAllListingsActive ? {
                 background: 'rgba(0, 0, 0, 0.05)',
                 color: 'rgba(0, 0, 0, 0.7)',
                 fontFamily: 'Lufga',
@@ -137,7 +181,7 @@ const Header = () => {
             <Button 
               size="sm" 
               className={`rounded-full px-4 py-2 font-lufga ${
-                isListingDetailPage 
+                useLightBar 
                   ? (isHowToBuyActive 
                       ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 font-medium" 
                       : "hover:bg-[#D3FC50] hover:text-black")
@@ -145,7 +189,7 @@ const Header = () => {
                       ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 font-medium" 
                       : "bg-[#FFFFFF0D] text-white hover:bg-[#D3FC50] hover:text-black")
               }`}
-              style={isListingDetailPage && !isHowToBuyActive ? {
+              style={useLightBar && !isHowToBuyActive ? {
                 background: 'rgba(0, 0, 0, 0.05)',
                 color: 'rgba(0, 0, 0, 0.7)',
                 fontFamily: 'Lufga',
@@ -163,7 +207,7 @@ const Header = () => {
             <Button 
               size="sm" 
               className={`rounded-full px-4 py-2 font-lufga ${
-                isListingDetailPage 
+                useLightBar 
                   ? (isHowToSellActive 
                       ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 font-medium" 
                       : "hover:bg-[#D3FC50] hover:text-black")
@@ -171,7 +215,7 @@ const Header = () => {
                       ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 font-medium" 
                       : "bg-[#FFFFFF0D] text-white hover:bg-[#D3FC50] hover:text-black")
               }`}
-              style={isListingDetailPage && !isHowToSellActive ? {
+              style={useLightBar && !isHowToSellActive ? {
                 background: 'rgba(0, 0, 0, 0.05)',
                 color: 'rgba(0, 0, 0, 0.7)',
                 fontFamily: 'Lufga',
@@ -188,17 +232,17 @@ const Header = () => {
             </Button>
           </nav>
 
-          <div className="flex items-center gap-2 sm:gap-3" style={{ gap: isListingDetailPage ? '10px' : undefined }}>
+          <div className="flex items-center gap-2 sm:gap-3" style={{ gap: useLightBar ? '10px' : undefined }}>
             {/* Notification Dropdown - visible when authenticated */}
             {isAuthenticated && user && (
-              <NotificationDropdown userId={user.id} variant={isListingDetailPage ? "dark" : "light"} />
+              <NotificationDropdown userId={user.id} variant={useLightBar ? "dark" : "light"} />
             )}
             
             {/* Favorites Button - visible on all screens */}
             <button 
               onClick={handleFavoritesClick}
               className="relative rounded-full flex items-center justify-center transition-colors"
-              style={isListingDetailPage ? {
+              style={useLightBar ? {
                 width: '52px',
                 height: '52px',
                 borderRadius: '28px',
@@ -213,8 +257,8 @@ const Header = () => {
               }}
             >
               <Heart 
-                className={isListingDetailPage ? "w-5 h-5" : "w-5 h-5 sm:w-6 sm:h-6"} 
-                style={isListingDetailPage 
+                className={useLightBar ? "w-5 h-5" : "w-5 h-5 sm:w-6 sm:h-6"} 
+                style={useLightBar 
                   ? { color: 'rgba(0, 0, 0, 1)' } 
                   : isHomeActive 
                     ? { color: 'rgba(255, 255, 255, 1)' }
@@ -229,14 +273,16 @@ const Header = () => {
             </button>
             
             {/* Desktop Actions */}
-            <div className="hidden md:flex items-center gap-3" style={{ gap: isListingDetailPage ? '10px' : undefined }}>
+            <div className="hidden md:flex items-center gap-3" style={{ gap: useLightBar ? '10px' : undefined }}>
               {isAuthenticated && user ? (
                 <>
+                  <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                   <Button 
                     variant="ghost" 
                     size="icon" 
                     className="rounded-full transition-colors"
-                    style={isListingDetailPage ? {
+                    style={useLightBar ? {
                       width: '52px',
                       height: '52px',
                       borderRadius: '28px',
@@ -251,23 +297,33 @@ const Header = () => {
                       background: 'rgba(255, 255, 255, 0.05)',
                       color: 'white'
                     }}
-                    asChild
                   >
-                    <Link to="/my-listings">
-                      <User 
-                        className="w-6 h-6" 
-                        style={isListingDetailPage ? { color: 'rgba(0, 0, 0, 1)' } : {}}
-                      />
-                    </Link>
+                    <User
+                      className="w-6 h-6"
+                      style={useLightBar ? { color: 'rgba(0, 0, 0, 1)' } : {}}
+                    />
                   </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem asChild>
+                      <Link to="/my-listings">My Listings</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to="/profile">Account Details</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                      Log Out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button 
                     size="sm" 
                     className={`rounded-full font-medium flex items-center ${
-                      isListingDetailPage 
+                      useLightBar 
                         ? "" 
                         : "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90"
                     }`}
-                    style={isListingDetailPage ? {
+                    style={useLightBar ? {
                       width: '159px',
                       height: '52px',
                       borderRadius: '60px',
@@ -281,8 +337,8 @@ const Header = () => {
                     } : {}}
                     asChild
                   >
-                    <Link to="/dashboard" className="flex items-center" style={isListingDetailPage ? { gap: '10px' } : {}}>
-                      <Plus className={isListingDetailPage ? "w-4 h-4" : "w-4 h-4 mr-1"} />
+                    <Link to="/dashboard" className="flex items-center" style={useLightBar ? { gap: '10px' } : {}}>
+                      <Plus className={useLightBar ? "w-4 h-4" : "w-4 h-4 mr-1"} />
                       Add Listing
                     </Link>
                   </Button>
@@ -295,11 +351,11 @@ const Header = () => {
                   <Button
                     size="sm"
                     className={`rounded-full font-medium flex items-center ${
-                      isListingDetailPage
+                      useLightBar
                         ? ""
                         : "bg-[#FFFFFF0D] text-white hover:bg-[#D3FC50] hover:text-black"
                     }`}
-                    style={isListingDetailPage ? {
+                    style={useLightBar ? {
                       width: "159px",
                       height: "52px",
                       borderRadius: "60px",
@@ -313,8 +369,8 @@ const Header = () => {
                     } : {}}
                     asChild
                   >
-                    <Link to="/dashboard" className="flex items-center" style={isListingDetailPage ? { gap: "10px" } : {}}>
-                      <Plus className={isListingDetailPage ? "w-4 h-4" : "w-4 h-4 mr-1"} />
+                    <Link to="/dashboard" className="flex items-center" style={useLightBar ? { gap: "10px" } : {}}>
+                      <Plus className={useLightBar ? "w-4 h-4" : "w-4 h-4 mr-1"} />
                       Add Listing
                     </Link>
                   </Button>
@@ -332,7 +388,7 @@ const Header = () => {
                   variant="ghost"
                   size="icon"
                   className="md:hidden rounded-full transition-colors"
-                  style={isListingDetailPage ? {
+                  style={useLightBar ? {
                     width: '52px',
                     height: '52px',
                     borderRadius: '28px',
@@ -350,7 +406,7 @@ const Header = () => {
                 >
                   <Menu 
                     className="w-5 h-5 sm:w-6 sm:h-6" 
-                    style={isListingDetailPage ? { color: 'rgba(0, 0, 0, 1)' } : {}}
+                    style={useLightBar ? { color: 'rgba(0, 0, 0, 1)' } : {}}
                   />
                 </Button>
               </SheetTrigger>
@@ -420,11 +476,11 @@ const Header = () => {
                           to="/dashboard"
                           onClick={() => setMobileMenuOpen(false)}
                           className={`rounded-full font-medium flex items-center ${
-                            isListingDetailPage 
+                            useLightBar 
                               ? "" 
                               : "px-4 py-3 bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 gap-3"
                           }`}
-                          style={isListingDetailPage ? {
+                          style={useLightBar ? {
                             width: '159px',
                             height: '52px',
                             borderRadius: '60px',

@@ -1,14 +1,31 @@
 import { useState, useEffect, useRef } from "react";
-import { Input } from "@/components/ui/input";
-import { Search, SlidersHorizontal } from "lucide-react";
+import { Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/lib/api";
-import { formatDistanceToNow } from "date-fns";
-import { formatChatTime } from "@/lib/timeFormatter";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import type { Socket } from "socket.io-client";
 import { useAuth } from "@/hooks/useAuth";
+import { resolveListingTitle } from "@/lib/listingTitle";
+import {
+  AdminChatFilters,
+  DEFAULT_CHAT_FILTERS,
+  countActiveFilters,
+  type ChatFilters,
+} from "./AdminChatFilters";
+import { ChatResponsiblePicker } from "./ChatResponsiblePicker";
+
+/**
+ * The four states a conversation can be in, in the words the design uses.
+ * A chat "blocked" between two people is stored as FLAGGED, and CLOSED keeps
+ * its own badge rather than being folded into Active — hiding a real state
+ * would make the list lie.
+ */
+const STATUS_BADGES: Record<string, { label: string; background: string; color: string }> = {
+  ACTIVE: { label: 'Active', background: 'rgba(174, 243, 31, 0.25)', color: 'rgba(76, 110, 6, 1)' },
+  FLAGGED: { label: 'Blocked', background: 'rgba(255, 19, 19, 0.12)', color: 'rgba(200, 16, 16, 1)' },
+  ARCHIVED: { label: 'Archive', background: 'rgba(0, 0, 0, 0.06)', color: 'rgba(0, 0, 0, 0.55)' },
+  CLOSED: { label: 'Closed', background: 'rgba(0, 0, 0, 0.06)', color: 'rgba(0, 0, 0, 0.55)' },
+};
 
 interface Conversation {
   id: string;
@@ -45,19 +62,39 @@ interface Conversation {
     monitorId: string;
     viewedAt: string;
   }>;
+  // What the transform below actually produces. These were missing, so every
+  // read of a row was a type error even though the value was always there.
+  last_message?: string | null;
+  last_message_at?: string;
+  unread_count?: number;
+  is_assigned?: boolean;
+  responsibleId?: string | null;
+  responsible?: {
+    id: string;
+    first_name?: string | null;
+    last_name?: string | null;
+    profile_pic?: string | null;
+  } | null;
+  listingTitle?: string;
+  managedByEx?: boolean;
+  dealStarted?: boolean;
 }
 
 interface AdminConversationListProps {
   selectedConversationId: string | null;
   onSelectConversation: (id: string) => void;
   autoSelectUserId?: string | null;
+  /** Narrow the list to conversations this team member is responsible for. */
+  assignedTo?: string | null;
 }
 
-export const AdminConversationList = ({ 
-  selectedConversationId, 
+export const AdminConversationList = ({
+  selectedConversationId,
   onSelectConversation,
-  autoSelectUserId
+  autoSelectUserId,
+  assignedTo
 }: AdminConversationListProps) => {
+  const [filters, setFilters] = useState<ChatFilters>(DEFAULT_CHAT_FILTERS);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -266,6 +303,16 @@ export const AdminConversationList = ({
           user: chat.user,
           seller: chat.seller,
           listing: chat.listing || null, // Include listing info
+          // Who on the team owns this conversation. Distinct from monitorViews,
+          // which only records who has looked at it.
+          responsibleId: chat.responsibleId || null,
+          responsible: chat.responsible || null,
+          // The listing's name heads each row; the tag rides along with it.
+          listingTitle: chat.listing ? resolveListingTitle(chat.listing, '') : '',
+          managedByEx: chat.listing?.managed_by_ex === true,
+          // Set only once someone pressed "Start Deal Process" and confirmed
+          // the dialog that follows — the API is called from that confirm.
+          dealStarted: chat.isOffered === true,
           last_message: lastMessage?.content || null,
           last_message_at: lastMessage?.createdAt || chat.updatedAt,
           unread_count: unreadCount,
@@ -293,15 +340,42 @@ export const AdminConversationList = ({
   };
 
   const filteredConversations = conversations.filter((conv: any) => {
+    // Arriving from a team member's "Managed Chats" card: show only what that
+    // card counted.
+    if (assignedTo && conv.responsibleId !== assignedTo) return false;
+
+    // Archived conversations are hidden unless they are asked for, so the list
+    // shows live work by default.
+    if (filters.archived === 'unarchived' && conv.status === 'ARCHIVED') return false;
+    if (filters.archived === 'archived' && conv.status !== 'ARCHIVED') return false;
+
+    if (filters.responsible === 'mine' && conv.responsibleId !== currentUserId) return false;
+    if (filters.responsible === 'unassigned' && conv.responsibleId) return false;
+    if (
+      filters.responsible !== 'all' &&
+      filters.responsible !== 'mine' &&
+      filters.responsible !== 'unassigned' &&
+      conv.responsibleId !== filters.responsible
+    ) {
+      return false;
+    }
+
+    if (filters.managedByEx === 'yes' && !conv.managedByEx) return false;
+    if (filters.managedByEx === 'no' && conv.managedByEx) return false;
+
+    if (filters.dealStarted === 'yes' && !conv.dealStarted) return false;
+    if (filters.dealStarted === 'no' && conv.dealStarted) return false;
+
+    const searchLower = searchQuery.trim().toLowerCase();
+    if (!searchLower) return true;
+
     const buyerName = `${conv.user?.first_name || ''} ${conv.user?.last_name || ''}`.toLowerCase();
     const sellerName = `${conv.seller?.first_name || ''} ${conv.seller?.last_name || ''}`.toLowerCase();
-    const listingInfo = conv.listing?.portfolioLink?.toLowerCase() || '';
-    const searchLower = searchQuery.toLowerCase();
-    
+
     return (
       buyerName.includes(searchLower) ||
       sellerName.includes(searchLower) ||
-      listingInfo.includes(searchLower) ||
+      conv.listingTitle?.toLowerCase().includes(searchLower) ||
       conv.user?.email?.toLowerCase().includes(searchLower) ||
       conv.seller?.email?.toLowerCase().includes(searchLower) ||
       conv.last_message?.toLowerCase().includes(searchLower)
@@ -312,7 +386,7 @@ export const AdminConversationList = ({
     <div 
       className={`
         ${selectedConversationId ? 'hidden lg:flex' : 'flex'} 
-        flex-col w-full md:w-[280px] lg:w-[300px] xl:w-[320px] flex-shrink-0
+        flex-col w-full md:w-[360px] lg:w-[400px] xl:w-[440px] flex-shrink-0
       `}
       style={{
         height: '100%',
@@ -374,13 +448,27 @@ export const AdminConversationList = ({
                 letterSpacing: '0%',
               }}
             />
-            <SlidersHorizontal className="w-3.5 h-3.5 sm:w-4 sm:h-4" style={{ color: 'rgba(0, 0, 0, 0.5)', flexShrink: 0, cursor: 'pointer' }} />
           </div>
+
+          {/* The filters sit beside the search box, not inside it — there are
+              four of them and the column is narrow. */}
+          <AdminChatFilters filters={filters} onChange={setFilters} />
         </div>
       </div>
 
+      {/* Column headings, as in the design: what the chat is, where it stands,
+          and who on the team answers for it. */}
+      <div
+        className="grid items-center px-[15px] pb-2 text-xs text-muted-foreground"
+        style={{ gridTemplateColumns: 'minmax(0,1fr) 78px 92px', gap: '8px' }}
+      >
+        <span>Chats</span>
+        <span>Status</span>
+        <span>Responsible</span>
+      </div>
+
       {/* Conversation List */}
-      <div className="flex-1 overflow-y-auto min-h-0 admin-chat-scrollbar" style={{ padding: '0 15px', boxSizing: 'border-box' }}>
+      <div className="flex-1 overflow-y-auto min-h-0 admin-chat-scrollbar" style={{ padding: '0 15px 15px', boxSizing: 'border-box' }}>
         {loading ? (
           <div className="w-full bg-background flex items-center justify-center h-full">
             <div className="text-center">
@@ -389,207 +477,109 @@ export const AdminConversationList = ({
             </div>
           </div>
         ) : filteredConversations.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">
-            <p>No conversations yet</p>
+          <div className="p-8 text-center text-muted-foreground text-sm">
+            <p>{countActiveFilters(filters) > 0 || searchQuery ? 'No chats match these filters' : 'No conversations yet'}</p>
           </div>
         ) : (
           filteredConversations.map((conv: any) => {
             const buyerName = `${conv.user?.first_name || ''} ${conv.user?.last_name || ''}`.trim() || 'Buyer';
             const sellerName = `${conv.seller?.first_name || ''} ${conv.seller?.last_name || ''}`.trim() || 'Seller';
-            
-            // Get listing title if available
-            const listingTitle = conv.listing?.portfolioLink 
-              ? `Listing: ${conv.listing.portfolioLink.substring(0, 30)}...` 
-              : `${buyerName} ↔ ${sellerName}`;
-            
-            // Use the other user's name for display (similar to user chat)
-            const otherUserName = listingTitle;
-            const otherUserAvatar = conv.listing?.image_url || conv.user?.profile_pic || '';
-            
-            // Format timestamp using formatChatTime
-            const lastMessageAt = conv.last_message_at || conv.updatedAt || conv.createdAt;
-            
-            // Truncate message
-            const getMessagePreview = (text: string | null, maxLength: number = 40) => {
+            const heading = conv.listingTitle || `${buyerName} ↔ ${sellerName}`;
+            const avatar = conv.user?.profile_pic || conv.seller?.profile_pic || '';
+
+            const getMessagePreview = (text: string | null, maxLength: number = 34) => {
               if (!text) return 'No messages yet';
               try {
                 const parsed = JSON.parse(text);
-                if (parsed?.type === 'missed_video_call') {
-                  return 'Missed video call';
-                }
-                if (parsed?.type === 'video_call_completed') {
-                  return 'Video call ended';
-                }
-              } catch (e) {
-                // Not JSON, continue
+                if (parsed?.type === 'missed_video_call') return 'Missed video call';
+                if (parsed?.type === 'video_call_completed') return 'Video call ended';
+              } catch {
+                // Not JSON, show it as written.
               }
-              return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+              return text.length > maxLength ? `${text.substring(0, maxLength)}...` : text;
             };
-            
-            const lastMessage = getMessagePreview(conv.last_message);
+
             const isUnread = conv.unread_count > 0 && selectedConversationId !== conv.id;
-            
+            const selected = selectedConversationId === conv.id;
+            const badge = STATUS_BADGES[conv.status] ?? STATUS_BADGES.ACTIVE;
+
             return (
               <div
                 key={conv.id}
                 onClick={() => onSelectConversation(conv.id)}
-                className="w-full flex items-center transition-colors cursor-pointer group relative h-[70px] lg:h-[60px] xl:h-[70px]"
+                className="grid items-center cursor-pointer rounded-lg transition-colors"
                 style={{
-                  paddingTop: '10px',
-                  paddingRight: '12px',
-                  paddingBottom: '10px',
-                  paddingLeft: '12px',
-                  gap: '10px',
-                  backgroundColor: selectedConversationId === conv.id ? 'rgba(239, 239, 239, 1)' : 'transparent',
+                  gridTemplateColumns: 'minmax(0,1fr) 78px 92px',
+                  gap: '8px',
+                  padding: '10px 8px',
+                  backgroundColor: selected ? 'rgba(239, 239, 239, 1)' : 'transparent',
                 }}
                 onMouseEnter={(e) => {
-                  if (selectedConversationId !== conv.id) {
-                    e.currentTarget.style.backgroundColor = 'rgba(239, 239, 239, 1)';
-                  }
+                  if (!selected) e.currentTarget.style.backgroundColor = 'rgba(246, 246, 246, 1)';
                 }}
                 onMouseLeave={(e) => {
-                  if (selectedConversationId !== conv.id) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
+                  if (!selected) e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                {/* First Section: Profile Image with Status */}
-                <div style={{ position: 'relative', flexShrink: 0 }}>
-                  <Avatar 
-                    className="w-11 h-11 lg:w-10 lg:h-10 xl:w-11 xl:h-11"
-                    style={{
-                      borderRadius: '20px',
-                    }}
-                  >
-                    <AvatarImage src={otherUserAvatar} />
-                    <AvatarFallback className="text-sm lg:text-[11px] xl:text-sm">
-                      {otherUserName.charAt(0).toUpperCase() || 'U'}
+                {/* Chats */}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Avatar className="h-9 w-9 flex-shrink-0">
+                    <AvatarImage src={avatar || undefined} />
+                    <AvatarFallback className="text-[11px]">
+                      {heading.substring(0, 2).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                </div>
-
-                {/* Second Section: User Name and Last Message */}
-                <div
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <h4
-                      className="text-base lg:text-xs xl:text-base text-black m-0 overflow-hidden text-ellipsis whitespace-nowrap"
-                      style={{
-                        fontFamily: 'Lufga',
-                        fontWeight: 600,
-                        lineHeight: '100%',
-                        letterSpacing: '0%',
-                      }}
-                    >
-                      {otherUserName}
-                    </h4>
-                    {conv.is_assigned && (
-                      <div
-                        style={{
-                          paddingTop: '2px',
-                          paddingRight: '10px',
-                          paddingBottom: '2px',
-                          paddingLeft: '10px',
-                          borderRadius: '40px',
-                          backgroundColor: 'rgba(34, 191, 21, 0.1)',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                          height: '18px',
-                        }}
+                  <div className="min-w-0 flex flex-col">
+                    <div className="flex items-center gap-1 min-w-0">
+                      <span
+                        className={`truncate text-[13px] ${isUnread ? 'font-semibold text-black' : 'font-medium text-black'}`}
+                        title={heading}
                       >
+                        {heading}
+                      </span>
+                      {conv.managedByEx && (
+                        <span title="Managed by EX" className="flex-shrink-0 text-[11px]">🤝</span>
+                      )}
+                      {conv.dealStarted && (
                         <span
-                          className="text-xs lg:text-[10px] xl:text-xs text-center"
-                          style={{
-                            fontFamily: 'Lufga',
-                            fontWeight: 500,
-                            lineHeight: '100%',
-                            letterSpacing: '0%',
-                            color: 'rgba(34, 191, 21, 1)',
-                          }}
+                          title="Deal process started"
+                          className="flex-shrink-0 rounded-full bg-accent px-1.5 text-[9px] font-semibold text-black"
                         >
-                          Assigned
+                          Deal
                         </span>
-                      </div>
-                    )}
+                      )}
+                    </div>
+                    <span className="truncate text-[11px] text-black/60">
+                      {buyerName} ←→ {sellerName}
+                    </span>
+                    <span className="truncate text-[11px] text-black/40">
+                      {getMessagePreview(conv.last_message)}
+                    </span>
                   </div>
-                  <p
-                    className="text-xs lg:text-[10px] xl:text-xs m-0 overflow-hidden text-ellipsis whitespace-nowrap"
-                    style={{
-                      fontFamily: 'Lufga',
-                      fontWeight: 500,
-                      lineHeight: '100%',
-                      letterSpacing: '0%',
-                      color: isUnread ? 'rgba(0, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.6)',
-                    }}
-                  >
-                    {lastMessage}
-                  </p>
+                  {isUnread && (
+                    <span className="ml-auto flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-black">
+                      {conv.unread_count}
+                    </span>
+                  )}
                 </div>
 
-                {/* Third Section: Time and Notification Badge */}
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'flex-end',
-                    gap: '4px',
-                    flexShrink: 0,
-                  }}
-                >
+                {/* Status */}
+                <div>
                   <span
-                    className="text-xs lg:text-[9px] xl:text-xs text-black/60 whitespace-nowrap"
-                    style={{
-                      fontFamily: 'Lufga',
-                      fontWeight: 500,
-                      lineHeight: '100%',
-                      letterSpacing: '0%',
-                    }}
+                    className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium"
+                    style={{ backgroundColor: badge.background, color: badge.color }}
                   >
-                    {lastMessageAt ? formatChatTime(lastMessageAt) : 'No messages'}
+                    {badge.label}
                   </span>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                  >
-                    {isUnread && (
-                      <div
-                        style={{
-                          width: '18px',
-                          height: '18px',
-                          borderRadius: '100px',
-                          background: 'linear-gradient(168.64deg, #FE4A23 7.17%, #FF4590 91.64%)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontFamily: 'Lufga',
-                            fontWeight: 600,
-                            fontSize: '9px',
-                            lineHeight: '100%',
-                            letterSpacing: '0%',
-                            color: 'rgba(250, 250, 250, 1)',
-                          }}
-                        >
-                          {conv.unread_count}
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                </div>
+
+                {/* Responsible */}
+                <div onClick={(event) => event.stopPropagation()}>
+                  <ChatResponsiblePicker
+                    chatId={conv.id}
+                    responsible={conv.responsible}
+                    onAssigned={() => fetchConversations(false)}
+                  />
                 </div>
               </div>
             );

@@ -9,14 +9,16 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useAccountQuestions } from "@/hooks/useAccountQuestions";
 import { Facebook, Instagram, Twitter, Music, Pin, Linkedin, Youtube } from "lucide-react";
 import { toast } from "sonner";
+import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 
 interface AccountsStepProps {
   formData?: any;
   onNext: (data: any) => void;
   onBack: () => void;
+  onPersist?: (data: any) => void;
 }
 
-export const AccountsStep = ({ formData: parentFormData, onNext, onBack }: AccountsStepProps) => {
+export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersist }: AccountsStepProps) => {
   const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
   const { data: questions = [], isLoading: questionsLoading } = useAccountQuestions();
   const [formData, setFormData] = useState<Record<string, { url: string; followers: string }>>(() => {
@@ -39,6 +41,8 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack }: Accou
     return {};
   });
 
+  usePersistOnUnmount(onPersist, () => ({ socialAccounts: formData, socialAccountQuestions: questionAnswers }));
+
   useEffect(() => {
     if (parentFormData?.socialAccounts) {
       const updated: Record<string, { url: string; followers: string }> = {};
@@ -57,7 +61,19 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack }: Accou
 
   const validateForm = (): { isValid: boolean; errors: string[] } => {
     const errors: string[] = [];
-    
+
+    // Required account questions (admin-marked) must be answered.
+    questions.forEach((question: any) => {
+      if (question?.required === true) {
+        const ans = questionAnswers[question.id];
+        const empty =
+          !ans ||
+          (typeof ans === "string" && ans.trim() === "") ||
+          (Array.isArray(ans) && ans.length === 0);
+        if (empty) errors.push(`${question.question} is required`);
+      }
+    });
+
     // Social accounts are optional, but validate format if provided
     Object.keys(formData).forEach((platform) => {
       const accountData = formData[platform];
@@ -126,7 +142,19 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack }: Accou
             className="bg-muted/50"
           />
         );
-      
+
+      case "URL":
+        return (
+          <Input
+            type="url"
+            inputMode="url"
+            value={value}
+            onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
+            placeholder="https://instagram.com/yourname"
+            className="bg-muted/50"
+          />
+        );
+
       case "TEXTAREA":
         return (
           <Textarea

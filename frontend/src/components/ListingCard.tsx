@@ -1,4 +1,5 @@
-import { Heart, Share2 } from "lucide-react";
+import { Heart, Share2, Crown, Lock } from "lucide-react";
+import { LISTING_TITLE_COLOR } from "@/lib/listingTitle";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import FlagIcon from "./FlagIcon";
@@ -9,6 +10,8 @@ import { apiClient } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ExIcon from "@/assets/Ex icon.svg";
+import ShareListingDialog from "@/components/ShareListingDialog";
+import ListingImage from "@/components/ListingImage";
 
 interface ListingCardProps {
   image: string;
@@ -24,9 +27,15 @@ interface ListingCardProps {
   netProfit?: string;
   revenue?: string;
   managedByEx?: boolean;
+  /** Seller booked the Premium package — shown as a badge on the listing. */
+  isPremium?: boolean;
   listingId?: string;
   sellerId?: string;
   lockRedirectTo?: string;
+  /** Photo is a blurred preview — overlay the unlock prompt. */
+  imageLocked?: boolean;
+  /** Which door is shut: no account yet, or the agreement not accepted. */
+  imageLockType?: string | null;
 }
 const ListingCard = ({
   image,
@@ -42,13 +51,17 @@ const ListingCard = ({
   netProfit = "N/A",
   revenue = "N/A",
   managedByEx = false,
+  isPremium = false,
   listingId,
   sellerId,
   lockRedirectTo = "/register",
+  imageLocked = false,
+  imageLockType = null,
 }: ListingCardProps) => {
   const [isFavorite, setIsFavorite] = useState(false);
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
@@ -131,41 +144,15 @@ const ListingCard = ({
     }
   };
 
-  const handleShare = async () => {
-    const listingUrl = listingId 
-      ? `${window.location.origin}/listing/${listingId}`
-      : window.location.href;
-    
-    const shareData = {
-      title: name || "Business Listing",
-      text: description || `Check out this business listing: ${name}`,
-      url: listingUrl,
-    };
+  const shareUrl = listingId
+    ? `${window.location.origin}/listing/${listingId}`
+    : window.location.href;
 
-    // Try native share API first (mobile/desktop with share support)
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-        toast.success("Shared successfully");
-      } catch (err: any) {
-        // User canceled or error occurred
-        if (err.name !== "AbortError") {
-          console.error("Share error:", err);
-          // Fallback to clipboard
-          await navigator.clipboard.writeText(listingUrl);
-          toast.success("Link copied to clipboard");
-        }
-      }
-    } else {
-      // Fallback: Copy to clipboard
-      try {
-        await navigator.clipboard.writeText(listingUrl);
-        toast.success("Link copied to clipboard!");
-      } catch (err) {
-        console.error("Failed to copy to clipboard:", err);
-        toast.error("Failed to copy link. Please copy manually.");
-      }
-    }
+  const handleShare = (event: React.MouseEvent) => {
+    // The whole card is clickable — keep the click from opening the listing.
+    event.preventDefault();
+    event.stopPropagation();
+    setShareOpen(true);
   };
 
   const handleUnlockClick = () => {
@@ -248,7 +235,7 @@ const ListingCard = ({
 
   console.log(image);
   return (
-    <div className="group bg-white relative w-full rounded-lg shadow-sm" style={{ minHeight: '590.84px', height: 'auto' }}>
+    <div className="group bg-white relative w-full rounded-lg shadow-sm flex flex-col h-full" style={{ minHeight: '590.84px' }}>
       <div className="relative overflow-hidden bg-muted w-full" style={{ height: '285px', borderRadius: '20px' }}>
         {listingLink ? (
           <Link
@@ -257,28 +244,48 @@ const ListingCard = ({
             className="block w-full h-full"
             style={{ borderRadius: '20px' }}
           >
-            <img
+            <ListingImage
               src={image}
               alt={name}
               className="w-full h-full object-cover"
-              loading="lazy"
-              decoding="async"
               sizes="(max-width: 768px) 100vw, 50vw"
               style={{ borderRadius: '20px', display: 'block' }}
+              blurred={imageLocked}
             />
           </Link>
         ) : (
-          <img
+          <ListingImage
             src={image}
             alt={name}
             className="w-full h-full object-cover"
-            loading="lazy"
-            decoding="async"
             sizes="(max-width: 768px) 100vw, 50vw"
             style={{ borderRadius: '20px', display: 'block' }}
+            blurred={imageLocked}
           />
         )}
-        <div className="absolute top-4 right-4 flex flex-col gap-2">
+        {/* The server sends a blurred preview until the viewer unlocks it. */}
+        {imageLocked && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleUnlockClick();
+            }}
+            className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-black/25 border-0 cursor-pointer"
+            style={{ borderRadius: '20px' }}
+          >
+            <Lock className="w-4 h-4 text-white" />
+            {/* Telling someone who has already registered to register reads as
+                a broken page; what they are missing is the agreement. */}
+            <span className="text-white text-sm font-medium underline">
+              {imageLockType === 'CONFIDENTIAL_AGREEMENT'
+                ? 'Accept Agreement To Unlock'
+                : 'Register To Unlock'}
+            </span>
+          </button>
+        )}
+        <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
           <button 
             onClick={handleFavorite}
             disabled={isTogglingFavorite || !listingId}
@@ -298,8 +305,34 @@ const ListingCard = ({
           >
             <Share2 className="w-5 h-5 text-foreground" />
           </button>
+          <ShareListingDialog
+            open={shareOpen}
+            onOpenChange={setShareOpen}
+            url={shareUrl}
+            title={name || "Business Listing"}
+          />
         </div>
         <div className="absolute bottom-4 left-4 flex gap-2">
+          {isPremium && (
+            <Badge
+              variant="dark"
+              className="border-0 shadow-lg flex items-center justify-center gap-1.5"
+              style={{
+                height: "36px",
+                borderRadius: "60px",
+                padding: "7px 14px",
+                backdropFilter: "blur(44px)",
+              }}
+            >
+              <Crown className="w-4 h-4" />
+              <span
+                className="font-lufga"
+                style={{ fontWeight: 500, fontSize: "14px", lineHeight: "140%" }}
+              >
+                Premium
+              </span>
+            </Badge>
+          )}
           {managedByEx && (
             <Link to="/managed-by-ex">
               <Badge
@@ -382,7 +415,7 @@ const ListingCard = ({
         </div>
       </div>
       
-      <div className="flex flex-col w-full" style={{ marginTop: '20px', paddingLeft: '12px', paddingRight: '12px', gap: '16px', paddingBottom: '20px' }}>
+      <div className="flex flex-col w-full flex-1" style={{ marginTop: '20px', paddingLeft: '12px', paddingRight: '12px', gap: '16px', paddingBottom: '20px' }}>
         <div className="flex flex-col" style={{ gap: '6px' }}>
           <h3 
             className="font-lufga text-sm md:text-base"
@@ -393,7 +426,7 @@ const ListingCard = ({
               fontSize: '16px',
               lineHeight: '140%',
               letterSpacing: '0%',
-              color: 'rgba(0, 0, 0, 1)',
+              color: LISTING_TITLE_COLOR,
               width: '100%',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -522,7 +555,7 @@ const ListingCard = ({
           </div>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex gap-3 mt-auto">
           <Button 
             className="bg-black text-white rounded-full font-semibold hover:bg-black text-xs md:text-sm"
             onClick={handleContactSeller}
@@ -550,9 +583,15 @@ const ListingCard = ({
               'Contact Seller'
             )}
           </Button>
-          <Button 
-            className="font-lufga font-medium rounded-full text-black text-xs md:text-sm"
-            onClick={() => listingId && navigate(`/listing/${listingId}`)}
+          {/* A real link, not a button with a navigate() — that is what makes
+              right-click, Ctrl+click and middle-click open it in a new tab. */}
+          <Link
+            to={listingId ? `/listing/${listingId}` : "#"}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!listingId) event.preventDefault();
+            }}
+            className="font-lufga font-medium rounded-full text-black text-xs md:text-sm inline-flex items-center justify-center"
             style={{
               width: '226.5px',
               height: '44px',
@@ -569,7 +608,7 @@ const ListingCard = ({
             }}
           >
             View Listing
-          </Button>
+          </Link>
         </div>
       </div>
     </div>

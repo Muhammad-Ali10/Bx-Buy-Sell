@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,25 @@ export default function AdminSettings() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState<"profile" | "security" | "activity">("profile");
+  // A team member's "Activity Log" card links here with ?tab=activity&actor=<id>,
+  // so the page opens on the right tab showing the right person.
+  const [searchParams] = useSearchParams();
+  const actorId = searchParams.get("actor") || user?.id || null;
+  const [activeTab, setActiveTab] = useState<"profile" | "security" | "activity">(
+    searchParams.get("tab") === "activity" ? "activity" : "profile",
+  );
+
+  const { data: activityLogs = [], isLoading: activityLoading } = useQuery({
+    queryKey: ["activity-log", actorId],
+    enabled: activeTab === "activity" && Boolean(actorId),
+    queryFn: async () => {
+      const response = await apiClient.getActivityLogByUser(actorId as string);
+      if (!response.success) return [];
+      const payload = response.data as any;
+      const rows = Array.isArray(payload) ? payload : (payload?.data ?? []);
+      return Array.isArray(rows) ? rows : [];
+    },
+  });
   const [isEditing, setIsEditing] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [formData, setFormData] = useState({
@@ -548,11 +566,54 @@ export default function AdminSettings() {
                 )}
 
                 {activeTab === "activity" && (
-                  <div className="space-y-8">
-                    <h3 className="text-2xl font-bold text-black font-lufga mb-6">Activity Logs</h3>
-                    <div className="text-center py-12 text-gray-500 font-lufga">
-                      <p>No activity logs available</p>
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="text-2xl font-bold text-black font-lufga">Activity Logs</h3>
+                      {actorId && actorId !== user?.id && (
+                        <span className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-sm">
+                          Showing one team member
+                          <button
+                            type="button"
+                            className="text-muted-foreground hover:text-foreground"
+                            onClick={() => navigate("/admin/settings")}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      )}
                     </div>
+
+                    {/* This panel used to be a hardcoded "No activity logs
+                        available", so a team member's Activity Log button led
+                        to an empty page whatever they had done. */}
+                    {activityLoading ? (
+                      <div className="flex items-center justify-center py-12 gap-2 text-gray-500">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        Loading activity...
+                      </div>
+                    ) : activityLogs.length === 0 ? (
+                      <div className="text-center py-12 text-gray-500 font-lufga">
+                        <p>No activity recorded yet</p>
+                      </div>
+                    ) : (
+                      <ul className="flex flex-col divide-y divide-border">
+                        {activityLogs.map((log: any) => (
+                          <li key={log.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-3">
+                            <span className="text-sm font-medium text-foreground">
+                              {log.message || log.action}
+                            </span>
+                            {log.entityType && (
+                              <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                                {log.entityType}
+                              </span>
+                            )}
+                            <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">
+                              {new Date(log.createdAt).toLocaleString("en-US")}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
               </div>

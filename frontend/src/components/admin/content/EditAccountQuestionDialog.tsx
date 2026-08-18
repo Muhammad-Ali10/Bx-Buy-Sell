@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useUpdateAccountQuestion } from "@/hooks/useUpdateAccountQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 import { toast } from "sonner";
 
 interface AccountQuestion {
@@ -14,6 +15,7 @@ interface AccountQuestion {
   question: string;
   answer_type: string;
   option?: string[];
+  required?: boolean | null;
 }
 
 interface EditAccountQuestionDialogProps {
@@ -25,6 +27,7 @@ interface EditAccountQuestionDialogProps {
 const QUESTION_TYPES = [
   { value: "TEXT", label: "Text" },
   { value: "NUMBER", label: "Number" },
+  { value: "URL", label: "Link" },
   { value: "DATE", label: "Date" },
   { value: "SELECT", label: "Dropdown" },
   { value: "CHECKBOX", label: "Checkbox (Multiple)" },
@@ -37,6 +40,7 @@ export const EditAccountQuestionDialog = ({ open, onOpenChange, question }: Edit
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState(""); // Options field for SELECT type
+  const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateAccountQuestion();
 
   useEffect(() => {
@@ -53,6 +57,7 @@ export const EditAccountQuestionDialog = ({ open, onOpenChange, question }: Edit
       } else {
         setOptions("");
       }
+      setRequired(question.required !== false);
     }
   }, [question]);
 
@@ -79,6 +84,7 @@ export const EditAccountQuestionDialog = ({ open, onOpenChange, question }: Edit
         question: questionText.trim(),
         answer_type: questionType,
         options: optionsArray,
+        required,
       },
       {
         onSuccess: () => {
@@ -157,6 +163,7 @@ export const EditAccountQuestionDialog = ({ open, onOpenChange, question }: Edit
               <p className="text-xs text-gray-500">Enter options separated by commas (e.g., "Yes, No" or "Option 1, Option 2")</p>
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

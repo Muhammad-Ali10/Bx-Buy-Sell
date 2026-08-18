@@ -10,6 +10,10 @@ import { VideoCall } from "./VideoCall";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { apiClient } from "@/lib/api";
 import { getCachedChatRoom, setCachedChatRoom } from "@/lib/chatRoomCache";
+import { getChatListingTitle } from "@/lib/chatListing";
+import { isSystemMessage, systemMessageText, POLICY_SENDER_NAME } from "@/lib/systemMessages";
+import ChatWelcomeCards from "@/components/chat/ChatWelcomeCards";
+import StartDealProcessDialog from "@/components/chat/StartDealProcessDialog";
 import { formatChatTime, formatAdminMessageTime } from "@/lib/timeFormatter";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -18,7 +22,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import chatSearchIcon from "@/assets/chatsearch.svg";
 import videoCallIcon from "@/assets/vedio call.svg";
-import stopIcon from "@/assets/stop.svg";
 import fileIcon from "@/assets/file.svg";
 import sendIcon from "@/assets/send.svg";
 
@@ -53,6 +56,9 @@ interface ChatWindowProps {
 export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, listingId, refreshConversations }: ChatWindowProps) => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
+  // Platform team only: admins and the monitors who police conversations.
+  const isModerator =
+    currentUser?.role === 'ADMIN' || currentUser?.role === 'MONITER';
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [chatRoom, setChatRoom] = useState<any>(null);
@@ -80,8 +86,11 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   const [isChatPinned, setIsChatPinned] = useState(false);
   const [hasConfidentialAccess, setHasConfidentialAccess] = useState<boolean | null>(null);
   const [isUpdatingConfidentialAccess, setIsUpdatingConfidentialAccess] = useState(false);
+  // This buyer has asked and is waiting on the seller's decision.
+  const [accessRequestPending, setAccessRequestPending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [startDealOpen, setStartDealOpen] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const windowIncomingCallHandlerRef = useRef<(event: Event) => void | null>(null);
@@ -242,7 +251,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
 
       // Fast path: if this conversation was opened before, paint its cached
       // messages instantly (no spinner) and refresh in the background.
-      const cachedChat = getCachedChatRoom(userId, sellerId);
+      const cachedChat = getCachedChatRoom(conversationId);
       const seeded = !!cachedChat?.id;
 
       // Clear per-conversation refs either way so nothing leaks between chats.
@@ -273,15 +282,16 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
 
       try {
       // CRITICAL: Load chat room FIRST and wait for it to complete
-        // Load merged conversation (no listingId - all messages with this seller together)
+        // Scoped to this listing. Passing nothing here used to pull every
+        // conversation this pair has ever had into one thread.
         // When seeded, skip the internal clear+delay so cached messages don't flash.
-        const loadedChatRoom = await loadChatRoomData(userId, sellerId, undefined, { skipClear: seeded });
+        const loadedChatRoom = await loadChatRoomData(userId, sellerId, listingId, { skipClear: seeded });
 
         if (!mounted) return;
 
         if (loadedChatRoom?.id) {
           // Fresh data in — cache it for next time.
-          setCachedChatRoom(userId, sellerId, loadedChatRoom);
+          setCachedChatRoom(conversationId, loadedChatRoom);
           console.log('✅ Chat room loaded, connecting socket...', { chatRoomId: loadedChatRoom.id });
           setIsLoadingChatRoom(false);
           // CRITICAL: Ensure chatRoom state is set before connecting socket
@@ -352,7 +362,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       const propsPair = [userId, sellerId].sort().join("-");
       const roomPair = [chatRoom.userId, chatRoom.sellerId].sort().join("-");
       if (propsPair === roomPair) {
-        setCachedChatRoom(userId, sellerId, { ...chatRoom, messages });
+        setCachedChatRoom(conversationId, { ...chatRoom, messages });
       }
     }
   }, [messages, chatRoom, userId, sellerId]);
@@ -505,10 +515,20 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   // Load chat room data from API - returns the loaded chat room
   const loadChatRoomData = async (userId: string, sellerId: string, listingId?: string, opts?: { skipClear?: boolean }): Promise<any> => {
     try {
-      // Load merged conversation with this seller (ignore listingId - all messages together)
-      console.log('📥 Loading chat room data:', { userId, sellerId });
-      const response = await apiClient.getChatRoom(userId, sellerId);
-      
+      console.log('📥 Loading chat room data:', { conversationId, userId, sellerId, listingId });
+      /**
+       * By conversation id whenever we have one.
+       *
+       * Asking by (buyer, seller, listing) cannot identify a conversation
+       * started before chats were tied to a listing — there is no listing to
+       * filter on, so the server answers with the pair's newest chat instead,
+       * which is the wrong-listing bug all over again for exactly those older
+       * threads. The id is unambiguous.
+       */
+      const response = conversationId
+        ? await apiClient.getChatById(conversationId)
+        : await apiClient.getChatRoom(userId, sellerId, listingId);
+
       // Handle successful response - data can be null if chat room doesn't exist
       if (response.success) {
         // Extract chat data - handle both wrapped and direct responses
@@ -517,7 +537,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         // If no chat room exists (response.data is null or chat is null/undefined)
         if (!chat || !chat.id) {
           console.log('🆕 Chat room not found, creating new one with seller:', sellerId);
-          const createResponse = await apiClient.createChatRoom(userId, sellerId);
+          // With the listing, or the new room is filed under no listing at all
+          // — and the next visit, unable to find it by listing, would make
+          // another one.
+          const createResponse = await apiClient.createChatRoom(userId, sellerId, listingId);
           if (createResponse.success && createResponse.data) {
             const newChat = (createResponse.data as any).data || createResponse.data;
             if (newChat && newChat.id) {
@@ -632,6 +655,9 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         read: msg.read || false,
         type: msg.type || 'TEXT',
         fileUrl: msg.fileUrl || null,
+        // Carries which notice this is and who was blocked; without it the
+        // reader cannot be given the right wording.
+        metadata: msg.metadata ?? null,
         // CRITICAL: Include sender information if available (for admin messages and others)
         // For admin messages, ensure role is set even if not in sender object
         sender: msg.sender ? {
@@ -641,10 +667,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
           email: msg.sender.email || '',
           profile_pic: msg.sender.profile_pic || null,
           role: (msg.sender.role as 'USER' | 'SELLER' | 'ADMIN' | 'MONITER') || (msg.type === 'ADMIN' ? 'ADMIN' : msg.type === 'MONITER' ? 'MONITER' : undefined)
-        } : (msg.type === 'ADMIN' || msg.type === 'MONITER' ? {
-          // If no sender but type is ADMIN, create a minimal sender object
+        } : (msg.type === 'ADMIN' || msg.type === 'MONITER' || msg.type === 'SYSTEM' ? {
+          // No sender at all on a SYSTEM row — the platform posted it.
           id: msg.senderId,
-          first_name: 'Admin',
+          first_name: msg.type === 'SYSTEM' ? POLICY_SENDER_NAME : 'Admin',
           last_name: '',
           email: '',
           profile_pic: null,
@@ -1304,6 +1330,11 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                   read: message.read || false,
                   type: message.type || 'TEXT',
                   fileUrl: message.fileUrl || null,
+                  // A platform notice carries no content — its wording is
+                  // chosen from the metadata when it is read. Dropping this
+                  // here made the notice arrive blank and only fill in after
+                  // a refresh.
+                  metadata: message.metadata ?? null,
                   sender: message.sender || null
                 };
                 return updated; // Return immediately after replacement - CRITICAL: prevent duplicate
@@ -1336,6 +1367,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                 read: message.read || false,
                 type: message.type || 'TEXT',
                 fileUrl: message.fileUrl || null,
+                metadata: message.metadata ?? null,
                 sender: message.sender || null
               };
               return updated; // Return immediately after replacement - CRITICAL: prevent duplicate
@@ -1450,6 +1482,9 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             read: message.read || false,
             type: message.type || 'TEXT',
             fileUrl: message.fileUrl || null,
+            // Platform notices arrive with no content; their wording is picked
+            // from this when read. This is the path a live notice takes.
+            metadata: message.metadata ?? null,
             sender: message.sender || null
           }];
         });
@@ -1767,6 +1802,33 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
 
     console.log('🔍 Filtered messages:', filteredMessages);
     console.log('🔍 Messages:', messages);
+  /**
+   * Ask the platform to begin the assisted deal process.
+   *
+   * The notice lands in the conversation, so the other party sees it happened
+   * without needing a separate notification, and it is still there tomorrow.
+   */
+  const handleStartDealProcess = async () => {
+    const chatId = chatRoom?.id || conversationId;
+    if (!chatId) return;
+    try {
+      const response: any = await apiClient.startDealProcess(chatId);
+      if (response?.success === false) {
+        toast.error(response?.error || 'Could not start the deal process.');
+        return;
+      }
+      toast.success('The deal process has started. Our team will be in touch.');
+      // Pull the thread back so the notice appears without a refresh; the
+      // socket does not carry messages the server posted on its own.
+      const refreshed = await loadChatRoomData(userId, sellerId, listingId, {
+        skipClear: true,
+      });
+      if (Array.isArray(refreshed?.messages)) loadMessages(refreshed.messages);
+    } catch {
+      toast.error('Could not start the deal process. Please try again.');
+    }
+  };
+
   const handleSearch = () => {
     setIsSearchOpen(true);
   };
@@ -2297,10 +2359,13 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       buyerIdForAccess,
     );
     if (response.success && response.data) {
-      setHasConfidentialAccess(Boolean((response.data as any).hasAccess));
+      const data = response.data as any;
+      setHasConfidentialAccess(Boolean(data.hasAccess));
+      setAccessRequestPending(Boolean(data.isPending));
       return;
     }
     setHasConfidentialAccess(null);
+    setAccessRequestPending(false);
   }, [isCurrentUserSeller, listingIdForAccess, buyerIdForAccess]);
 
   useEffect(() => {
@@ -2319,11 +2384,34 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       if (response.success) {
         toast.success("Confidential details are now visible for this buyer");
         setHasConfidentialAccess(true);
+        // The request has been answered, so the banner has nothing left to ask.
+        setAccessRequestPending(false);
       } else {
         toast.error(response.error || "Failed to grant confidential access");
       }
     } catch (error: any) {
       toast.error(error.message || "Failed to grant confidential access");
+    } finally {
+      setIsUpdatingConfidentialAccess(false);
+    }
+  };
+
+  const handleDeclineConfidentialAccess = async () => {
+    if (!listingIdForAccess || !buyerIdForAccess) return;
+    setIsUpdatingConfidentialAccess(true);
+    try {
+      const response: any = await apiClient.declineConfidentialAccess(
+        listingIdForAccess,
+        buyerIdForAccess,
+      );
+      if (response?.success === false) {
+        toast.error(response?.error || 'Could not decline the request.');
+        return;
+      }
+      toast.success('Request declined.');
+      setAccessRequestPending(false);
+    } catch {
+      toast.error('Could not decline the request. Please try again.');
     } finally {
       setIsUpdatingConfidentialAccess(false);
     }
@@ -2466,6 +2554,15 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   // Count online members (simplified - just check otherUser for now)
   const onlineCount = otherUser?.is_online ? 1 : 0;
 
+  // The listing names the conversation. Chats started before conversations were
+  // tied to a listing fall back to the other party, which is all they ever had.
+  const headerTitle =
+    getChatListingTitle((chatRoom as any)?.listing) ||
+    (otherUser?.first_name && otherUser?.last_name
+      ? `${otherUser.first_name} ${otherUser.last_name}`.trim()
+      : otherUser?.first_name ||
+        (otherUser?.email ? otherUser.email.split('@')[0] : 'General enquiry'));
+
   return (
     <div className="flex-1 flex flex-col bg-background min-w-0 overflow-x-hidden">
       {/* Chat Header */}
@@ -2480,39 +2577,22 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
               letterSpacing: '0%',
             }}
           >
-            {otherUser?.first_name && otherUser?.last_name 
-              ? `${otherUser.first_name} ${otherUser.last_name}`.trim()
-              : otherUser?.first_name 
-              ? otherUser.first_name
-              : otherUser?.email 
-              ? otherUser.email.split('@')[0]
-              : 'Unknown User'}
+            {/* The conversation is named after the business, not the person.
+                The other party, and whether they are online, moved to the
+                details panel on the right. */}
+            {headerTitle}
           </h2>
-          {hasAdminInChat ? (
-            <p
-              className="text-base lg:text-[11px] xl:text-base text-black/50 m-0"
-              style={{
-                fontFamily: 'Lufga',
-                fontWeight: 400,
-                lineHeight: '100%',
-                letterSpacing: '0%',
-              }}
-            >
-              {memberCount} Members, {onlineCount} online
-            </p>
-          ) : (
-            <p
-              className="text-base lg:text-[11px] xl:text-base text-black/50 m-0"
-              style={{
-                fontFamily: 'Lufga',
-                fontWeight: 400,
-                lineHeight: '100%',
-                letterSpacing: '0%',
-              }}
-            >
-              {otherUser?.is_online ? 'Online' : 'Offline'}
-            </p>
-          )}
+          <p
+            className="text-base lg:text-[11px] xl:text-base text-black/50 m-0"
+            style={{
+              fontFamily: 'Lufga',
+              fontWeight: 400,
+              lineHeight: '100%',
+              letterSpacing: '0%',
+            }}
+          >
+            Private Deal Chat
+          </p>
         </div>
         <div className="flex items-center flex-shrink-0" style={{ gap: '4px' }}>
           <button
@@ -2621,17 +2701,31 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
               <DropdownMenuItem onClick={handlePinChat}>
                 <Pin className="mr-2 h-4 w-4" /> {isChatPinned ? "Unpin Chat" : "Pin Chat"}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleBlockUser}>
-                <UserX className="mr-2 h-4 w-4" /> Block User
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-red-600" onClick={handleDeleteChat}>
-                <Trash2 className="mr-2 h-4 w-4" /> Delete Chat
-              </DropdownMenuItem>
+              {/* Blocking a member and destroying a conversation are moderation
+                  acts, not things a buyer or seller should reach for mid-deal —
+                  a deleted chat also takes the evidence with it. Kept for the
+                  team, removed for everyone else. */}
+              {isModerator && (
+                <>
+                  <DropdownMenuItem onClick={handleBlockUser}>
+                    <UserX className="mr-2 h-4 w-4" /> Block User
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="text-red-600" onClick={handleDeleteChat}>
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete Chat
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
+
+      <StartDealProcessDialog
+        open={startDealOpen}
+        onOpenChange={setStartDealOpen}
+        onConfirm={handleStartDealProcess}
+      />
 
       {/* Chat Messages */}
       <div
@@ -2639,59 +2733,45 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         className="flex-1 min-h-0 min-w-0 p-3 sm:p-4 overflow-y-auto overflow-x-hidden space-y-4"
         onScroll={handleScroll}
       >
-        {/* Warning Banner - Always shown at top */}
-        <div
-          style={{
-            width: '100%',
-            maxWidth: '648px',
-            minHeight: '74px',
-            paddingTop: '10px',
-            paddingRight: '20px',
-            paddingBottom: '10px',
-            paddingLeft: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-            borderRadius: '24px',
-            background: 'rgba(249, 237, 231, 1)',
-            marginBottom: '16px',
-            boxSizing: 'border-box',
-          }}
-        >
-          <img 
-            src={stopIcon} 
-            alt="Warning" 
-            style={{ 
-              width: '28px', 
-              height: '28px',
-              flexShrink: 0,
-            }} 
-          />
-          <p
-            className="text-sm lg:text-[11px] xl:text-sm text-black m-0 flex-1"
-            style={{
-              fontFamily: 'Lufga',
-              fontWeight: 500,
-              lineHeight: '130%',
-              letterSpacing: '0%',
-            }}
+        {/* Only the seller sees this, and only while the buyer is waiting. */}
+        {isCurrentUserSeller && accessRequestPending && (
+          <div
+            className="mb-4 rounded-xl px-4 py-3.5"
+            style={{ background: 'rgba(250, 250, 250, 1)', border: '1px solid rgba(0,0,0,0.08)' }}
           >
-            Please remember: Communicating outside the EX Platform is forbidden. If you communicate or transact outside you are violating the{' '}
-            <span
-              className="text-sm lg:text-[11px] xl:text-sm underline text-black"
-              style={{
-                fontFamily: 'Lufga',
-                fontWeight: 500,
-                lineHeight: '130%',
-                letterSpacing: '0%',
-                textDecorationStyle: 'solid',
-              }}
+            <p
+              className="m-0 text-[13px] text-[#0F172A]"
+              style={{ fontFamily: 'Lufga' }}
             >
-              Terms and Conditions
-            </span>
-            . This could be fined.
-          </p>
-        </div>
+              <strong>{otherUser?.first_name || 'This buyer'}</strong> wants access to the
+              confidential details of your listing.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={isUpdatingConfidentialAccess}
+                onClick={handleDeclineConfidentialAccess}
+                className="rounded-lg border border-[#FCA5A5] px-4 py-2 text-[12.5px] font-medium text-[#DC2626] transition-colors hover:bg-[#FEF2F2] disabled:opacity-60"
+                style={{ fontFamily: 'Lufga' }}
+              >
+                ✕ Decline Request
+              </button>
+              <button
+                type="button"
+                disabled={isUpdatingConfidentialAccess}
+                onClick={handleGrantConfidentialAccess}
+                className="rounded-lg px-4 py-2 text-[12.5px] font-medium text-black transition-colors hover:brightness-95 disabled:opacity-60"
+                style={{ background: 'rgba(174, 243, 31, 1)', fontFamily: 'Lufga' }}
+              >
+                ✓ Approve Access
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* The client's two standing notices. Replaces the single-line
+            warning that used to sit here and said the same thing. */}
+        <ChatWelcomeCards onStartDeal={() => setStartDealOpen(true)} />
 
         {filteredMessages.length === 0 && !isSearchOpen ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -2762,7 +2842,11 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             
             // Get sender information - CRITICAL: Prioritize message.sender and message.type for admin messages
             // Check if this is an admin message first (by type or by sender role)
-            const isAdminMessage = message.type === 'ADMIN' || message.type === 'MONITER' || 
+            // The platform's own notices render in the same card as staff
+            // messages — same authority, same shape.
+            const systemText = systemMessageText(message, currentUserId);
+            const isAdminMessage = message.type === 'ADMIN' || message.type === 'MONITER' ||
+              isSystemMessage(message) ||
               message.sender?.role === 'ADMIN' || message.sender?.role === 'MONITER' ||
               (message.senderId !== userId && message.senderId !== sellerId);
             
@@ -2788,7 +2872,9 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
               // Don't use otherUser for admin messages!
               sender = {
                 id: message.senderId,
-                first_name: 'Admin',
+                // Client's wording. "Admin" reads like a person you could
+                // argue with; this is the rule, and it says which rule.
+                first_name: systemText ? POLICY_SENDER_NAME : 'Admin',
                 last_name: '',
                 email: '',
                 profile_pic: null,
@@ -2989,7 +3075,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                               wordBreak: 'break-word',
                             }}
                           >
-                            {message.content}
+                            {systemText || message.content}
                           </p>
                         )}
                       </>

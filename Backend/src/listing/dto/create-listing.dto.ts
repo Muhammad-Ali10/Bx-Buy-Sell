@@ -102,7 +102,8 @@ export const Question = z
 
 //Listing
 export const listingSchema = z.object({
-  status: z.enum(['PUBLISH', 'DRAFT']),
+  // SOLD can only be set by the platform team (enforced in the service).
+  status: z.enum(['PUBLISH', 'DRAFT', 'SOLD', 'BLOCKED']),
   brand: z.array(Question),
   category: z.array(Category),
   tools: z.array(Tool),
@@ -115,9 +116,19 @@ export const listingSchema = z.object({
   handover: z.array(Question),
   portfolioLink: z.string().optional(),
   managed_by_ex: z.boolean().optional(),
+  // Team member looking after this listing; null clears the assignment.
+  responsibleId: z.string().nullable().optional(),
+  // Shown to the owner when the team blocks a listing.
+  blockedReason: z.string().nullable().optional(),
   confidentialControl: z.boolean().optional(),
   featuredOnCategoryPage: z.boolean().optional(),
   featuredOnStartPage: z.boolean().optional(),
+  // Package selection made in the Packages step.
+  selectedPackage: z.string().nullish(),
+  packageBillingCycle: z.string().nullish(),
+  packageAddons: z.array(z.string()).optional(),
+  successFeePercent: z.number().nullish(),
+  approveBuyersManually: z.boolean().nullish(),
 });
 
 export type ListingSchemaT = z.infer<typeof listingSchema>;

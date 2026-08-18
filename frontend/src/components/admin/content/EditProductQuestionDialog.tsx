@@ -7,12 +7,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useUpdateProductQuestion } from "@/hooks/useUpdateProductQuestion";
+import { useProductQuestions } from "@/hooks/useProductQuestions";
+import { QuestionDependencyPicker } from "./QuestionDependencyPicker";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 
 interface ProductQuestion {
   id: string;
   question: string;
   answer_type: string;
   option?: string[];
+  dependsOnQuestionId?: string | null;
+  dependsOnValue?: string | null;
+  required?: boolean | null;
 }
 
 interface EditProductQuestionDialogProps {
@@ -36,6 +42,10 @@ export const EditProductQuestionDialog = ({ open, onOpenChange, question }: Edit
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState(""); // Options field for SELECT type
+  const [dependsOnQuestionId, setDependsOnQuestionId] = useState("");
+  const [dependsOnValue, setDependsOnValue] = useState("");
+  const [required, setRequired] = useState(true);
+  const { data: productQuestions = [] } = useProductQuestions();
   const updateQuestion = useUpdateProductQuestion();
 
   useEffect(() => {
@@ -52,6 +62,9 @@ export const EditProductQuestionDialog = ({ open, onOpenChange, question }: Edit
       } else {
         setOptions("");
       }
+      setDependsOnQuestionId(question.dependsOnQuestionId || "");
+      setDependsOnValue(question.dependsOnValue || "");
+      setRequired(question.required !== false);
     }
   }, [question]);
 
@@ -72,6 +85,9 @@ export const EditProductQuestionDialog = ({ open, onOpenChange, question }: Edit
         question: questionText.trim(),
         answer_type: questionType,
         options: optionsArray,
+        dependsOnQuestionId: dependsOnQuestionId || null,
+        dependsOnValue: dependsOnQuestionId ? dependsOnValue || "yes" : null,
+        required,
       },
       {
         onSuccess: () => {
@@ -151,6 +167,17 @@ export const EditProductQuestionDialog = ({ open, onOpenChange, question }: Edit
               <p className="text-xs text-gray-500">Enter options separated by commas (e.g., "Option 1, Option 2, Option 3")</p>
             </div>
           )}
+          <QuestionDependencyPicker
+            questions={productQuestions}
+            excludeId={question?.id}
+            dependsOnQuestionId={dependsOnQuestionId}
+            dependsOnValue={dependsOnValue}
+            onChange={(qid, val) => {
+              setDependsOnQuestionId(qid);
+              setDependsOnValue(val);
+            }}
+          />
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

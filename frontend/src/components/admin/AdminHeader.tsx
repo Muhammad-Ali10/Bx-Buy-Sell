@@ -35,6 +35,7 @@ const getPageTitle = (pathname: string, customTitle?: string): string => {
     "/admin/chat-analytics": "Chat Analytics",
     "/admin/monitoring-alerts": "Monitoring Alerts",
     "/admin/detect-words": "Detect Words",
+    "/admin/acquisition-capacity": "Acquisition Capacity",
     "/admin/content": "Content Management",
     "/admin/settings": "Settings",
   };
@@ -58,7 +59,16 @@ export const AdminHeader = ({ title }: AdminHeaderProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
-  const [userName, setUserName] = useState("Admin");
+  /**
+   * Seeded from the signed-in account rather than the word "Admin".
+   *
+   * The header remounts on every tab change, so a hardcoded starting value
+   * meant the name flickered from "Admin" to the real one on each navigation.
+   * The account is already in memory; the fetch below only refreshes it.
+   */
+  const [userName, setUserName] = useState(() =>
+    [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.email || "",
+  );
   const [userProfilePic, setUserProfilePic] = useState<string | null>(null);
   
   // Get page title from route if not provided

@@ -6,11 +6,12 @@ export const useUpdateAccountQuestion = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { 
-      id: string; 
-      question: string; 
+    mutationFn: async (data: {
+      id: string;
+      question: string;
       answer_type: string;
       options?: string[];
+      required?: boolean | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -23,8 +24,9 @@ export const useUpdateAccountQuestion = () => {
         question: data.question,
         answer_type: mappedAnswerType,
         answer_for: "SOCIAL",
+        required: data.required ?? null,
       };
-      
+
       // Add options if provided
       if (data.options !== undefined) {
         payload.option = data.options;

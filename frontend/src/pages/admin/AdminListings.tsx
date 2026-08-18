@@ -19,7 +19,9 @@ import {
 import { Search, ExternalLink, Eye, Edit, MessageCircle, RefreshCw, Trash2, MoreVertical, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Filter, CalendarIcon, X, CheckCircle2, XCircle, Crown, Settings, UserPlus } from "lucide-react";
 import { useAdminListings } from "@/hooks/useAdminListings";
 import { useCategories } from "@/hooks/useCategories";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import ListingImage from "@/components/ListingImage";
+import { parseMediaUrls } from "@/lib/mediaUtils";
 import { apiClient } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -52,6 +54,13 @@ export default function AdminListings() {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [managedByFilter, setManagedByFilter] = useState<string>("all");
+  // A team member's "Managed Listings" card links here with ?assigned=<id>, so
+  // the list opens already showing exactly what that card counted.
+  const [searchParams] = useSearchParams();
+  const [assignedFilter, setAssignedFilter] = useState<string>(
+    searchParams.get("assigned") || "all",
+  );
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
@@ -194,17 +203,18 @@ export default function AdminListings() {
         return oldData.map((listing: any) => {
           if (listing.id !== listingId) return listing;
           if (!rememberMemberId || !teamMember) {
-            return { ...listing, responsible_user_id: null, responsible_user: null };
+            return { ...listing, responsibleId: null, responsible: null };
           }
           return {
             ...listing,
-            responsible_user_id: teamMember.id,
-            responsible_user: {
+            responsibleId: teamMember.id,
+            // Mirrors what the server sends back, so the optimistic row and the
+            // refetched one render identically.
+            responsible: {
               id: teamMember.id,
-              full_name: teamMember.full_name || null,
-              avatar_url: teamMember.avatar_url || null,
-              user_type: teamMember.role?.toLowerCase() || null,
-              verified: teamMember.verified ?? null,
+              first_name: teamMember.full_name?.split(' ')[0] || null,
+              last_name: teamMember.full_name?.split(' ').slice(1).join(' ') || null,
+              profile_pic: teamMember.avatar_url || null,
             },
           };
         });
@@ -214,25 +224,12 @@ export default function AdminListings() {
     try {
       console.log(`Assigning responsible for listing ${listingId}:`, rememberMemberId);
       
-      // Try to update responsible_user_id
-      // Note: Backend may need to add this field to the listing schema
-      const response = await apiClient.updateListing(listingId, { responsible_user_id: rememberMemberId });
-      
-      console.log('Assign response:', response);
-      
+      const response = await apiClient.updateListing(listingId, {
+        responsibleId: rememberMemberId || null,
+      });
+
       if (!response.success) {
-        // If backend doesn't support it yet, show a helpful message
-        if (response.error?.includes('responsible_user_id') || response.error?.includes('Unknown')) {
-          applyLocalAssignment();
-          toast.success(
-            rememberMemberId
-              ? "Assigned locally. Backend support will sync this automatically once available."
-              : "Assignment removed locally."
-          );
-        } else {
-          throw new Error(response.error || "Failed to assign responsible member");
-        }
-        return;
+        throw new Error(response.error || "Failed to assign responsible member");
       }
 
       applyLocalAssignment();
@@ -263,15 +260,20 @@ export default function AdminListings() {
     }
   };
 
-  const handleQuickStatusChange = async (listingId: string, newStatus: "PUBLISH" | "DRAFT") => {
+  const handleQuickStatusChange = async (
+    listingId: string,
+    newStatus: "PUBLISH" | "DRAFT" | "SOLD",
+  ) => {
     try {
       const response = await apiClient.updateListing(listingId, { status: newStatus });
-      
+
       if (!response.success) {
         throw new Error(response.error || "Failed to update listing status");
       }
-      
-      toast.success(`Listing ${newStatus === "PUBLISH" ? "published" : "drafted"} successfully`);
+
+      const label =
+        newStatus === "PUBLISH" ? "published" : newStatus === "SOLD" ? "marked as sold" : "drafted";
+      toast.success(`Listing ${label} successfully`);
       queryClient.invalidateQueries({ queryKey: ["admin-listings"] });
     } catch (error: any) {
       toast.error(error.message || "Failed to update listing status");
@@ -279,73 +281,81 @@ export default function AdminListings() {
     }
   };
 
+  /**
+   * Marking a business as sold removes it from the public marketplace and stops
+   * the package renewing, so it is confirmed before it is applied.
+   */
+  const handleMarkAsSold = (listingId: string, isSold: boolean) => {
+    if (isSold) {
+      void handleQuickStatusChange(listingId, "PUBLISH");
+      return;
+    }
+    if (
+      !confirm(
+        "Mark this listing as sold? It will be removed from All Listings and its package will stop renewing.",
+      )
+    ) {
+      return;
+    }
+    void handleQuickStatusChange(listingId, "SOLD");
+  };
+
   const handleRefresh = () => {
     refetch();
     toast.success("Listings refreshed");
   };
 
-  const handleBlockUser = async (userId: string, userName: string) => {
-    if (isModerator) {
-      const targetListing = listings?.find((l: any) => (l.userId || l.user_id) === userId);
-      const targetRole = targetListing?.profile?.user_type?.toLowerCase() || "";
-      if (targetRole !== "user") {
-        toast.error("You can only block normal users.");
-        return;
-      }
-    }
-    if (!confirm(`Are you sure you want to block user "${userName}"?`)) {
-      return;
-    }
+  /**
+   * Block the listing, not the person.
+   *
+   * This used to set `verified: false` on the owner's account and then announce
+   * that they could no longer access the platform — which was not true, since
+   * nothing checks that flag at sign-in. The listing itself stayed on the
+   * marketplace.
+   */
+  const handleBlockListing = async (listingId: string, listingTitle: string) => {
+    const reason = window.prompt(
+      `Why is "${listingTitle}" being blocked?
+
+The owner sees this, so it saves a support ticket.`,
+      "",
+    );
+    // Cancel returns null; an empty answer is a deliberate "no reason given".
+    if (reason === null) return;
 
     try {
-      const response = await apiClient.updateUser(userId, { verified: false });
+      const response = await apiClient.updateListing(listingId, {
+        status: "BLOCKED",
+        blockedReason: reason.trim() || null,
+      });
       if (!response.success) {
-        if (response.error?.includes('verified') || response.error?.includes('Unknown')) {
-          toast.info("Backend support for blocking users is being added. This feature will be available soon.");
-        } else {
-          throw new Error(response.error || "Failed to block user");
-        }
-        return;
+        throw new Error(response.error || "Failed to block listing");
       }
 
-      toast.success(`✓ User "${userName}" has been blocked`, {
+      toast.success(`"${listingTitle}" has been blocked`, {
         duration: 4000,
-        description: "The user's account is now blocked and they cannot access the platform."
+        description:
+          "It is off the marketplace. The owner still sees it under My Listings and can edit it, but only we can put it back.",
       });
       queryClient.invalidateQueries({ queryKey: ["admin-listings"] });
     } catch (error: any) {
-      toast.error(error.message || "Failed to block user");
-      console.error("Error blocking user:", error);
+      toast.error(error.message || "Failed to block listing");
+      console.error("Error blocking listing:", error);
     }
   };
 
-  const handleUnblockUser = async (userId: string, userName: string) => {
-    if (isModerator) {
-      const targetListing = listings?.find((l: any) => (l.userId || l.user_id) === userId);
-      const targetRole = targetListing?.profile?.user_type?.toLowerCase() || "";
-      if (targetRole !== "user") {
-        toast.error("You can only unblock normal users.");
-        return;
-      }
-    }
-    if (!confirm(`Are you sure you want to unblock user "${userName}"?`)) {
-      return;
-    }
-
+  const handleUnblockListing = async (listingId: string, listingTitle: string) => {
     try {
-      const response = await apiClient.updateUser(userId, { verified: true });
+      const response = await apiClient.updateListing(listingId, { status: "DRAFT" });
       if (!response.success) {
-        throw new Error(response.error || "Failed to unblock user");
+        throw new Error(response.error || "Failed to unblock listing");
       }
-
-      toast.success(`✓ User "${userName}" has been unblocked`, {
-        duration: 4000,
-        description: "The user's account is now active and they can access the platform."
+      toast.success(`"${listingTitle}" is no longer blocked`, {
+        description: "It has gone back to Draft, so the owner can publish it again.",
       });
       queryClient.invalidateQueries({ queryKey: ["admin-listings"] });
     } catch (error: any) {
-      toast.error(error.message || "Failed to unblock user");
-      console.error("Error unblocking user:", error);
+      toast.error(error.message || "Failed to unblock listing");
     }
   };
 
@@ -411,6 +421,8 @@ export default function AdminListings() {
   const clearFilters = () => {
     setStatusFilter("all");
     setCategoryFilter("all");
+    setManagedByFilter("all");
+    setAssignedFilter("all");
     setDateFrom(undefined);
     setDateTo(undefined);
   };
@@ -418,26 +430,45 @@ export default function AdminListings() {
   const filteredListings = listings?.filter(listing => {
     // Search filter
     const searchLower = searchQuery.toLowerCase();
-    const matchesSearch = !searchQuery || 
+    const ownerName = [listing.user?.first_name, listing.user?.last_name]
+      .filter(Boolean)
+      .join(' ');
+    const listingLink = listing.portfolioLink
+      || listing.brand?.find((b: any) => /website|url|domain/i.test(String(b?.question || '')))?.answer
+      || '';
+    const matchesSearch = !searchQuery ||
       listing.title?.toLowerCase().includes(searchLower) ||
+      ownerName.toLowerCase().includes(searchLower) ||
       listing.profile?.full_name?.toLowerCase().includes(searchLower) ||
-      listing.brand?.[0]?.businessName?.toLowerCase().includes(searchLower);
+      listing.brand?.[0]?.businessName?.toLowerCase().includes(searchLower) ||
+      String(listingLink).toLowerCase().includes(searchLower) ||
+      listing.id?.toLowerCase().includes(searchLower);
     
     // Status filter - normalize backend status values
     let listingStatus = listing.status?.toLowerCase() || 'draft';
     if (listingStatus === 'publish') listingStatus = 'published';
     const matchesStatus = statusFilter === "all" || listingStatus === statusFilter;
     
-    // Category filter - handle special "Managed by EX" filter
+    const isManagedByEx = listing.managed_by_ex === true
+      || listing.managed_by_ex === 1
+      || listing.managed_by_ex === 'true'
+      || listing.managed_by_ex === '1';
+
+    if (managedByFilter === "ex" && !isManagedByEx) return false;
+    if (managedByFilter === "owner" && isManagedByEx) return false;
+
+    if (assignedFilter === "none" && listing.responsibleId) return false;
+    if (assignedFilter !== "all" && assignedFilter !== "none"
+        && listing.responsibleId !== assignedFilter) {
+      return false;
+    }
+
     let matchesCategory = true;
-    if (categoryFilter === "managed_by_ex") {
-      // Filter for listings managed by EX
-      const isManaged = listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1';
-      matchesCategory = isManaged;
-    } else if (categoryFilter !== "all") {
-      // Regular category filter
-      const categoryId = listing.category_id || listing.category?.[0]?.id || null;
-      matchesCategory = categoryId === categoryFilter;
+    if (categoryFilter !== "all") {
+      // A listing can carry several categories, so check them all rather than
+      // only the first.
+      matchesCategory = Array.isArray(listing.category)
+        && listing.category.some((c: any) => c?.name === categoryFilter);
     }
     
     // Date range filter
@@ -450,6 +481,14 @@ export default function AdminListings() {
     
     return matchesSearch && matchesStatus && matchesCategory;
   }) || [];
+
+  // The "Assigned" chip should name the person, not show their raw id.
+  const assignedMember = Array.isArray(teamMembers)
+    ? teamMembers.find((m: any) => m.id === assignedFilter)
+    : null;
+  const assignedFilterLabel = assignedFilter === "none"
+    ? "Not assigned"
+    : (assignedMember?.full_name || assignedMember?.email || "Team member");
 
   const sortedListings = [...filteredListings].sort((a, b) => {
     let comparison = 0;
@@ -518,9 +557,9 @@ export default function AdminListings() {
                   <Button variant="outline" className="gap-2 border-border text-sm sm:text-base h-9 sm:h-10">
                     <Filter className="h-3 w-3 sm:h-4 sm:w-4" />
                     Filters
-                    {(statusFilter !== "all" || categoryFilter !== "all" || dateFrom || dateTo) && (
+                    {(statusFilter !== "all" || categoryFilter !== "all" || managedByFilter !== "all" || assignedFilter !== "all" || dateFrom || dateTo) && (
                       <Badge className="ml-2 bg-accent text-black text-xs">
-                        {[statusFilter !== "all", categoryFilter !== "all", dateFrom, dateTo].filter(Boolean).length}
+                        {[statusFilter !== "all", categoryFilter !== "all", managedByFilter !== "all", assignedFilter !== "all", dateFrom, dateTo].filter(Boolean).length}
                       </Badge>
                     )}
                   </Button>
@@ -545,6 +584,8 @@ export default function AdminListings() {
                           <SelectItem value="all">All Status</SelectItem>
                           <SelectItem value="published">Published</SelectItem>
                           <SelectItem value="draft">Draft</SelectItem>
+                          <SelectItem value="blocked">Blocked</SelectItem>
+                          <SelectItem value="sold">Sold</SelectItem>
                           <SelectItem value="deleted">Deleted</SelectItem>
                         </SelectContent>
                       </Select>
@@ -559,10 +600,43 @@ export default function AdminListings() {
                         </SelectTrigger>
                         <SelectContent className="bg-background border-border">
                           <SelectItem value="all">All Categories</SelectItem>
-                          <SelectItem value="managed_by_ex">🤝 Managed by EX</SelectItem>
                           {Array.isArray(categories) && categories.map((category: any) => (
-                            <SelectItem key={category.id} value={category.id}>
+                            <SelectItem key={category.id} value={category.name}>
                               {category.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Managed by */}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Managed by</label>
+                      <Select value={managedByFilter} onValueChange={setManagedByFilter}>
+                        <SelectTrigger className="bg-background border-border">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-background border-border">
+                          <SelectItem value="all">Anyone</SelectItem>
+                          <SelectItem value="owner">Managed by Owner</SelectItem>
+                          <SelectItem value="ex">Managed by EX</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Assigned team member */}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Assigned</label>
+                      <Select value={assignedFilter} onValueChange={setAssignedFilter}>
+                        <SelectTrigger className="bg-background border-border">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-background border-border">
+                          <SelectItem value="all">Anyone</SelectItem>
+                          <SelectItem value="none">Not assigned</SelectItem>
+                          {Array.isArray(teamMembers) && teamMembers.map((member: any) => (
+                            <SelectItem key={member.id} value={member.id}>
+                              {member.full_name || member.email}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -627,7 +701,7 @@ export default function AdminListings() {
             </div>
 
             {/* Active Filters Display */}
-            {(statusFilter !== "all" || categoryFilter !== "all" || dateFrom || dateTo) && (
+            {(statusFilter !== "all" || categoryFilter !== "all" || managedByFilter !== "all" || assignedFilter !== "all" || dateFrom || dateTo) && (
               <div className="flex flex-wrap gap-2">
                 {statusFilter !== "all" && (
                   <Badge className="gap-1 bg-muted text-foreground">
@@ -637,10 +711,21 @@ export default function AdminListings() {
                 )}
                 {categoryFilter !== "all" && (
                   <Badge className="gap-1 bg-muted text-foreground">
-                    Category: {categoryFilter === "managed_by_ex" 
-                      ? "🤝 Managed by EX" 
-                      : (Array.isArray(categories) ? categories.find((c: any) => c.id === categoryFilter)?.name : "")}
+                    {/* The dropdown stores the category name, so show it directly. */}
+                    Category: {categoryFilter}
                     <X className="h-3 w-3 cursor-pointer" onClick={() => setCategoryFilter("all")} />
+                  </Badge>
+                )}
+                {managedByFilter !== "all" && (
+                  <Badge className="gap-1 bg-muted text-foreground">
+                    Managed by: {managedByFilter === "ex" ? "🤝 EX" : "Owner"}
+                    <X className="h-3 w-3 cursor-pointer" onClick={() => setManagedByFilter("all")} />
+                  </Badge>
+                )}
+                {assignedFilter !== "all" && (
+                  <Badge className="gap-1 bg-muted text-foreground">
+                    Assigned: {assignedFilterLabel}
+                    <X className="h-3 w-3 cursor-pointer" onClick={() => setAssignedFilter("all")} />
                   </Badge>
                 )}
                 {dateFrom && (
@@ -704,6 +789,12 @@ export default function AdminListings() {
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-50/70">
                         <th className="px-3 sm:px-6 py-3 text-left text-[11px] font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">
+                          Image
+                        </th>
+                        <th className="px-3 sm:px-6 py-3 text-left text-[11px] font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap hidden xl:table-cell">
+                          ID
+                        </th>
+                        <th className="px-3 sm:px-6 py-3 text-left text-[11px] font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">
                           User Name
                         </th>
                         <th className="px-3 sm:px-6 py-3 text-left text-[11px] font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">
@@ -746,6 +837,12 @@ export default function AdminListings() {
                           listing.website ||
                           listing.url ||
                           "";
+                        const photoRow = (listing.advertisement || []).find(
+                          (a: any) => a?.answer_type === "PHOTO" && a?.answer,
+                        );
+                        const listingImage = photoRow
+                          ? parseMediaUrls(photoRow.answer)[0] || ""
+                          : listing.image_url || "";
                         const normalizedLink = rawLink
                           ? rawLink.startsWith("http")
                             ? rawLink
@@ -756,6 +853,32 @@ export default function AdminListings() {
                           key={listing.id} 
                           className="hover:bg-gray-50/50 transition-colors"
                         >
+                          {/* Listing image */}
+                          <td className="px-3 sm:px-6 py-3 sm:py-4">
+                            <Link to={`/listing/${listing.id}`} className="block w-14">
+                              <ListingImage
+                                src={listingImage}
+                                alt={listing.title || "Listing"}
+                                className="h-10 w-14 rounded-lg object-cover"
+                              />
+                            </Link>
+                          </td>
+
+                          {/* Listing ID — the team quotes this in support threads. */}
+                          <td className="px-3 sm:px-6 py-3 sm:py-4 hidden xl:table-cell">
+                            <button
+                              type="button"
+                              title={`${listing.id} — click to copy`}
+                              onClick={() => {
+                                navigator.clipboard?.writeText(listing.id);
+                                toast.success("Listing ID copied");
+                              }}
+                              className="font-mono text-[11px] text-gray-500 hover:text-gray-900"
+                            >
+                              {String(listing.id).slice(0, 8)}…
+                            </button>
+                          </td>
+
                           {/* User Name Column with Title underneath */}
                           <td className="px-3 sm:px-6 py-3 sm:py-4">
                             <div className="flex items-center gap-2 sm:gap-3">
@@ -767,9 +890,12 @@ export default function AdminListings() {
                               </Avatar>
                               <div className="flex flex-col gap-0.5">
                                 <div className="flex items-center gap-1.5 sm:gap-2">
-                                  <span className="text-xs sm:text-sm font-semibold text-gray-900">
+                                  <Link
+                                    to={`/admin/users/${listing.userId || listing.user_id}`}
+                                    className="text-xs sm:text-sm font-semibold text-gray-900 hover:underline"
+                                  >
                                     {listing.profile?.full_name || 'Unknown User'}
-                                  </span>
+                                  </Link>
                                   {/* Pro tag - you can add logic to determine if user is Pro */}
                                   {listing.profile?.user_type === 'seller' && (
                                     <Badge className="bg-accent text-black text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded-full font-bold">
@@ -783,9 +909,12 @@ export default function AdminListings() {
                           
                           {/* Title Column */}
                           <td className="px-3 sm:px-6 py-3 sm:py-4">
-                            <span className="text-xs sm:text-sm text-gray-700 font-medium">
+                            <Link
+                              to={`/listing/${listing.id}`}
+                              className="text-xs sm:text-sm text-gray-700 font-medium hover:underline"
+                            >
                               {listing.title}
-                            </span>
+                            </Link>
                           </td>
                           
                           {/* Link Column */}
@@ -810,12 +939,22 @@ export default function AdminListings() {
                           <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                             {(listing.status === 'draft' || listing.status === 'DRAFT') && (
                               <Badge className="bg-yellow-100 text-yellow-800 border-0 rounded-full px-2 sm:px-3 py-0.5 text-[10px] sm:text-xs font-medium">
-                                Pending
+                                Draft
+                              </Badge>
+                            )}
+                            {String(listing.status).toUpperCase() === 'BLOCKED' && (
+                              <Badge className="bg-red-100 text-red-800 border-0 rounded-full px-2 sm:px-3 py-0.5 text-[10px] sm:text-xs font-medium">
+                                Blocked
                               </Badge>
                             )}
                             {(listing.status === 'published' || listing.status === 'PUBLISH' || listing.status === 'publish') && (
                               <Badge className="bg-green-100 text-green-800 border-0 rounded-full px-2 sm:px-3 py-0.5 text-[10px] sm:text-xs font-medium">
                                 Published
+                              </Badge>
+                            )}
+                            {String(listing.status).toUpperCase() === 'SOLD' && (
+                              <Badge className="bg-blue-100 text-blue-800 border-0 rounded-full px-2 sm:px-3 py-0.5 text-[10px] sm:text-xs font-medium">
+                                Sold
                               </Badge>
                             )}
                             {(listing.status === 'deleted' || listing.status === 'DELETED') && (
@@ -840,7 +979,7 @@ export default function AdminListings() {
                               return isManaged;
                             })() ? (
                               <button
-                                className="bg-[#c6fe1f] text-black border-2 border-[#a3e635] rounded-full px-3 sm:px-4 py-1.5 sm:py-2 text-[10px] sm:text-xs font-bold cursor-pointer hover:bg-[#b5e91c] hover:border-[#84cc16] transition-all shadow-md flex items-center gap-1.5 sm:gap-2 min-w-[140px] sm:min-w-[170px] justify-center group"
+                                className="bg-[#c6fe1f] text-black border-2 border-[#a3e635] rounded-full px-3 py-1.5 text-[10px] sm:text-xs font-bold cursor-pointer hover:bg-[#b5e91c] hover:border-[#84cc16] transition-all shadow-md flex items-center gap-1.5 min-w-[110px] max-w-full whitespace-nowrap justify-center group"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleToggleManagedByEx(listing.id, true);
@@ -852,7 +991,7 @@ export default function AdminListings() {
                               </button>
                             ) : (
                               <button
-                                className="bg-gray-100 text-gray-700 border border-gray-300 rounded-full px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium cursor-pointer hover:bg-gray-200 hover:border-gray-400 transition-all flex items-center gap-1.5 sm:gap-2 min-w-[80px] sm:min-w-[100px] justify-center group"
+                                className="bg-gray-100 text-gray-700 border border-gray-300 rounded-full px-3 py-1.5 text-[10px] sm:text-xs font-medium cursor-pointer hover:bg-gray-200 hover:border-gray-400 transition-all flex items-center gap-1.5 min-w-[110px] max-w-full whitespace-nowrap justify-center group"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleToggleManagedByEx(listing.id, false);
@@ -866,23 +1005,23 @@ export default function AdminListings() {
                           
                           {/* Responsible Column */}
                           <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap hidden lg:table-cell">
-                            {listing.responsible_user_id ? (
+                            {listing.responsibleId ? (
                               <div 
                                 className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
                                 onClick={() => {
                                   setSelectedListingForAssign(listing.id);
                                   setAssignDialogOpen(true);
                                 }}
-                                title={`Assigned to: ${listing.responsible_user?.full_name || 'Unknown'} - Click to change`}
+                                title={`Assigned to: ${[listing.responsible?.first_name, listing.responsible?.last_name].filter(Boolean).join(' ') || 'Unknown'} - Click to change`}
                               >
                                 <Avatar className="h-6 w-6">
-                                  <AvatarImage src={listing.responsible_user?.avatar_url || undefined} />
+                                  <AvatarImage src={listing.responsible?.profile_pic || undefined} />
                                   <AvatarFallback className="text-xs bg-gray-200 text-gray-600">
-                                    {listing.responsible_user?.full_name?.charAt(0) || 'U'}
+                                    {listing.responsible?.first_name?.charAt(0)?.toUpperCase() || 'U'}
                                   </AvatarFallback>
                                 </Avatar>
                                 <span className="text-xs text-gray-700">
-                                  {listing.responsible_user?.full_name || 'Assigned'}
+                                  {[listing.responsible?.first_name, listing.responsible?.last_name].filter(Boolean).join(' ') || 'Assigned'}
                                 </span>
                               </div>
                             ) : (
@@ -919,7 +1058,7 @@ export default function AdminListings() {
                               <DropdownMenuContent align="end" className="bg-white border border-gray-200 shadow-lg rounded-lg min-w-[140px] sm:min-w-[160px] p-1 text-xs sm:text-sm">
                                 <DropdownMenuItem 
                                   className="cursor-pointer hover:bg-accent/20 rounded-md"
-                                  onClick={() => navigate(`/admin/listings/${listing.id}`)}
+                                  onClick={() => navigate(`/listing/${listing.id}`)}
                                 >
                                   <Eye className="h-3 w-3 sm:h-4 sm:w-4 mr-2 text-gray-600" />
                                   <span>View</span>
@@ -933,7 +1072,7 @@ export default function AdminListings() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   className="cursor-pointer hover:bg-accent/20 rounded-md"
-                                  onClick={() => navigate(`/admin/users/${listing.userId || listing.user_id}/chats`)}
+                                  onClick={() => navigate(`/admin/users/${listing.userId || listing.user_id}/chats?listingId=${listing.id}`)}
                                 >
                                   <MessageCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-2 text-gray-600" />
                                   <span>Chat</span>
@@ -942,24 +1081,35 @@ export default function AdminListings() {
                                   <DropdownMenuItem 
                                     className="cursor-pointer hover:bg-accent/20 rounded-md"
                                     onClick={() => {
-                                      const ownerId = listing.user_id || listing.userId;
-                                      const ownerName = listing.profile?.full_name || 'Unknown User';
-                                      if (!ownerId) {
-                                        toast.error("User ID not found for this listing");
-                                        return;
-                                      }
-                                      if (listing.profile?.verified === false) {
-                                        handleUnblockUser(ownerId, ownerName);
+                                      const title = listing.title || 'this listing';
+                                      if (String(listing.status).toUpperCase() === 'BLOCKED') {
+                                        handleUnblockListing(listing.id, title);
                                       } else {
-                                        handleBlockUser(ownerId, ownerName);
+                                        handleBlockListing(listing.id, title);
                                       }
                                     }}
                                   >
                                     <XCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-2 text-gray-600" />
-                                    <span>{listing.profile?.verified === false ? "Unblock" : "Block"}</span>
+                                    <span>{String(listing.status).toUpperCase() === 'BLOCKED' ? "Unblock" : "Block"}</span>
                                   </DropdownMenuItem>
                                 )}
-                                <DropdownMenuItem 
+                                <DropdownMenuItem
+                                  className="cursor-pointer hover:bg-accent/20 rounded-md"
+                                  onClick={() =>
+                                    handleMarkAsSold(
+                                      listing.id,
+                                      String(listing.status).toUpperCase() === "SOLD",
+                                    )
+                                  }
+                                >
+                                  <CheckCircle2 className="h-3 w-3 sm:h-4 sm:w-4 mr-2 text-gray-600" />
+                                  <span>
+                                    {String(listing.status).toUpperCase() === "SOLD"
+                                      ? "Unmark as Sold"
+                                      : "Mark as Sold"}
+                                  </span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
                                   className="cursor-pointer text-red-600 hover:bg-red-50 rounded-md"
                                   onClick={() => handleDelete(listing.id)}
                                 >
@@ -983,8 +1133,8 @@ export default function AdminListings() {
                   <AssignResponsibleDialog
                     open={assignDialogOpen}
                     onOpenChange={setAssignDialogOpen}
-                    listingId={selectedListingForAssign}
-                    currentResponsibleId={listings?.find(l => l.id === selectedListingForAssign)?.responsible_user_id || null}
+                    targetId={selectedListingForAssign}
+                    currentResponsibleId={listings?.find(l => l.id === selectedListingForAssign)?.responsibleId || null}
                     onAssign={handleAssignResponsible}
                   />
                 )}

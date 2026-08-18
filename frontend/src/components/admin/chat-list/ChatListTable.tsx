@@ -7,6 +7,7 @@ import { Eye, Edit, Trash2, MoreVertical } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { TeamMemberAssignDialog } from "./TeamMemberAssignDialog";
+import { resolveListingTitle } from "@/lib/listingTitle";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -119,9 +120,10 @@ export const ChatListTable = ({ searchQuery, filterType }: ChatListTableProps) =
         return {
           id: chat.id,
           listing: chat.listing ? {
-            title: chat.listing.portfolioLink 
-              ? `Listing: ${chat.listing.portfolioLink.substring(0, 40)}...` 
-              : 'Untitled Listing',
+            // The name a seller actually gave the business. This used to read
+            // portfolioLink, which the server deliberately withholds as
+            // confidential — so every row said "Untitled Listing".
+            title: resolveListingTitle(chat.listing, 'Untitled Listing'),
             image_url: null, // Listing model doesn't have image_url
           } : null,
           last_message: lastMessage?.content || null,

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -10,6 +11,18 @@ import { ListingSchemaT } from './dto/create-listing.dto';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { trimListingFeedRecord } from 'common/util/trim-listing-feed.util';
 import { normalizeDomainAnswer } from 'common/util/domain.util';
+import { StripeService } from '../subscription/stripe.service';
+import {
+  ADDON_LABELS,
+  computePackageCharge,
+  getAddonPrice,
+  getPricingTier,
+  readListingPriceFromAdvertisement,
+  type AddonId,
+  type BillingCycleId,
+  type PackageId,
+} from './package-pricing';
+import { maskListingFor } from './listing-visibility';
 
 type ViewerType = 'UNREGISTERED' | 'REGISTERED_FREE' | 'REGISTERED_PRO';
 
@@ -21,11 +34,13 @@ type ViewerContext = {
 
 @Injectable()
 export class ListingService {
+  private readonly logger = new Logger(ListingService.name);
   private readonly earlyAccessDays: number;
 
   constructor(
     private readonly db: PrismaService,
     private readonly subscriptionService: SubscriptionService,
+    private readonly stripeService: StripeService,
   ) {
     const parsed = Number.parseInt(
       process.env.LISTING_EARLY_ACCESS_DAYS ?? '7',
@@ -37,10 +52,6 @@ export class ListingService {
         : 7;
   }
 
-  private readonly proUnlockLabel = 'upgrade to unlock 🔓';
-  private readonly proUnlockRedirect = '/pricing';
-  private readonly registerUnlockLabel = 'register to unlock 🔓';
-  private readonly registerUnlockRedirect = '/register';
 
   private normalizeAnswerForStorage(answer: unknown): string | undefined {
     if (answer === null || answer === undefined) return undefined;
@@ -79,6 +90,36 @@ export class ListingService {
     return answerType === 'UMBER' ? 'NUMBER' : answerType;
   }
 
+  /**
+   * Build a Prisma nested "replace" payload for a listing's answer-question
+   * relation on UPDATE. `updateMany` only touches rows that already exist, so a
+   * question answered for the first time on an existing listing (e.g. a newly
+   * added social "Link" field) was silently dropped — the incoming item has no
+   * matching row id to update. Deleting the current rows and re-creating from the
+   * full incoming set keeps add/edit/remove all working, since the client always
+   * submits the complete answer set. Returns undefined for an empty/invalid
+   * payload so we never wipe existing answers by accident.
+   */
+  private buildQuestionReplace(arr: any[] | undefined): any {
+    if (!Array.isArray(arr)) return undefined;
+    const valid = this.normalizeQuestionArrayForStorage(
+      arr.filter(
+        (item) =>
+          item &&
+          (String(item.answer ?? '').trim().length >= 2 ||
+            String(item.question ?? '').trim().length >= 2),
+      ),
+    ).map((item) => ({
+      answer: item.answer,
+      question: item.question,
+      answer_for: item.answer_for,
+      answer_type: item.answer_type,
+      option: Array.isArray(item.option) ? item.option : [],
+    }));
+    if (valid.length === 0) return undefined;
+    return { deleteMany: {}, create: valid };
+  }
+
   private shuffleArray<T>(items: T[]): T[] {
     const copy = [...items];
     for (let i = copy.length - 1; i > 0; i -= 1) {
@@ -88,107 +129,16 @@ export class ListingService {
     return copy;
   }
 
-  private halfText(text: string): string {
-    const value = String(text || '');
-    const half = Math.ceil(value.length / 2);
-    return `${value.slice(0, half)}...`;
-  }
 
-  private maskQuestionData(
-    questions: any[] = [],
-    options?: {
-      hideAll?: boolean;
-      lockLabel?: string;
-      lockType?: 'PRO_SUBSCRIPTION' | 'AUTH_REQUIRED';
-      redirectTo?: string;
-    },
-  ) {
-    const lockLabel = options?.lockLabel || this.proUnlockLabel;
-    const lockType = options?.lockType || 'PRO_SUBSCRIPTION';
-    const redirectTo = options?.redirectTo || this.proUnlockRedirect;
-
-    return (questions || []).map((item) => {
-      const questionText = String(item?.question || '').toLowerCase();
-      const isDescription = questionText.includes('description');
-      const isDomain = questionText.includes('domain');
-      const isFileOrPhoto =
-        item?.answer_type === 'FILE' || item?.answer_type === 'PHOTO';
-
-      const shouldLock = options?.hideAll || isDomain || isFileOrPhoto;
-      if (shouldLock) {
-        return {
-          ...item,
-          answer: lockLabel,
-          locked: true,
-          lockType,
-          redirectTo,
-        };
-      }
-
-      if (isDescription && item?.answer) {
-        return { ...item, answer: this.halfText(item.answer) };
-      }
-
-      return item;
-    });
-  }
-
-  private applyUnregisteredMask(listing: any) {
-    return {
-      ...listing,
-      portfolioLink: this.registerUnlockLabel,
-      lockAction: {
-        lockType: 'AUTH_REQUIRED',
-        ctaText: this.registerUnlockLabel,
-        redirectTo: this.registerUnlockRedirect,
-      },
-      brand: this.maskQuestionData(listing.brand, {
-        lockLabel: this.registerUnlockLabel,
-        lockType: 'AUTH_REQUIRED',
-        redirectTo: this.registerUnlockRedirect,
-      }),
-      financials: this.maskQuestionData(listing.financials, {
-        hideAll: true,
-        lockLabel: this.registerUnlockLabel,
-        lockType: 'AUTH_REQUIRED',
-        redirectTo: this.registerUnlockRedirect,
-      }),
-      statistics: this.maskQuestionData(listing.statistics, {
-        hideAll: true,
-        lockLabel: this.registerUnlockLabel,
-        lockType: 'AUTH_REQUIRED',
-        redirectTo: this.registerUnlockRedirect,
-      }),
-      productQuestion: this.maskQuestionData(listing.productQuestion, {
-        hideAll: true,
-        lockLabel: this.registerUnlockLabel,
-        lockType: 'AUTH_REQUIRED',
-        redirectTo: this.registerUnlockRedirect,
-      }),
-      managementQuestion: this.maskQuestionData(listing.managementQuestion, {
-        hideAll: true,
-        lockLabel: this.registerUnlockLabel,
-        lockType: 'AUTH_REQUIRED',
-        redirectTo: this.registerUnlockRedirect,
-      }),
-      handover: this.maskQuestionData(listing.handover, {
-        hideAll: true,
-        lockLabel: this.registerUnlockLabel,
-        lockType: 'AUTH_REQUIRED',
-        redirectTo: this.registerUnlockRedirect,
-      }),
-      social_account: this.maskQuestionData(listing.social_account, {
-        hideAll: true,
-        lockLabel: this.registerUnlockLabel,
-        lockType: 'AUTH_REQUIRED',
-        redirectTo: this.registerUnlockRedirect,
-      }),
-      advertisement: this.maskQuestionData(listing.advertisement, {
-        lockLabel: this.registerUnlockLabel,
-        lockType: 'AUTH_REQUIRED',
-        redirectTo: this.registerUnlockRedirect,
-      }),
-    };
+  /**
+   * Vetting buyers by hand comes with the Starter and Premium packages.
+   *
+   * The wizard already hides the option on Minimum, but an entitlement decided
+   * only in the browser is not decided at all — the same reason package prices
+   * are recomputed here rather than taken from the request.
+   */
+  private canApproveBuyersManually(selectedPackage?: string | null): boolean {
+    return selectedPackage === 'STARTER' || selectedPackage === 'PREMIUM';
   }
 
   private async hasConfidentialAccess(
@@ -206,58 +156,329 @@ export class ListingService {
           buyerId: viewerUserId,
         },
       },
+      select: { status: true },
     });
 
-    return Boolean(access);
+    // A row on its own is no longer permission — a buyer waiting on a seller
+    // who vets by hand has one too, and must not see anything yet.
+    return access?.status === 'APPROVED';
   }
 
-  private async applyConfidentialMask(listing: any, viewer?: ViewerContext) {
-    if (!listing?.confidentialControl) {
-      return listing;
+  /**
+   * Start Stripe checkout for a listing's package + add-on.
+   *
+   * Amounts are recomputed from the listing price here — the client only says
+   * *what* was picked. A free selection (Minimum without add-on) needs no
+   * payment and is activated straight away.
+   */
+  async createPackageCheckout(
+    listingId: string,
+    userId: string,
+    input: {
+      packageId: PackageId;
+      addon: AddonId;
+      billingCycle: BillingCycleId;
+      successUrl: string;
+      cancelUrl: string;
+    },
+  ) {
+    const listing = await this.db.listing.findUnique({
+      where: { id: listingId },
+      include: { advertisement: true },
+    });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.userId !== userId) {
+      throw new ForbiddenException('You can only pay for your own listing.');
     }
 
-    const viewerRole = viewer?.role?.toUpperCase();
-    if (viewerRole === 'ADMIN' || viewerRole === 'MONITER' || viewerRole === 'MODERATOR') {
-      return listing;
+    const listingPrice = readListingPriceFromAdvertisement(listing.advertisement as any);
+    if (listingPrice === null) {
+      throw new BadRequestException(
+        'Please enter a listing price before selecting a package.',
+      );
     }
 
-    if (viewer?.userId && viewer.userId === listing.userId) {
-      return listing;
+    const charge = computePackageCharge({
+      listingPrice,
+      packageId: input.packageId,
+      addon: input.addon,
+      billingCycle: input.billingCycle,
+    });
+
+    const baseData = {
+      selectedPackage: input.packageId,
+      packageBillingCycle: input.packageId === 'MINIMUM' ? null : input.billingCycle,
+      packageAddons: input.addon === 'NONE' ? [] : [input.addon],
+      successFeePercent: charge.successFeePercent,
+    };
+
+    // Nothing to charge: the free plan is active immediately.
+    if (charge.amountDueToday === 0) {
+      await this.db.listing.update({
+        where: { id: listingId },
+        data: { ...baseData, packageActive: true, packageExpiresAt: null } as any,
+      });
+      return { free: true, checkoutUrl: null };
     }
 
-    const hasBuyerAccess = await this.hasConfidentialAccess(
-      listing.id,
-      viewer?.userId,
-    );
-    if (hasBuyerAccess) {
-      return listing;
+    const user = await this.db.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const existing = await this.db.userSubscription.findUnique({ where: { userId } });
+    let customerId = existing?.stripeCustomerId;
+    if (!customerId) {
+      const customer = await this.stripeService.createCustomer(
+        user.email,
+        `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
+        { userId },
+      );
+      customerId = customer.id;
+    }
+
+    // Stripe cannot mix billing intervals inside one subscription. When the
+    // package runs 3/6-monthly and the add-on monthly, the add-on's first month
+    // is charged on this invoice as a one-off — so the seller sees and pays the
+    // exact total shown in the overview — and the webhook then starts its
+    // monthly subscription from the following month.
+    const intervals = new Set(charge.lines.map((l) => l.intervalMonths));
+    const deferredAddon = intervals.size > 1;
+    const checkoutLines = deferredAddon
+      ? charge.lines.map((l) => (l.intervalMonths === 1 ? { ...l, oneTime: true } : l))
+      : charge.lines;
+
+    const session = await this.stripeService.createDynamicCheckoutSession({
+      customerId,
+      lineItems: checkoutLines,
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      metadata: {
+        listingId,
+        userId,
+        packageId: input.packageId,
+        addon: input.addon,
+        billingCycle: input.billingCycle,
+        successFeePercent: String(charge.successFeePercent),
+        deferredAddon: deferredAddon ? '1' : '0',
+      },
+    });
+
+    // Remember the selection now; `packageActive` only flips once Stripe confirms.
+    await this.db.listing.update({
+      where: { id: listingId },
+      data: baseData as any,
+    });
+
+    return { free: false, checkoutUrl: session.url };
+  }
+
+  /**
+   * What a listing's package and add-on currently are, with the prices this
+   * listing would pay — its tier depends on its own asking price, so the menu
+   * cannot show one shared price list.
+   */
+  async getPackageState(listingId: string, userId: string) {
+    const listing = await this.db.listing.findUnique({
+      where: { id: listingId },
+      include: { advertisement: true },
+    });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.userId !== userId) {
+      throw new ForbiddenException('You can only manage your own listing.');
+    }
+
+    const l = listing as any;
+    const listingPrice = readListingPriceFromAdvertisement(listing.advertisement as any);
+    const tier = getPricingTier(listingPrice ?? 0);
+    const activeAddon: AddonId = (l.packageAddons?.[0] as AddonId) || 'NONE';
+
+    // A cancelled add-on whose date has passed is simply gone.
+    const endsAt: Date | null = l.addonEndsAt ? new Date(l.addonEndsAt) : null;
+    const removalDue = endsAt !== null && endsAt.getTime() <= Date.now();
+    if (removalDue && activeAddon !== 'NONE') {
+      await this.finishAddonRemoval(listingId);
     }
 
     return {
-      ...listing,
-      portfolioLink: this.proUnlockLabel,
-      lockAction: {
-        lockType: 'PRO_SUBSCRIPTION',
-        ctaText: this.proUnlockLabel,
-        redirectTo: this.proUnlockRedirect,
-      },
-      brand: this.maskQuestionData(listing.brand, { hideAll: true }),
-      productQuestion: this.maskQuestionData(listing.productQuestion, {
-        hideAll: true,
-      }),
-      managementQuestion: this.maskQuestionData(listing.managementQuestion, {
-        hideAll: true,
-      }),
-      handover: this.maskQuestionData(listing.handover, { hideAll: true }),
-      social_account: this.maskQuestionData(listing.social_account, {
-        hideAll: true,
-      }),
+      listingId,
+      listingPrice,
+      selectedPackage: l.selectedPackage ?? null,
+      packageBillingCycle: l.packageBillingCycle ?? null,
+      packageActive: Boolean(l.packageActive),
+      packageExpiresAt: l.packageExpiresAt ?? null,
+      addon: removalDue ? 'NONE' : activeAddon,
+      /** Set when the add-on is cancelled but still running out its month. */
+      addonEndsAt: removalDue ? null : endsAt,
+      options: (['CATEGORY_PAGE', 'START_PAGE', 'BUNDLE'] as const).map((id) => ({
+        id,
+        label: ADDON_LABELS[id],
+        monthlyPrice: getAddonPrice(tier, id),
+      })),
     };
+  }
+
+  /** Drop the placement once a cancelled add-on's paid month is over. */
+  private async finishAddonRemoval(listingId: string) {
+    await this.db.listing.update({
+      where: { id: listingId },
+      data: {
+        packageAddons: [],
+        addonEndsAt: null,
+        addonStripeSubscriptionId: null,
+        featuredOnCategoryPage: false,
+        featuredOnStartPage: false,
+      } as any,
+    });
+    this.logger.log(`Listing ${listingId}: add-on removal completed`);
+  }
+
+  /**
+   * Add, replace or cancel a listing's add-on after the listing already exists.
+   *
+   * Three rules, chosen so the seller is never billed twice and never loses a
+   * day they paid for:
+   *  - Adding one is paid for now and live now.
+   *  - Cancelling keeps the placement until the paid month runs out.
+   *  - Replacing one starts the new placement now and refunds the remainder of
+   *    the old as Stripe credit against the next invoice.
+   */
+  async changeAddon(
+    listingId: string,
+    userId: string,
+    input: { addon: AddonId; successUrl: string; cancelUrl: string },
+  ) {
+    const listing = await this.db.listing.findUnique({
+      where: { id: listingId },
+      include: { advertisement: true },
+    });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.userId !== userId) {
+      throw new ForbiddenException('You can only manage your own listing.');
+    }
+
+    const l = listing as any;
+    const currentAddon: AddonId = (l.packageAddons?.[0] as AddonId) || 'NONE';
+    if (currentAddon === input.addon) {
+      throw new BadRequestException('That add-on is already on this listing.');
+    }
+
+    // Cancelling: stop renewing, but leave the placement up until the month
+    // they already paid for is over.
+    if (input.addon === 'NONE') {
+      if (currentAddon === 'NONE') {
+        throw new BadRequestException('This listing has no add-on to cancel.');
+      }
+
+      let endsAt = new Date();
+      if (l.addonStripeSubscriptionId) {
+        const sub: any = await this.stripeService.cancelSubscription(
+          l.addonStripeSubscriptionId,
+          false,
+        );
+        if (sub?.current_period_end) endsAt = new Date(sub.current_period_end * 1000);
+      } else {
+        // No Stripe record (a free or legacy add-on): give the placement the
+        // rest of the current month rather than dropping it mid-view.
+        endsAt.setMonth(endsAt.getMonth() + 1);
+      }
+
+      await this.db.listing.update({
+        where: { id: listingId },
+        data: { addonEndsAt: endsAt } as any,
+      });
+
+      this.logger.log(
+        `Listing ${listingId}: add-on ${currentAddon} ends ${endsAt.toISOString()}`,
+      );
+      return { scheduled: true, addonEndsAt: endsAt, checkoutUrl: null };
+    }
+
+    const listingPrice = readListingPriceFromAdvertisement(listing.advertisement as any);
+    if (listingPrice === null) {
+      throw new BadRequestException(
+        'Please enter a listing price before choosing an add-on.',
+      );
+    }
+
+    const amount = getAddonPrice(getPricingTier(listingPrice), input.addon);
+    if (amount <= 0) throw new BadRequestException('That add-on is not available.');
+
+    const user = await this.db.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const existing = await this.db.userSubscription.findUnique({ where: { userId } });
+    let customerId = existing?.stripeCustomerId;
+    if (!customerId) {
+      const customer = await this.stripeService.createCustomer(
+        user.email,
+        `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
+        { userId },
+      );
+      customerId = customer.id;
+    }
+
+    const session = await this.stripeService.createDynamicCheckoutSession({
+      customerId,
+      lineItems: [
+        { name: ADDON_LABELS[input.addon], amount, intervalMonths: 1 },
+      ],
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      // `addonOnly` matters: without it the webhook would treat this as a full
+      // package purchase and overwrite the package's own subscription id.
+      metadata: {
+        listingId,
+        userId,
+        addon: input.addon,
+        addonOnly: '1',
+        replacesAddonSubscriptionId: l.addonStripeSubscriptionId || '',
+      },
+    });
+
+    return { scheduled: false, addonEndsAt: null, checkoutUrl: session.url };
+  }
+
+  /**
+   * Stop every Stripe subscription attached to a listing. Called when the team
+   * marks it sold — otherwise the seller keeps paying for a business they no
+   * longer own. Failures are logged rather than thrown so marking a listing sold
+   * never fails because of a billing hiccup.
+   */
+  private async cancelListingSubscriptions(listingId: string) {
+    const listing = await this.db.listing.findUnique({
+      where: { id: listingId },
+      select: {
+        packageStripeSubscriptionId: true,
+        addonStripeSubscriptionId: true,
+      },
+    });
+    if (!listing) return;
+
+    const ids = [
+      listing.packageStripeSubscriptionId,
+      listing.addonStripeSubscriptionId,
+    ].filter(Boolean) as string[];
+
+    for (const subscriptionId of ids) {
+      try {
+        await this.stripeService.cancelSubscription(subscriptionId, true);
+      } catch (error) {
+        console.error(
+          `Could not cancel subscription ${subscriptionId} for listing ${listingId}:`,
+          error,
+        );
+      }
+    }
+  }
+
+  /** Roles that manage the marketplace and may see/act on sold listings. */
+  private isStaffRole(role?: string | null): boolean {
+    const r = String(role || '').toUpperCase();
+    return r === 'ADMIN' || r === 'MONITER' || r === 'MODERATOR';
   }
 
   async findAll(
     filters?: {
-      status?: 'PUBLISH' | 'DRAFT';
+      status?: 'PUBLISH' | 'DRAFT' | 'SOLD' | 'BLOCKED';
       category?: string;
       userId?: string;
       page?: number;
@@ -276,7 +497,20 @@ export class ListingService {
     if (filters?.status) {
       where.status = filters.status;
     }
-    
+
+    // A sold business is off the market: it disappears from the public feed
+    // (All Listings) while the team can still find it in the admin views.
+    if (!this.isStaffRole(resolvedViewer.role)) {
+      where.status =
+        filters?.status && filters.status !== 'SOLD' && filters.status !== 'BLOCKED'
+          ? filters.status
+          : { notIn: ['SOLD', 'BLOCKED'] };
+
+      // Blocking an account takes their businesses off the marketplace too;
+      // otherwise a blocked seller keeps collecting enquiries they cannot answer.
+      where.user = { ...(where.user ?? {}), blocked: false };
+    }
+
     // Filter by category if provided
     if (filters?.category) {
       where.category = {
@@ -325,14 +559,21 @@ export class ListingService {
       // each omitted relation is one fewer round-trip to the database per feed
       // load and a smaller payload.
       include: {
+        // Same shape as findOne, so a seller's identity is never richer on one
+        // endpoint than the other. The email address is deliberately absent —
+        // no screen shows it and contact runs through in-app chat.
         user: {
           select: {
             id: true,
             created_at: true,
             first_name: true,
             last_name: true,
-            email: true,
+            profile_pic: true,
           },
+        },
+        // Who on the team is looking after this listing, for the admin table.
+        responsible: {
+          select: { id: true, first_name: true, last_name: true, profile_pic: true },
         },
         brand: true,
         category: true,
@@ -360,18 +601,139 @@ export class ListingService {
       ...nonFeaturedListings,
     ].map((listing) => trimListingFeedRecord(listing as Record<string, any>));
 
-    return Promise.all(rotatedListings.map(async (listing) => {
-      const withConfidentialMask = await this.applyConfidentialMask(
-        listing,
-        resolvedViewer,
-      );
+    // One query for every listing this viewer already has access to, rather
+    // than one lookup per row.
+    // trimListingFeedRecord widens the record, so read the id back as a string.
+    const accessibleIds = await this.confidentialAccessIds(
+      rotatedListings.map((listing) => String(listing.id)),
+      resolvedViewer.userId,
+    );
 
-      // if (resolvedViewer.viewerType === 'UNREGISTERED') {
-      //   return this.applyUnregisteredMask(withConfidentialMask);
-      // }
+    return rotatedListings.map((listing) =>
+      maskListingFor(listing, {
+        userId: resolvedViewer.userId,
+        role: resolvedViewer.role,
+        hasConfidentialAccess: accessibleIds.has(String(listing.id)),
+      }),
+    );
+  }
 
-      return withConfidentialMask;
-    }));
+  /**
+   * Which of these listings the viewer has already accepted the agreement for.
+   * Batched so a feed costs one query instead of one per listing.
+   */
+  private async confidentialAccessIds(
+    listingIds: string[],
+    viewerUserId?: string,
+  ): Promise<Set<string>> {
+    if (!viewerUserId || listingIds.length === 0) return new Set();
+
+    const rows = await this.db.listingConfidentialAccess.findMany({
+      // Only decided-in-their-favour rows count; a pending request grants
+      // nothing, and neither does one the seller turned down.
+      where: {
+        buyerId: viewerUserId,
+        listingId: { in: listingIds },
+        status: 'APPROVED',
+      },
+      select: { listingId: true },
+    });
+
+    return new Set(rows.map((row) => row.listingId));
+  }
+
+  /**
+   * Listings still inside their early-access window — "off market".
+   *
+   * A listing is Pro-only for its first `earlyAccessDays`, then goes public.
+   * The main feed simply drops these for everyone else, which is why the
+   * teaser on All Listings needs its own way in.
+   *
+   * Pro members (and staff) get the listings themselves. Everyone else gets a
+   * teaser: category, asking price and the countdown.
+   *
+   * The price is deliberately included. What Pro sells here is the ability to
+   * *act* first — the full listing and the seller — not secrecy about the
+   * price, which becomes public in a few days regardless. A card that shows
+   * only "new listing, 5 days left" gives nobody a reason to upgrade.
+   */
+  async findOffMarket(viewer?: ViewerContext) {
+    const resolvedViewer: ViewerContext = viewer || { viewerType: 'UNREGISTERED' };
+    const cutoff = new Date(Date.now() - this.earlyAccessDays * 24 * 60 * 60 * 1000);
+
+    const listings = await this.db.listing.findMany({
+      where: { status: 'PUBLISH', created_at: { gt: cutoff } },
+      include: {
+        user: {
+          select: {
+            id: true,
+            created_at: true,
+            first_name: true,
+            last_name: true,
+            profile_pic: true,
+          },
+        },
+        brand: true,
+        category: true,
+        financials: true,
+        statistics: true,
+        advertisement: true,
+      },
+      orderBy: { created_at: 'desc' },
+      take: 12,
+    });
+
+    /** Whole days until this listing becomes public; never below one. */
+    const daysLeft = (createdAt: Date) => {
+      const goesPublic =
+        new Date(createdAt).getTime() + this.earlyAccessDays * 24 * 60 * 60 * 1000;
+      return Math.max(1, Math.ceil((goesPublic - Date.now()) / (24 * 60 * 60 * 1000)));
+    };
+
+    const hasEarlyAccess =
+      resolvedViewer.viewerType === 'REGISTERED_PRO' ||
+      this.isStaffRole(resolvedViewer.role);
+
+    if (!hasEarlyAccess) {
+      return {
+        total: listings.length,
+        hasEarlyAccess: false,
+        listings: listings.map((listing) => ({
+          id: listing.id,
+          category: (listing as any).category ?? [],
+          askingPrice: readListingPriceFromAdvertisement(
+            ((listing as any).advertisement ?? []) as Array<{
+              question?: string | null;
+              answer?: unknown;
+            }>,
+          ),
+          daysRemaining: daysLeft(listing.created_at),
+          locked: true,
+        })),
+      };
+    }
+
+    const accessibleIds = await this.confidentialAccessIds(
+      listings.map((listing) => listing.id),
+      resolvedViewer.userId,
+    );
+
+    return {
+      total: listings.length,
+      hasEarlyAccess: true,
+      listings: listings.map((listing) => ({
+        ...maskListingFor(
+          trimListingFeedRecord(listing as Record<string, any>),
+          {
+            userId: resolvedViewer.userId,
+            role: resolvedViewer.role,
+            hasConfidentialAccess: accessibleIds.has(listing.id),
+          },
+        ),
+        daysRemaining: daysLeft(listing.created_at),
+        locked: false,
+      })),
+    };
   }
 
   async findOne(id: string, viewer?: ViewerContext) {
@@ -388,7 +750,6 @@ export class ListingService {
             created_at: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
           },
         },
@@ -420,15 +781,15 @@ export class ListingService {
     }
 
     const normalizedListing = trimListingFeedRecord(listing as Record<string, any>);
-    const withConfidentialMask = await this.applyConfidentialMask(
-      normalizedListing,
-      resolvedViewer,
-    );
-    // if (resolvedViewer.viewerType === 'UNREGISTERED') {
-    //   return this.applyUnregisteredMask(withConfidentialMask);
-    // }
 
-    return withConfidentialMask;
+    return maskListingFor(normalizedListing, {
+      userId: resolvedViewer.userId,
+      role: resolvedViewer.role,
+      hasConfidentialAccess: await this.hasConfidentialAccess(
+        listing.id,
+        resolvedViewer.userId,
+      ),
+    });
   }
 
   async resolveViewerContext(userId?: string, role?: string | null): Promise<ViewerContext> {
@@ -444,6 +805,161 @@ export class ListingService {
     return { userId, viewerType: 'REGISTERED_FREE', role };
   }
 
+  /**
+   * A buyer accepts the platform confidentiality agreement.
+   *
+   * With "Approve Buyers Manually" switched off (the default) this immediately
+   * unlocks the confidential details — the agreement alone is the gate. With it
+   * switched on, nothing is granted here and the seller has to approve the
+   * buyer first.
+   */
+  async acceptConfidentialityAgreement(listingId: string, buyerId: string) {
+    const listing = await this.db.listing.findUnique({
+      where: { id: listingId },
+      select: {
+        id: true,
+        userId: true,
+        confidentialControl: true,
+        approveBuyersManually: true,
+      },
+    });
+    if (!listing) throw new NotFoundException('Listing not found');
+
+    // The seller always sees their own listing in full.
+    if (listing.userId === buyerId) {
+      return { granted: true, pendingApproval: false };
+    }
+
+    // No early return for listings without confidentialControl. The agreement
+    // now gates every listing, so acceptance must always write an access row —
+    // returning "granted" without one would lock the buyer out permanently,
+    // since re-accepting would take the same path.
+    /**
+     * The seller vets buyers by hand.
+     *
+     * A request has to be written down, or there is nothing for the seller to
+     * approve and nothing to tell the buyer they are waiting — which is what
+     * used to happen: this returned "pending" and saved nothing at all.
+     */
+    if (listing.approveBuyersManually === true) {
+      const existing = await this.db.listingConfidentialAccess.findUnique({
+        where: { listingId_buyerId: { listingId, buyerId } },
+        select: { status: true },
+      });
+
+      // Already decided? Leave it. Re-accepting the agreement must not undo a
+      // seller's refusal, nor re-open a request they already approved.
+      if (existing?.status === 'APPROVED') {
+        return { granted: true, pendingApproval: false };
+      }
+      if (existing?.status === 'DECLINED') {
+        return { granted: false, pendingApproval: false, declined: true };
+      }
+
+      await this.db.listingConfidentialAccess.upsert({
+        where: { listingId_buyerId: { listingId, buyerId } },
+        create: {
+          listingId,
+          buyerId,
+          grantedBySellerId: listing.userId,
+          chatId: null,
+          status: 'PENDING',
+        },
+        update: { status: 'PENDING' },
+      });
+
+      return { granted: false, pendingApproval: true };
+    }
+
+    // This listing does not vet buyers, so accepting the agreement is enough.
+    await this.db.listingConfidentialAccess.upsert({
+      where: { listingId_buyerId: { listingId, buyerId } },
+      create: {
+        listingId,
+        buyerId,
+        grantedBySellerId: listing.userId,
+        chatId: null,
+        status: 'APPROVED',
+        decidedAt: new Date(),
+      },
+      update: {
+        grantedBySellerId: listing.userId,
+        status: 'APPROVED',
+        decidedAt: new Date(),
+      },
+    });
+
+    return { granted: true, pendingApproval: false };
+  }
+
+  /**
+   * Every buyer waiting on this seller's decision, newest first.
+   *
+   * Grouped by listing on the way out so the chat list can head its
+   * "Confidential Access Requests" section with a single count.
+   */
+  async getPendingConfidentialRequests(sellerId: string) {
+    const rows = await this.db.listingConfidentialAccess.findMany({
+      where: {
+        status: 'PENDING',
+        listing: { userId: sellerId },
+      },
+      include: {
+        buyer: {
+          select: { id: true, first_name: true, last_name: true, profile_pic: true },
+        },
+        listing: {
+          include: { brand: true, advertisement: true },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      listingId: row.listingId,
+      listing: row.listing,
+      buyer: row.buyer,
+      chatId: row.chatId,
+      requestedAt: row.created_at,
+    }));
+  }
+
+  /** Turn a request down. The buyer keeps the public view and nothing more. */
+  async declineConfidentialAccess(
+    listingId: string,
+    sellerId: string,
+    buyerId: string,
+  ) {
+    const listing = await this.db.listing.findUnique({
+      where: { id: listingId },
+      select: { id: true, userId: true },
+    });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.userId !== sellerId) {
+      throw new ForbiddenException(
+        'Only the listing seller can decide on access requests.',
+      );
+    }
+
+    const request = await this.db.listingConfidentialAccess.findUnique({
+      where: { listingId_buyerId: { listingId, buyerId } },
+      select: { status: true },
+    });
+    if (!request) throw new NotFoundException('No request from this buyer.');
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('That request has already been decided.');
+    }
+
+    await this.db.listingConfidentialAccess.update({
+      where: { listingId_buyerId: { listingId, buyerId } },
+      data: { status: 'DECLINED', decidedAt: new Date() },
+    });
+
+    this.logger.log(`Listing ${listingId}: access declined for buyer ${buyerId}`);
+    return { success: true };
+  }
+
   async grantConfidentialAccess(
     listingId: string,
     sellerId: string,
@@ -452,7 +968,13 @@ export class ListingService {
   ) {
     const listing = await this.db.listing.findUnique({
       where: { id: listingId },
-      select: { id: true, userId: true, confidentialControl: true },
+      select: {
+        id: true,
+        userId: true,
+        confidentialControl: true,
+        selectedPackage: true,
+        packageActive: true,
+      },
     });
 
     if (!listing) {
@@ -465,9 +987,19 @@ export class ListingService {
       );
     }
 
-    if (!listing.confidentialControl) {
-      throw new BadRequestException(
-        'Confidential control is not enabled for this listing.',
+    // No confidentialControl check. Every listing now holds something behind
+    // the agreement, so granting is always meaningful — and it only ever gives
+    // a buyer more access, which the owner is entitled to do.
+
+    // An expired package still lets the seller see requests, but not approve
+    // them — they have to buy a package again first. Listings from before
+    // packages existed (packageActive null) are left alone.
+    const paidPackage =
+      listing.selectedPackage === 'STARTER' ||
+      listing.selectedPackage === 'PREMIUM';
+    if (paidPackage && listing.packageActive === false) {
+      throw new ForbiddenException(
+        'Your package has expired. Please renew it to approve buyers.',
       );
     }
 
@@ -503,10 +1035,15 @@ export class ListingService {
         buyerId,
         grantedBySellerId: sellerId,
         chatId: chatId || null,
+        status: 'APPROVED',
+        decidedAt: new Date(),
       },
       update: {
         grantedBySellerId: sellerId,
         chatId: chatId || null,
+        // Approving clears a pending request and reverses a past refusal.
+        status: 'APPROVED',
+        decidedAt: new Date(),
       },
     });
   }
@@ -539,8 +1076,20 @@ export class ListingService {
   }
 
   async getConfidentialAccessStatus(listingId: string, buyerId: string) {
-    const hasAccess = await this.hasConfidentialAccess(listingId, buyerId);
-    return { listingId, buyerId, hasAccess };
+    const row = await this.db.listingConfidentialAccess.findUnique({
+      where: { listingId_buyerId: { listingId, buyerId } },
+      select: { status: true },
+    });
+
+    // "No access" now has three shapes — never asked, waiting, refused — and
+    // the chat says something different for each.
+    return {
+      listingId,
+      buyerId,
+      hasAccess: row?.status === 'APPROVED',
+      status: row?.status ?? null,
+      isPending: row?.status === 'PENDING',
+    };
   }
 
   async getConfidentialAccessStatusForSeller(
@@ -569,23 +1118,12 @@ export class ListingService {
   async create(userId: string, body: ListingSchemaT) {
     const rules = await this.subscriptionService.getUserSubscriptionRules(userId);
 
-    if (body.confidentialControl && !rules.actions.canToggleConfidentialControl) {
-      throw new ForbiddenException(
-        'Confidential control is available only for Pro sellers.',
-      );
-    }
-
-    if (body.featuredOnCategoryPage && !rules.actions.canFeatureOnCategoryPage) {
-      throw new ForbiddenException(
-        'Featured on category page is available only for Pro sellers.',
-      );
-    }
-
-    if (body.featuredOnStartPage && !rules.actions.canFeatureOnStartPage) {
-      throw new BadRequestException(
-        'Featured on start page is a separate paid add-on, not included in subscription.',
-      );
-    }
+    // Seller features now come from the listing's own package, not a Pro
+    // subscription. Confidential control needs a paid package; the featured
+    // placements are switched on by the add-on once payment clears, so whatever
+    // the client sends for them is ignored here.
+    const confidentialAllowed =
+      body.selectedPackage === 'STARTER' || body.selectedPackage === 'PREMIUM';
 
     const usage = await this.subscriptionService.getUserListingLimit(userId);
     if (!usage.canCreate) {
@@ -682,9 +1220,17 @@ export class ListingService {
       user: {
         connect: { id: userId },
       },
-      confidentialControl: Boolean(body.confidentialControl),
-      featuredOnCategoryPage: Boolean(body.featuredOnCategoryPage),
-      featuredOnStartPage: Boolean(body.featuredOnStartPage),
+      confidentialControl: Boolean(body.confidentialControl) && confidentialAllowed,
+      // Granted by the add-on when payment completes, never set by the client.
+      featuredOnCategoryPage: false,
+      featuredOnStartPage: false,
+      selectedPackage: body.selectedPackage ?? null,
+      packageBillingCycle: body.packageBillingCycle ?? null,
+      packageAddons: Array.isArray(body.packageAddons) ? body.packageAddons : [],
+      successFeePercent: body.successFeePercent ?? null,
+      approveBuyersManually: this.canApproveBuyersManually(body.selectedPackage)
+        ? (body.approveBuyersManually ?? null)
+        : false,
     };
 
     // Only add createMany for arrays that have valid data
@@ -787,7 +1333,12 @@ export class ListingService {
       key !== 'portfolioLink' &&
       key !== 'confidentialControl' &&
       key !== 'featuredOnCategoryPage' &&
-      key !== 'featuredOnStartPage'
+      key !== 'featuredOnStartPage' &&
+      key !== 'selectedPackage' &&
+      key !== 'packageBillingCycle' &&
+      key !== 'packageAddons' &&
+      key !== 'successFeePercent' &&
+      key !== 'approveBuyersManually'
     );
     
     if (dataFields.length === 0) {
@@ -816,31 +1367,60 @@ export class ListingService {
     });
   }
 
-  async update(id: string, userId: string, body: UpdateListingT) {
-    if (body.confidentialControl !== undefined) {
-      const rules = await this.subscriptionService.getUserSubscriptionRules(userId);
-      if (body.confidentialControl && !rules.actions.canToggleConfidentialControl) {
+  async update(
+    id: string,
+    userId: string,
+    body: UpdateListingT,
+    actorRole?: string | null,
+  ) {
+    // Marking a business as sold is a platform-team action, never the seller's.
+    if (body.status === 'SOLD' && !this.isStaffRole(actorRole)) {
+      throw new ForbiddenException(
+        'Only the platform team can mark a listing as sold.',
+      );
+    }
+
+    if (body.status === 'BLOCKED' && !this.isStaffRole(actorRole)) {
+      throw new ForbiddenException(
+        'Only the platform team can block a listing.',
+      );
+    }
+
+    // A blocked listing may still be edited — the owner has to be able to fix
+    // whatever was wrong — but only the team can put it back on the market.
+    if (!this.isStaffRole(actorRole)) {
+      const current = await this.db.listing.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (current?.status === 'BLOCKED' && body.status && body.status !== 'BLOCKED') {
         throw new ForbiddenException(
-          'Confidential control is available only for Pro sellers.',
+          'This listing was blocked by our team. Edit it and ask us to review it — it cannot be republished directly.',
         );
       }
     }
 
-    if (body.featuredOnCategoryPage !== undefined) {
-      const rules = await this.subscriptionService.getUserSubscriptionRules(userId);
-      if (body.featuredOnCategoryPage && !rules.actions.canFeatureOnCategoryPage) {
-        throw new ForbiddenException(
-          'Featured on category page is available only for Pro sellers.',
-        );
-      }
+    // Assigning a team member is a staff action; ignore it from anyone else
+    // rather than letting a seller hand their listing to someone.
+    if (body.responsibleId !== undefined && !this.isStaffRole(actorRole)) {
+      delete (body as any).responsibleId;
     }
 
-    if (body.featuredOnStartPage !== undefined) {
-      const rules = await this.subscriptionService.getUserSubscriptionRules(userId);
-      if (body.featuredOnStartPage && !rules.actions.canFeatureOnStartPage) {
-        throw new BadRequestException(
-          'Featured on start page is a separate paid add-on, not included in subscription.',
-        );
+    // Confidential control belongs to the paid packages. Rather than rejecting
+    // the whole save (which would strand listings created under the old Pro
+    // rules), the flag is simply turned off when there is no paid package.
+    if (body.confidentialControl) {
+      const chosen =
+        body.selectedPackage ??
+        (
+          await this.db.listing.findUnique({
+            where: { id },
+            select: { selectedPackage: true },
+          })
+        )?.selectedPackage;
+
+      if (chosen !== 'STARTER' && chosen !== 'PREMIUM') {
+        body = { ...body, confidentialControl: false };
       }
     }
 
@@ -967,6 +1547,21 @@ export class ListingService {
     // Always include status if provided
     if (body.status) {
       updateData.status = body.status;
+
+      if (body.status === 'SOLD') {
+        // The business is sold, so the seller must stop being billed for it.
+        updateData.soldAt = new Date();
+        updateData.packageBillingCycle = null;
+        updateData.packageActive = false;
+        updateData.featuredOnCategoryPage = false;
+        updateData.featuredOnStartPage = false;
+        updateData.packageStripeSubscriptionId = null;
+        updateData.addonStripeSubscriptionId = null;
+
+        await this.cancelListingSubscriptions(id);
+      } else {
+        updateData.soldAt = null;
+      }
     }
     
     // CRITICAL: Always include managed_by_ex if provided (even if false)
@@ -976,32 +1571,65 @@ export class ListingService {
       console.log(`📝 Updating listing ${id}: managed_by_ex = ${updateData.managed_by_ex}`);
     }
 
+    // Assignment and block reason. The admin table was already sending
+    // responsibleId; there was simply nothing here to write it with.
+    if (body.responsibleId !== undefined) {
+      updateData.responsibleId = body.responsibleId || null;
+    }
+
+    if (body.status === 'BLOCKED') {
+      updateData.blockedReason = body.blockedReason || null;
+    } else if (body.status) {
+      // Any other status means the block has been lifted; the note goes too.
+      updateData.blockedReason = null;
+    }
+
     if (body.confidentialControl !== undefined) {
       updateData.confidentialControl = Boolean(body.confidentialControl);
     }
 
-    if (body.featuredOnCategoryPage !== undefined) {
-      updateData.featuredOnCategoryPage = Boolean(body.featuredOnCategoryPage);
+    // featuredOnCategoryPage / featuredOnStartPage are deliberately not taken
+    // from the request: they are granted by the paid add-on (see the Stripe
+    // webhook) and cleared when the package lapses.
+
+    if (body.selectedPackage !== undefined) {
+      updateData.selectedPackage = body.selectedPackage ?? null;
     }
 
-    if (body.featuredOnStartPage !== undefined) {
-      updateData.featuredOnStartPage = Boolean(body.featuredOnStartPage);
+    if (body.packageBillingCycle !== undefined) {
+      updateData.packageBillingCycle = body.packageBillingCycle ?? null;
+    }
+
+    if (body.packageAddons !== undefined) {
+      updateData.packageAddons = Array.isArray(body.packageAddons)
+        ? body.packageAddons
+        : [];
+    }
+
+    if (body.successFeePercent !== undefined) {
+      updateData.successFeePercent = body.successFeePercent ?? null;
+    }
+
+    if (body.approveBuyersManually !== undefined) {
+      // Checked against the package being saved, falling back to the one the
+      // listing already has when the update does not change it.
+      const packageForCheck =
+        body.selectedPackage !== undefined
+          ? body.selectedPackage
+          : (await this.db.listing.findUnique({
+              where: { id },
+              select: { selectedPackage: true },
+            }))?.selectedPackage;
+
+      updateData.approveBuyersManually = this.canApproveBuyersManually(packageForCheck)
+        ? (body.approveBuyersManually ?? null)
+        : false;
     }
     
     // Include all the nested updates
     if (body.brand) {
-      updateData.brand = {
-        updateMany: body.brand.map((question) => ({
-          where: { id: question.id },
-          data: {
-            answer: this.normalizeAnswerForStorage(question.answer),
-            question: question.question,
-            answer_for: question.answer_for,
-            answer_type: this.normalizeAnswerTypeForStorage(question.answer_type) as any,
-            option: question.option,
-          },
-        })),
-      };
+      const replace = this.buildQuestionReplace(body.brand);
+      if (replace) updateData.brand = replace;
     }
     
     if (body.category) {
@@ -1038,93 +1666,33 @@ export class ListingService {
     }
     
     if (body.statistics) {
-      updateData.statistics = {
-        updateMany: body.statistics.map((question) => ({
-          where: { id: question.id },
-          data: {
-            answer: this.normalizeAnswerForStorage(question.answer),
-            question: question.question,
-            answer_for: question.answer_for,
-            answer_type: this.normalizeAnswerTypeForStorage(question.answer_type) as any,
-            option: question.option,
-          },
-        })),
-      };
+      const replace = this.buildQuestionReplace(body.statistics);
+      if (replace) updateData.statistics = replace;
     }
     
     if (body.productQuestion) {
-      updateData.productQuestion = {
-        updateMany: body.productQuestion.map((question) => ({
-          where: { id: question.id },
-          data: {
-            answer: this.normalizeAnswerForStorage(question.answer),
-            question: question.question,
-            answer_for: question.answer_for,
-            answer_type: this.normalizeAnswerTypeForStorage(question.answer_type) as any,
-            option: question.option,
-          },
-        })),
-      };
+      const replace = this.buildQuestionReplace(body.productQuestion);
+      if (replace) updateData.productQuestion = replace;
     }
     
     if (body.managementQuestion) {
-      updateData.managementQuestion = {
-        updateMany: body.managementQuestion.map((question) => ({
-          where: { id: question.id },
-          data: {
-            answer: this.normalizeAnswerForStorage(question.answer),
-            question: question.question,
-            answer_for: question.answer_for,
-            answer_type: this.normalizeAnswerTypeForStorage(question.answer_type) as any,
-            option: question.option,
-          },
-        })),
-      };
+      const replace = this.buildQuestionReplace(body.managementQuestion);
+      if (replace) updateData.managementQuestion = replace;
     }
     
     if (body.social_account) {
-      updateData.social_account = {
-        updateMany: body.social_account.map((question) => ({
-          where: { id: question.id },
-          data: {
-            answer: this.normalizeAnswerForStorage(question.answer),
-            question: question.question,
-            answer_for: question.answer_for,
-            answer_type: this.normalizeAnswerTypeForStorage(question.answer_type) as any,
-            option: question.option,
-          },
-        })),
-      };
+      const replace = this.buildQuestionReplace(body.social_account);
+      if (replace) updateData.social_account = replace;
     }
     
     if (body.advertisement) {
-      updateData.advertisement = {
-        updateMany: body.advertisement.map((question) => ({
-          where: { id: question.id },
-          data: {
-            answer: this.normalizeAnswerForStorage(question.answer),
-            question: question.question,
-            answer_for: question.answer_for,
-            answer_type: this.normalizeAnswerTypeForStorage(question.answer_type) as any,
-            option: question.option,
-          },
-        })),
-      };
+      const replace = this.buildQuestionReplace(body.advertisement);
+      if (replace) updateData.advertisement = replace;
     }
     
     if (body.handover) {
-      updateData.handover = {
-        updateMany: body.handover.map((question) => ({
-          where: { id: question.id },
-          data: {
-            answer: this.normalizeAnswerForStorage(question.answer),
-            question: question.question,
-            answer_for: question.answer_for,
-            answer_type: this.normalizeAnswerTypeForStorage(question.answer_type) as any,
-            option: question.option,
-          },
-        })),
-      };
+      const replace = this.buildQuestionReplace(body.handover);
+      if (replace) updateData.handover = replace;
     }
     
     // Log the update data for debugging

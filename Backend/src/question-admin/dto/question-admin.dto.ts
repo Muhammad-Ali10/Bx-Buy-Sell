@@ -24,6 +24,9 @@ export const QuestionAdminSchema = z.object({
   answer_type: AnswerTypeSchema,
   answer_for: z.enum(['BRAND', 'PRODUCT', 'MANAGEMENT', 'HANDOVER', 'STATISTIC', 'ADVERTISMENT', 'SOCIAL']),
   options: z.array(z.string()).optional(),
+  dependsOnQuestionId: z.string().nullish(),
+  dependsOnValue: z.string().nullish(),
+  required: z.boolean().nullish(),
 }).superRefine((data, ctx) => {
   if (data.answer_type === 'SELECT' || data.answer_type === 'CHECKBOX') {
     if (!data.options || data.options.length < 2) {
@@ -45,6 +48,9 @@ export const UpdateQuestionAdminSchema = z.object({
   answer_type: AnswerTypeSchema.optional(),
   answer_for: z.enum(['BRAND', 'PRODUCT', 'MANAGEMENT', 'HANDOVER', 'STATISTIC', 'ADVERTISMENT', 'SOCIAL']).optional(),
   options: z.array(z.string()).optional(),
+  dependsOnQuestionId: z.string().nullish(),
+  dependsOnValue: z.string().nullish(),
+  required: z.boolean().nullish(),
 }).superRefine((data, ctx) => {
   if ((data.answer_type === 'SELECT' || data.answer_type === 'CHECKBOX') && data.options !== undefined && data.options.length < 2) {
     ctx.addIssue({

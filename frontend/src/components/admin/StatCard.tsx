@@ -1,5 +1,6 @@
 import { TrendingUp } from "lucide-react";
 
+import { formatNumber } from "@/lib/formatNumber";
 interface StatCardProps {
   title: string;
   value: string | number;
@@ -51,7 +52,7 @@ export const StatCard = ({ title, value, change, period }: StatCardProps) => {
           marginBottom: '8px',
         }}
       >
-        {typeof value === 'number' ? value.toLocaleString() : value}
+        {typeof value === 'number' ? formatNumber(value) : value}
       </p>
 
       {/* Change and Period Row */}

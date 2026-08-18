@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useAddAccountQuestion } from "@/hooks/useAddAccountQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 
 interface AddAccountQuestionDialogProps {
   open: boolean;
@@ -16,11 +17,12 @@ interface AddAccountQuestionDialogProps {
 const QUESTION_TYPES = [
   { value: "TEXT", label: "Text" },
   { value: "NUMBER", label: "Number" },
+  { value: "URL", label: "Link" },
   { value: "DATE", label: "Date" },
-  { value: "SELECT", label: "Select" },
+  { value: "SELECT", label: "Dropdown" },
   { value: "CHECKBOX", label: "Checkbox (Multiple)" },
-  { value: "TEXTAREA", label: "Text Area" },
   { value: "YESNO", label: "Yes / No" },
+  { value: "TEXTAREA", label: "Text Area" },
 ];
 
 export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuestionDialogProps) => {
@@ -28,6 +30,7 @@ export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuest
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState(""); // Options field for SELECT type
+  const [required, setRequired] = useState(true);
   const addQuestion = useAddAccountQuestion();
 
   const handleSave = () => {
@@ -49,6 +52,7 @@ export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuest
         question: question.trim(),
         answer_type: questionType,
         options: optionsArray,
+        required,
       },
       {
         onSuccess: () => {
@@ -56,6 +60,7 @@ export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuest
           setHintText("");
           setQuestionType("TEXT");
           setOptions("");
+          setRequired(true);
           onOpenChange(false);
         },
       }
@@ -67,6 +72,7 @@ export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuest
     setHintText("");
     setQuestionType("TEXT");
     setOptions("");
+    setRequired(true);
     onOpenChange(false);
   };
 
@@ -122,6 +128,7 @@ export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuest
               <p className="text-xs text-gray-500">Enter options separated by commas (e.g., "Yes, No" or "Option 1, Option 2")</p>
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

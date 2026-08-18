@@ -28,7 +28,7 @@ export default function AdminUserListings() {
     <div className="flex min-h-screen w-full bg-background">
       <AdminSidebar />
       
-      <main className="flex-1">
+      <main className="flex-1 min-w-0">
         <AdminHeader title="User Details" />
 
         <div className="p-8">

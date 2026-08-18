@@ -1,12 +1,24 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Search, MoreVertical, Eye, Ban, Trash2, Loader2 } from "lucide-react";
+import {
+  Search,
+  MoreVertical,
+  Eye,
+  Ban,
+  Trash2,
+  Loader2,
+  MessageSquare,
+  ArrowUp,
+  ArrowDown,
+  ChevronsUpDown,
+  ShieldCheck,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +38,38 @@ import { toast } from "sonner";
 import { apiClient } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import { formatPresence } from "@/lib/lastSeen";
+import { DuplicateAccountsNotice } from "@/components/admin/DuplicateAccountsNotice";
+
+/**
+ * Team members are users with a staff role, not a separate population, so they
+ * are managed here rather than on their own screen. The tabs are the merge:
+ * one list, filtered by what kind of account it is.
+ */
+const ROLE_TABS = [
+  { key: "all", label: "All" },
+  { key: "user", label: "Users" },
+  { key: "moniter", label: "Moderators" },
+  { key: "admin", label: "Admins" },
+] as const;
+
+type RoleTab = (typeof ROLE_TABS)[number]["key"];
+type SortKey = "id" | "name" | "listings" | "registered" | "status";
+
+/** "Moniter" is the value in the database; nobody should have to read that. */
+const roleLabel = (role: string | null | undefined) => {
+  switch ((role || "").toLowerCase()) {
+    case "admin":
+      return "Admin";
+    case "moniter":
+    case "moderator":
+      return "Moderator";
+    case "seller":
+      return "Seller";
+    default:
+      return "User";
+  }
+};
 
 export default function AdminUsers() {
   const navigate = useNavigate();
@@ -33,6 +77,21 @@ export default function AdminUsers() {
   const { user: currentUser } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  // The sidebar's "Team Members" entry links here with ?role=team, so the old
+  // shortcut still lands on the right list after the merge.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const roleParam = searchParams.get("role");
+  const [roleTab, setRoleTab] = useState<RoleTab>(
+    roleParam === "team" || roleParam === "moniter"
+      ? "moniter"
+      : roleParam === "admin"
+        ? "admin"
+        : roleParam === "user"
+          ? "user"
+          : "all",
+  );
+  const [sortKey, setSortKey] = useState<SortKey>("registered");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const pageSize = 15;
   const { data: users, isLoading, error } = useAdminUsers();
   const currentRole = currentUser?.role?.toUpperCase();
@@ -42,14 +101,88 @@ export default function AdminUsers() {
     console.error("Error loading users:", error);
   }
 
-  const filteredUsers = users?.filter((user) => {
-    const query = searchQuery.toLowerCase();
+  const filteredUsers = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const matching = (users || []).filter((user) => {
+      const role = (user.user_type || "user").toLowerCase();
+      if (roleTab === "user" && (role === "admin" || role === "moniter")) return false;
+      if (roleTab === "moniter" && role !== "moniter") return false;
+      if (roleTab === "admin" && role !== "admin") return false;
+
+      if (!query) return true;
+      return (
+        user.full_name?.toLowerCase().includes(query) ||
+        user.email?.toLowerCase().includes(query) ||
+        user.phone?.toLowerCase().includes(query)
+      );
+    });
+
+    // Sorting is applied to the whole filtered set, not to the current page,
+    // so "oldest first" means oldest overall rather than oldest of fifteen.
+    const direction = sortDir === "asc" ? 1 : -1;
+    const byText = (a?: string | null, b?: string | null) =>
+      (a || "").localeCompare(b || "", "en-US", { sensitivity: "base" });
+
+    return [...matching].sort((a, b) => {
+      switch (sortKey) {
+        case "name":
+          return direction * byText(a.full_name || a.email, b.full_name || b.email);
+        case "listings":
+          return direction * (a.listings_count - b.listings_count);
+        case "registered":
+          return (
+            direction *
+            (new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+          );
+        case "status": {
+          // Online first, then whoever was seen most recently.
+          const rank = (u: AdminUser) =>
+            u.blocked ? -1 : u.is_online ? Number.MAX_SAFE_INTEGER : new Date(u.last_seen || 0).getTime();
+          return direction * (rank(a) - rank(b));
+        }
+        case "id":
+        default:
+          return direction * byText(a.id, b.id);
+      }
+    });
+  }, [users, searchQuery, roleTab, sortKey, sortDir]);
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "registered" || key === "listings" || key === "status" ? "desc" : "asc");
+  };
+
+  const SortableHead = ({
+    label,
+    sortKey: key,
+    className,
+    style,
+  }: {
+    label: string;
+    sortKey: SortKey;
+    className?: string;
+    style?: React.CSSProperties;
+  }) => {
+    const active = sortKey === key;
+    const Icon = !active ? ChevronsUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
     return (
-      user.full_name?.toLowerCase().includes(query) ||
-      user.email?.toLowerCase().includes(query) ||
-      user.phone?.toLowerCase().includes(query)
+      <TableHead className={className} style={style}>
+        <button
+          type="button"
+          onClick={() => toggleSort(key)}
+          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+          aria-label={`Sort by ${label}`}
+        >
+          {label}
+          <Icon className={`h-3.5 w-3.5 ${active ? "text-foreground" : "text-muted-foreground/60"}`} />
+        </button>
+      </TableHead>
     );
-  }) || [];
+  };
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -62,9 +195,26 @@ export default function AdminUsers() {
     }
   }, [currentPage, totalPages]);
 
+  // Changing what is listed should start from the first page again.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [roleTab, searchQuery, sortKey, sortDir]);
+
+  // Keep the address bar honest, so the tab survives a reload or a shared link.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (roleTab === "all") next.delete("role");
+    else next.set("role", roleTab);
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [roleTab]);
+
   const getStatusBadge = (user: AdminUser) => {
-    // Blocked takes priority
-    if (user.verified === false) {
+    // Blocked takes priority. This reads the moderation flag, not `verified`:
+    // an unverified account is not a blocked one, and conflating them made
+    // every unverified user look banned.
+    if (user.blocked === true) {
       return (
         <Badge
           variant="accent"
@@ -86,12 +236,13 @@ export default function AdminUsers() {
       );
     }
 
+    // "Offline" on its own says nothing useful; when they were last here does.
     return (
       <Badge
         variant="accent"
-        className="bg-yellow-500/20 text-yellow-700 border-yellow-500/30 rounded-full px-3 py-0.5 text-xs font-medium hover:bg-yellow-500/20 cursor-default"
+        className="bg-muted text-muted-foreground border-border rounded-full px-3 py-0.5 text-xs font-medium hover:bg-muted cursor-default whitespace-nowrap"
       >
-        Offline
+        {formatPresence(false, user.last_seen)}
       </Badge>
     );
   };
@@ -104,7 +255,8 @@ export default function AdminUsers() {
     if (isModerator) {
       const target = users?.find((u) => u.id === userId);
       const targetRole = target?.user_type?.toLowerCase() || "";
-      if (targetRole !== "user") {
+      // Sellers are ordinary members too; only the team is off limits.
+      if (targetRole !== "user" && targetRole !== "seller") {
         toast.error("You can only block normal users.");
         return;
       }
@@ -114,25 +266,18 @@ export default function AdminUsers() {
     }
 
     try {
-      console.log(`Blocking user ${userId}: ${userName}`);
-      // Try to update user's verified status to false (blocked)
-      const response = await apiClient.updateUser(userId, { verified: false });
-      
-      console.log('Block user response:', response);
-      
+      // A real block: sign-in is refused, open sessions end, and their listings
+      // leave the marketplace. This used to set `verified: false`, which gated
+      // nothing and merely made unverified users look blocked.
+      const response = await apiClient.blockAccount(userId);
+
       if (!response.success) {
-        // If backend doesn't support blocking, show a message
-        if (response.error?.includes('verified') || response.error?.includes('Unknown')) {
-          toast.info("Backend support for blocking users is being added. This feature will be available soon.");
-        } else {
-          throw new Error(response.error || "Failed to block user");
-        }
-        return;
+        throw new Error(response.error || "Failed to block user");
       }
 
       toast.success(`✓ User "${userName}" has been blocked`, {
         duration: 4000,
-        description: "The user's account is now blocked and they cannot access the platform."
+        description: "They can no longer sign in, and their listings are off the marketplace."
       });
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     } catch (error: any) {
@@ -145,7 +290,8 @@ export default function AdminUsers() {
     if (isModerator) {
       const target = users?.find((u) => u.id === userId);
       const targetRole = target?.user_type?.toLowerCase() || "";
-      if (targetRole !== "user") {
+      // Sellers are ordinary members too; only the team is off limits.
+      if (targetRole !== "user" && targetRole !== "seller") {
         toast.error("You can only unblock normal users.");
         return;
       }
@@ -155,12 +301,8 @@ export default function AdminUsers() {
     }
 
     try {
-      console.log(`Unblocking user ${userId}: ${userName}`);
-      // Update user's verified status to true (unblocked)
-      const response = await apiClient.updateUser(userId, { verified: true });
-      
-      console.log('Unblock user response:', response);
-      
+      const response = await apiClient.unblockAccount(userId);
+
       if (!response.success) {
         throw new Error(response.error || "Failed to unblock user");
       }
@@ -180,7 +322,8 @@ export default function AdminUsers() {
     if (isModerator) {
       const target = users?.find((u) => u.id === userId);
       const targetRole = target?.user_type?.toLowerCase() || "";
-      if (targetRole !== "user") {
+      // Sellers are ordinary members too; only the team is off limits.
+      if (targetRole !== "user" && targetRole !== "seller") {
         toast.error("You can only delete normal users.");
         return;
       }
@@ -231,11 +374,13 @@ export default function AdminUsers() {
     <div className="flex min-h-screen w-full bg-background">
       <AdminSidebar />
       
-      <main className="flex-1">
+      <main className="flex-1 min-w-0">
         <AdminHeader />
 
         <div className="p-8">
-          <div className="mb-6">
+          <div className="mb-6 flex flex-col gap-4">
+            <DuplicateAccountsNotice isAdmin={currentRole === "ADMIN"} />
+
             <div className="relative w-full max-w-xl">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -244,6 +389,36 @@ export default function AdminUsers() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 bg-muted/30 border-muted"
               />
+            </div>
+
+            {/* Team members live in this list too; the tabs are how you narrow it. */}
+            <div className="flex flex-wrap items-center gap-2">
+              {ROLE_TABS.map((tab) => {
+                const count = (users || []).filter((u) => {
+                  const role = (u.user_type || "user").toLowerCase();
+                  if (tab.key === "all") return true;
+                  if (tab.key === "user") return role !== "admin" && role !== "moniter";
+                  return role === tab.key;
+                }).length;
+                const active = roleTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setRoleTab(tab.key)}
+                    className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                      active
+                        ? "bg-accent text-black border-accent"
+                        : "bg-background text-muted-foreground border-border hover:text-foreground"
+                    }`}
+                  >
+                    {tab.label}
+                    <span className={`ml-2 text-xs ${active ? "text-black/60" : "text-muted-foreground/70"}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -276,13 +451,13 @@ export default function AdminUsers() {
                     <Table>
                       <TableHeader>
                         <TableRow className="border-border hover:bg-transparent">
-                          <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm" style={{ width: '70px' }}>ID</TableHead>
-                          <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm" style={{ width: '200px' }}>Username</TableHead>
+                          <SortableHead label="ID" sortKey="id" className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm" style={{ width: '70px' }} />
+                          <SortableHead label="Username" sortKey="name" className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm" style={{ width: '220px' }} />
                           <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm hidden lg:table-cell" style={{ width: '160px' }}>Phone Number</TableHead>
-                          <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm hidden sm:table-cell" style={{ width: '90px' }}>Listings</TableHead>
-                          <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm hidden lg:table-cell" style={{ width: '140px' }}>Registration date</TableHead>
+                          <SortableHead label="Listings" sortKey="listings" className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm hidden sm:table-cell" style={{ width: '90px' }} />
+                          <SortableHead label="Registration date" sortKey="registered" className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm hidden lg:table-cell" style={{ width: '150px' }} />
                           <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm hidden md:table-cell" style={{ width: '140px' }}>Verification</TableHead>
-                          <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm" style={{ width: '110px' }}>Status</TableHead>
+                          <SortableHead label="Status" sortKey="status" className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm" style={{ width: '150px' }} />
                           <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm" style={{ width: '220px' }}>Notes</TableHead>
                           <TableHead className="text-muted-foreground whitespace-nowrap text-xs sm:text-sm" style={{ width: '90px' }}>Action</TableHead>
                         </TableRow>
@@ -306,24 +481,40 @@ export default function AdminUsers() {
                                   {user.full_name?.substring(0, 2).toUpperCase() || user.email?.substring(0, 2).toUpperCase() || "U"}
                                 </AvatarFallback>
                               </Avatar>
-                              {user.user_type === "seller" && (
-                                <div className="absolute -bottom-1 -right-1 bg-accent text-black text-[8px] font-bold px-1 rounded">
+                              {/* PRO follows the paid subscription, not the
+                                  account type — a seller on the free plan is
+                                  not a PRO member. */}
+                              {user.is_pro && (
+                                <div
+                                  className="absolute -bottom-1 -right-1 bg-accent text-black text-[8px] font-bold px-1 rounded"
+                                  title={user.plan_name ? `${user.plan_name} plan` : "Paid plan"}
+                                >
                                   Pro
                                 </div>
                               )}
                             </div>
-                            <span
-                              style={{
-                                fontFamily: 'Outfit',
-                                fontWeight: 400,
-                                fontSize: '14px',
-                                lineHeight: '100%',
-                                letterSpacing: '0%',
-                                color: '#000000',
-                              }}
-                            >
-                              {user.full_name || "Unknown"}
-                            </span>
+                            <div className="flex flex-col gap-0.5">
+                              <Link
+                                to={`/admin/users/${user.id}`}
+                                className="hover:underline"
+                                style={{
+                                  fontFamily: 'Outfit',
+                                  fontWeight: 400,
+                                  fontSize: '14px',
+                                  lineHeight: '100%',
+                                  letterSpacing: '0%',
+                                  color: '#000000',
+                                }}
+                              >
+                                {user.full_name || "Unknown"}
+                              </Link>
+                              {(targetRole === "admin" || targetRole === "moniter") && (
+                                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                                  <ShieldCheck className="h-3 w-3" />
+                                  {roleLabel(user.user_type)}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell
@@ -407,87 +598,54 @@ export default function AdminUsers() {
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
+                            {/* Icons alone left people guessing what each button
+                                did, so every action is labelled. There is no
+                                Edit here on purpose: editing happens on the
+                                user's own page. */}
                             <DropdownMenuContent
                               align="end"
-                              className="shadow-lg"
-                              style={{
-                                width: '56px',
-                                height: '138px',
-                                borderRadius: '12px',
-                                border: '1px solid #C6FE1F',
-                                background: '#FFFFFF',
-                                paddingTop: '15px',
-                                paddingRight: '12px',
-                                paddingBottom: '15px',
-                                paddingLeft: '12px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '10px',
-                              }}
+                              className="shadow-lg min-w-[180px] rounded-xl border border-[#C6FE1F] bg-white p-2"
                             >
                               <DropdownMenuItem
                                 onClick={() => navigate(`/admin/users/${user.id}`)}
-                                className="p-0 focus:bg-transparent"
+                                className="gap-2 cursor-pointer rounded-lg"
                               >
-                                <div
-                                  className="flex items-center justify-center"
-                                  style={{
-                                    width: '32px',
-                                    height: '32px',
-                                    borderRadius: '10px',
-                                    background: '#F4F4F4',
-                                    border: '1px solid #EBF0ED',
-                                  }}
-                                >
-                                  <Eye className="h-4 w-4 text-black" />
-                                </div>
+                                <Eye className="h-4 w-4" />
+                                View
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => navigate(`/admin/users/${user.id}/chats?direct=1`)}
+                                className="gap-2 cursor-pointer rounded-lg"
+                              >
+                                <MessageSquare className="h-4 w-4" />
+                                Chat
                               </DropdownMenuItem>
                               {canModerateTarget && (
                                 <DropdownMenuItem
-                                  className="p-0 focus:bg-transparent"
+                                  className="gap-2 cursor-pointer rounded-lg"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    if (user.verified === false) {
+                                    if (user.blocked) {
                                       handleUnblockUser(user.id, user.full_name || user.email);
                                     } else {
                                       handleBlockUser(user.id, user.full_name || user.email);
                                     }
                                   }}
                                 >
-                                  <div
-                                    className="flex items-center justify-center"
-                                    style={{
-                                      width: '32px',
-                                      height: '32px',
-                                      borderRadius: '10px',
-                                      background: '#F4F4F4',
-                                      border: '1px solid #EBF0ED',
-                                    }}
-                                  >
-                                    <Ban className="h-4 w-4 text-black" />
-                                  </div>
+                                  <Ban className="h-4 w-4" />
+                                  {user.blocked ? "Unblock" : "Block"}
                                 </DropdownMenuItem>
                               )}
                               {canModerateTarget && (
                                 <DropdownMenuItem
-                                  className="p-0 focus:bg-transparent"
+                                  className="gap-2 cursor-pointer rounded-lg text-destructive focus:text-destructive"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleDeleteUser(user.id, user.full_name || user.email);
                                   }}
                                 >
-                                  <div
-                                    className="flex items-center justify-center"
-                                    style={{
-                                      width: '32px',
-                                      height: '32px',
-                                      borderRadius: '10px',
-                                      background: '#F4F4F4',
-                                      border: '1px solid #EBF0ED',
-                                    }}
-                                  >
-                                    <Trash2 className="h-4 w-4 text-black" />
-                                  </div>
+                                  <Trash2 className="h-4 w-4" />
+                                  Delete
                                 </DropdownMenuItem>
                               )}
                             </DropdownMenuContent>

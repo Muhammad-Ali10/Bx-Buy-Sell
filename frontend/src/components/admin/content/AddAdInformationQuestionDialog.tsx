@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAddAdInformationQuestion } from "@/hooks/useAddAdInformationQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 import { useState } from "react";
 import { toast } from "sonner";
 import { X } from "lucide-react";
@@ -17,6 +18,7 @@ export const AddAdInformationQuestionDialog = ({ open, onOpenChange }: AddAdInfo
   const [question, setQuestion] = useState("");
   const [answerType, setAnswerType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  const [required, setRequired] = useState(true);
   const addQuestion = useAddAdInformationQuestion();
 
   const handleSubmit = (e?: React.FormEvent) => {
@@ -51,12 +53,13 @@ export const AddAdInformationQuestionDialog = ({ open, onOpenChange }: AddAdInfo
     }
 
     addQuestion.mutate(
-      { question: trimmedQuestion, answer_type: answerType, options: optionsArray },
+      { question: trimmedQuestion, answer_type: answerType, options: optionsArray, required },
       {
         onSuccess: () => {
           setQuestion("");
           setAnswerType("TEXT");
           setOptions("");
+          setRequired(true);
           onOpenChange(false);
         },
         onError: (error: any) => {
@@ -71,6 +74,7 @@ export const AddAdInformationQuestionDialog = ({ open, onOpenChange }: AddAdInfo
     setQuestion("");
     setAnswerType("TEXT");
     setOptions("");
+    setRequired(true);
     onOpenChange(false);
   };
 
@@ -121,6 +125,7 @@ export const AddAdInformationQuestionDialog = ({ open, onOpenChange }: AddAdInfo
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, ChevronDown, ChevronUp, Settings, LogOut, Rocket, DollarSign, Eye, X } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, Rocket, DollarSign, X, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -12,10 +12,34 @@ import {
 } from "@/components/ui/select";
 import { useCategories } from "@/hooks/useCategories";
 import FlagIcon from "@/components/FlagIcon";
-import { useNavigate, Link } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
-import { toast } from "sonner";
+import { ALL_COUNTRY_NAMES } from "@/lib/countryUtils";
+import { Link } from "react-router-dom";
+import { useSubscriptionTier } from "@/hooks/useSubscriptionTier";
 import logo from "@/assets/_App Icon 1 (2).png";
+
+import { formatNumber as formatFullNumber } from "@/lib/formatNumber";
+/**
+ * Upper bounds for the range sliders.
+ *
+ * Each top end means "and above", not a hard cap — a slider parked at its
+ * maximum reads "10y+" / "$5,000,000+" and the listings page stops applying an
+ * upper limit, so nothing is hidden simply for being large.
+ */
+export const PRICE_MAX = 5_000_000;
+export const AGE_MAX = 10;
+export const MONEY_MAX = 1_000_000;
+export const MULTIPLE_MAX = 10;
+
+/**
+ * Step sizes, kept proportional to each range. A slider with tens of thousands
+ * of positions cannot be dragged to a chosen value — the wider ranges need
+ * coarser steps to stay usable.
+ */
+export const PRICE_STEP = 10_000;   // 500 positions across $0–$5m
+export const MONEY_STEP = 1_000;    // 1,000 positions across $0–$1m
+
+/** Appends "+" once a slider sits at its ceiling. */
+const withPlus = (value: number, max: number) => (value >= max ? `${value}+` : `${value}`);
 
 interface FilterSidebarProps {
   filters: FilterState;
@@ -43,10 +67,9 @@ export interface FilterState {
 }
 
 const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: FilterSidebarProps) => {
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(true);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const { canUseAdvancedFilters, isHighestTier } = useSubscriptionTier();
   const { data: categoriesData = [] } = useCategories({ nocache: true });
-  const navigate = useNavigate();
-  const { logout } = useAuth();
 
   // Extract category names for niche dropdown
   const niches = categoriesData
@@ -58,42 +81,9 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
       name?.trim() !== ""
     );
 
-  // Common countries list
-  const countries = [
-    "United States",
-    "United Kingdom",
-    "Canada",
-    "Australia",
-    "India",
-    "Pakistan",
-    "Singapore",
-    "UAE",
-    "Germany",
-    "France",
-    "Spain",
-    "Italy",
-    "Netherlands",
-    "Belgium",
-    "Sweden",
-    "Norway",
-    "Denmark",
-    "Japan",
-    "South Korea",
-    "China",
-    "Brazil",
-    "Mexico",
-    "Argentina",
-  ];
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-      toast.success("Logged out successfully");
-      navigate("/");
-    } catch (error) {
-      toast.error("Error logging out");
-    }
-  };
+  // Every country, so the filter matches the real world rather than a
+  // hand-picked two dozen. Flags resolve from the same dataset.
+  const countries = ALL_COUNTRY_NAMES;
 
   const updateFilter = (key: string, value: any) => {
     if (key.startsWith("advanced.")) {
@@ -113,9 +103,10 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
     }
   };
 
-  // Format currency
-  const formatCurrency = (value: number) => {
-    return `$${value.toLocaleString()}`;
+  // Format currency — the full figure, not the abbreviated one below.
+  const formatCurrency = (value: number, max?: number) => {
+    const suffix = max !== undefined && value >= max ? "+" : "";
+    return `$${formatFullNumber(value)}${suffix}`;
   };
 
   // Format number with k suffix
@@ -127,13 +118,19 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
   };
 
   return (
-    <div 
-      className="filter-sidebar flex flex-col w-full h-screen" 
-      style={{ 
+    <div
+      className="filter-sidebar flex flex-col h-screen"
+      style={{
         position: 'fixed',
         left: 0,
         top: 0,
         height: '100vh',
+        // Was w-full. On a fixed element that resolves against the viewport, so
+        // this panel stretched invisibly across the whole screen — its bottom
+        // row (Settings / Log Out) sat over the page content and swallowed
+        // clicks meant for what was underneath.
+        width: '303px',
+        maxWidth: '85vw',
         paddingTop: '20px',
         paddingBottom: '20px',
         paddingLeft: '5px',
@@ -271,70 +268,6 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
           </Select>
         </div>
 
-        {/* Revenue Generating */}
-        <div className="space-y-2">
-          <label 
-            className="font-lufga text-white text-xs md:text-sm"
-            style={{
-              fontWeight: 500,
-              fontSize: "14px",
-              lineHeight: "150%",
-              letterSpacing: "0%",
-              color: "rgba(255, 255, 255, 1)",
-            }}
-          >
-            Revenue generating
-          </label>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => updateFilter("revenueGenerating", filters.revenueGenerating === "yes" ? "all" : "yes")}
-              className={`text-xs md:text-sm ${
-                filters.revenueGenerating === "yes"
-                  ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90"
-                  : "text-white hover:opacity-80"
-              }`}
-              style={{
-                flex: 1,
-                height: "48px",
-                borderRadius: "12px",
-                padding: "12px",
-                gap: "8px",
-                fontSize: "14px",
-                backgroundColor: filters.revenueGenerating === "yes" 
-                  ? "#D3FC50" 
-                  : "rgba(255, 255, 255, 0.05)",
-              }}
-            >
-              Yes
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => updateFilter("revenueGenerating", filters.revenueGenerating === "no" ? "all" : "no")}
-              className={`text-xs md:text-sm ${
-                filters.revenueGenerating === "no"
-                  ? "bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90"
-                  : "text-white hover:opacity-80"
-              }`}
-              style={{
-                flex: 1,
-                height: "48px",
-                borderRadius: "12px",
-                padding: "12px",
-                gap: "8px",
-                fontSize: "14px",
-                backgroundColor: filters.revenueGenerating === "no" 
-                  ? "#D3FC50" 
-                  : "rgba(255, 255, 255, 0.05)",
-              }}
-            >
-              No
-            </Button>
-          </div>
-        </div>
-
         {/* Price */}
         <div className="space-y-2">
           <div 
@@ -387,7 +320,7 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                   color: "rgba(255, 255, 255, 1)",
                 }}
               >
-                {formatCurrency(filters.priceRange[1])}
+                {formatCurrency(filters.priceRange[1], PRICE_MAX)}
               </span>
             </div>
             
@@ -395,7 +328,7 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
             <div className="relative" style={{ height: "60px" }}>
               {(() => {
                 const minValue = 0;
-                const maxValue = 100000;
+                const maxValue = PRICE_MAX;
                 const leftPercent = ((filters.priceRange[0] - minValue) / (maxValue - minValue)) * 100;
                 const rightPercent = ((filters.priceRange[1] - minValue) / (maxValue - minValue)) * 100;
                 const rangeWidth = rightPercent - leftPercent;
@@ -454,8 +387,8 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                           value={filters.priceRange}
                           onValueChange={(value) => updateFilter("priceRange", value as [number, number])}
                           min={0}
-                          max={100000}
-                          step={100}
+                          max={PRICE_MAX}
+                          step={PRICE_STEP}
                           className="w-full [&>span:first-child]:hidden [&_[role=slider]]:bg-[rgba(24,24,26,1)] [&_[role=slider]]:border-[5px_solid_rgba(197,253,31,1)] [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:z-10 [&_[role=slider]]:relative [&_[role=slider]]:top-0"
                         />
                       </div>
@@ -529,12 +462,14 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
 
         {/* Advanced Filter Section */}
         <div className="space-y-4">
+          {/* Kept visible without a paid plan, only locked. Hiding it entirely
+              would mean nobody ever learns the tier includes it. */}
           <button
             onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
             className="flex items-center justify-between w-full"
           >
-            <span 
-              className="font-lufga text-white"
+            <span
+              className="font-lufga text-white flex items-center gap-2"
               style={{
                 fontWeight: 500,
                 fontSize: "14px",
@@ -544,6 +479,7 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
               }}
             >
               Advanced Filter
+              {!canUseAdvancedFilters && <Lock className="w-3.5 h-3.5 text-white/60" />}
             </span>
             {isAdvancedOpen ? (
               <ChevronUp className="w-4 h-4 text-white" />
@@ -552,7 +488,22 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
             )}
           </button>
 
-          {isAdvancedOpen && (
+          {isAdvancedOpen && !canUseAdvancedFilters && (
+            <div className="rounded-xl bg-white/5 p-4 text-center">
+              <p className="font-lufga text-white/70" style={{ fontSize: "13px", lineHeight: "150%" }}>
+                Advanced filters are part of the Starter and Premium plans.
+              </p>
+              <Link
+                to="/manage-subscription"
+                className="mt-3 inline-block rounded-full bg-[#D3FC50] px-5 py-2 font-lufga font-semibold text-black"
+                style={{ fontSize: "13px" }}
+              >
+                See plans
+              </Link>
+            </div>
+          )}
+
+          {isAdvancedOpen && canUseAdvancedFilters && (
             <div className="space-y-6">
               {/* Target Country */}
               <div className="space-y-3">
@@ -649,14 +600,14 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                       color: "rgba(255, 255, 255, 1)",
                     }}
                   >
-                    {filters.advancedFilters.ageRange[0]}y-{filters.advancedFilters.ageRange[1]}y
+                    {filters.advancedFilters.ageRange[0]}y-{withPlus(filters.advancedFilters.ageRange[1], AGE_MAX)}y
                   </span>
                 </div>
                 <Slider
                   value={filters.advancedFilters.ageRange}
                   onValueChange={(value) => updateFilter("advanced.ageRange", value as [number, number])}
                   min={0}
-                  max={20}
+                  max={AGE_MAX}
                   step={1}
                   className="[&>div:first-child]:!bg-[rgba(58,58,59,1)] [&>div:first-child]:!h-1.5 [&>div:first-child]:!rounded-[10px] [&>div:first-child>div]:!bg-[rgba(197,253,31,1)] [&>div:first-child>div]:!h-1.5 [&_[role=slider]]:!bg-[rgba(24,24,26,1)] [&_[role=slider]]:!border-[5px_solid_rgba(197,253,31,1)] [&_[role=slider]]:!w-5 [&_[role=slider]]:!h-5"
                 />
@@ -691,15 +642,15 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                       color: "rgba(255, 255, 255, 1)",
                     }}
                   >
-                    {formatCurrency(filters.advancedFilters.monthlyRevenue[0])}-{formatCurrency(filters.advancedFilters.monthlyRevenue[1])}
+                    {formatCurrency(filters.advancedFilters.monthlyRevenue[0])}-{formatCurrency(filters.advancedFilters.monthlyRevenue[1], MONEY_MAX)}
                   </span>
                 </div>
                 <Slider
                   value={filters.advancedFilters.monthlyRevenue}
                   onValueChange={(value) => updateFilter("advanced.monthlyRevenue", value as [number, number])}
                   min={0}
-                  max={50000}
-                  step={100}
+                  max={MONEY_MAX}
+                  step={MONEY_STEP}
                   className="[&>div:first-child]:!bg-[rgba(58,58,59,1)] [&>div:first-child]:!h-1.5 [&>div:first-child]:!rounded-[10px] [&>div:first-child>div]:!bg-[rgba(197,253,31,1)] [&>div:first-child>div]:!h-1.5 [&_[role=slider]]:!bg-[rgba(24,24,26,1)] [&_[role=slider]]:!border-[5px_solid_rgba(197,253,31,1)] [&_[role=slider]]:!w-5 [&_[role=slider]]:!h-5"
                 />
               </div>
@@ -733,57 +684,15 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                       color: "rgba(255, 255, 255, 1)",
                     }}
                   >
-                    {formatCurrency(filters.advancedFilters.monthlyProfit[0])}-{formatCurrency(filters.advancedFilters.monthlyProfit[1])}
+                    {formatCurrency(filters.advancedFilters.monthlyProfit[0])}-{formatCurrency(filters.advancedFilters.monthlyProfit[1], MONEY_MAX)}
                   </span>
                 </div>
                 <Slider
                   value={filters.advancedFilters.monthlyProfit}
                   onValueChange={(value) => updateFilter("advanced.monthlyProfit", value as [number, number])}
                   min={0}
-                  max={50000}
-                  step={100}
-                  className="[&>div:first-child]:!bg-[rgba(58,58,59,1)] [&>div:first-child]:!h-1.5 [&>div:first-child]:!rounded-[10px] [&>div:first-child>div]:!bg-[rgba(197,253,31,1)] [&>div:first-child>div]:!h-1.5 [&_[role=slider]]:!bg-[rgba(24,24,26,1)] [&_[role=slider]]:!border-[5px_solid_rgba(197,253,31,1)] [&_[role=slider]]:!w-5 [&_[role=slider]]:!h-5"
-                />
-              </div>
-
-              {/* Monthly Pageviews */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Eye className="w-4 h-4 text-white" />
-                    <label 
-                      className="font-lufga text-white"
-                      style={{
-                        fontWeight: 500,
-                        fontSize: "14px",
-                        lineHeight: "150%",
-                        letterSpacing: "0%",
-                        color: "rgba(255, 255, 255, 1)",
-                      }}
-                    >
-                      Monthly Pageviews
-                    </label>
-                  </div>
-                  <span 
-                    className="font-lufga"
-                    style={{
-                      fontWeight: 500,
-                      fontSize: "14px",
-                      lineHeight: "150%",
-                      letterSpacing: "0%",
-                      textAlign: "right",
-                      color: "rgba(255, 255, 255, 1)",
-                    }}
-                  >
-                    {formatNumber(filters.advancedFilters.monthlyPageviews[0])}-{formatNumber(filters.advancedFilters.monthlyPageviews[1])}
-                  </span>
-                </div>
-                <Slider
-                  value={filters.advancedFilters.monthlyPageviews}
-                  onValueChange={(value) => updateFilter("advanced.monthlyPageviews", value as [number, number])}
-                  min={0}
-                  max={1000000}
-                  step={1000}
+                  max={MONEY_MAX}
+                  step={MONEY_STEP}
                   className="[&>div:first-child]:!bg-[rgba(58,58,59,1)] [&>div:first-child]:!h-1.5 [&>div:first-child]:!rounded-[10px] [&>div:first-child>div]:!bg-[rgba(197,253,31,1)] [&>div:first-child>div]:!h-1.5 [&_[role=slider]]:!bg-[rgba(24,24,26,1)] [&_[role=slider]]:!border-[5px_solid_rgba(197,253,31,1)] [&_[role=slider]]:!w-5 [&_[role=slider]]:!h-5"
                 />
               </div>
@@ -817,14 +726,14 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                       color: "rgba(255, 255, 255, 1)",
                     }}
                   >
-                    {filters.advancedFilters.revenueMultiple[0]}x-{filters.advancedFilters.revenueMultiple[1]}x
+                    {filters.advancedFilters.revenueMultiple[0]}x-{withPlus(filters.advancedFilters.revenueMultiple[1], MULTIPLE_MAX)}x
                   </span>
                 </div>
                 <Slider
                   value={filters.advancedFilters.revenueMultiple}
                   onValueChange={(value) => updateFilter("advanced.revenueMultiple", value as [number, number])}
                   min={0}
-                  max={50}
+                  max={MULTIPLE_MAX}
                   step={1}
                   className="[&>div:first-child]:!bg-[rgba(58,58,59,1)] [&>div:first-child]:!h-1.5 [&>div:first-child]:!rounded-[10px] [&>div:first-child>div]:!bg-[rgba(197,253,31,1)] [&>div:first-child>div]:!h-1.5 [&_[role=slider]]:!bg-[rgba(24,24,26,1)] [&_[role=slider]]:!border-[5px_solid_rgba(197,253,31,1)] [&_[role=slider]]:!w-5 [&_[role=slider]]:!h-5"
                 />
@@ -859,14 +768,14 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                       color: "rgba(255, 255, 255, 1)",
                     }}
                   >
-                    {filters.advancedFilters.profitMultiple[0]}x-{filters.advancedFilters.profitMultiple[1]}x
+                    {filters.advancedFilters.profitMultiple[0]}x-{withPlus(filters.advancedFilters.profitMultiple[1], MULTIPLE_MAX)}x
                   </span>
                 </div>
                 <Slider
                   value={filters.advancedFilters.profitMultiple}
                   onValueChange={(value) => updateFilter("advanced.profitMultiple", value as [number, number])}
                   min={0}
-                  max={50}
+                  max={MULTIPLE_MAX}
                   step={1}
                   className="[&>div:first-child]:!bg-[rgba(58,58,59,1)] [&>div:first-child]:!h-1.5 [&>div:first-child]:!rounded-[10px] [&>div:first-child>div]:!bg-[rgba(197,253,31,1)] [&>div:first-child>div]:!h-1.5 [&_[role=slider]]:!bg-[rgba(24,24,26,1)] [&_[role=slider]]:!border-[5px_solid_rgba(197,253,31,1)] [&_[role=slider]]:!w-5 [&_[role=slider]]:!h-5"
                 />
@@ -875,25 +784,29 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
           )}
         </div>
 
-        {/* Premium Upgrade Banner */}
-        <div 
-          className="bg-[#D3FC50] rounded-2xl p-4 text-black flex flex-col items-center mt-4"
-          style={{ width: "100%", boxSizing: 'border-box', maxWidth: "100%" }}
-        >
-          <div className="w-12 h-12 bg-black rounded-2xl flex items-center justify-center mb-3">
-            <Rocket className="w-6 h-6 text-[#D3FC50]" />
-          </div>
-          <h3 className="text-sm font-bold text-center mb-3" style={{ fontSize: "14px" }}>
-            Upgrade Your Account To Premium
-          </h3>
-          <Button
-            className="w-full bg-black text-[#D3FC50] hover:bg-black/90 rounded-full font-semibold"
-            style={{ fontSize: "14px", height: "40px" }}
-            size="lg"
+        {/* Premium Upgrade Banner — nothing left to sell someone already on
+            the top tier, so it disappears for them. */}
+        {!isHighestTier && (
+          <div
+            className="bg-[#D3FC50] rounded-2xl p-4 text-black flex flex-col items-center mt-4"
+            style={{ width: "100%", boxSizing: 'border-box', maxWidth: "100%" }}
           >
-            Let's Go →
-          </Button>
-        </div>
+            <div className="w-12 h-12 bg-black rounded-2xl flex items-center justify-center mb-3">
+              <Rocket className="w-6 h-6 text-[#D3FC50]" />
+            </div>
+            <h3 className="text-sm font-bold text-center mb-3" style={{ fontSize: "14px" }}>
+              Upgrade Your Account To Premium
+            </h3>
+            <Button
+              asChild
+              className="w-full bg-black text-[#D3FC50] hover:bg-black/90 rounded-full font-semibold"
+              style={{ fontSize: "14px", height: "40px" }}
+              size="lg"
+            >
+              <Link to="/manage-subscription">Let's Go →</Link>
+            </Button>
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex gap-3 pt-4">
@@ -950,40 +863,6 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
         </div>
       </div>
 
-      {/* Settings & Log Out - fixed at bottom */}
-      <div 
-        className="flex-shrink-0 flex flex-col gap-2 pt-4"
-        style={{ width: '100%', paddingLeft: '12px', paddingRight: '12px' }}
-      >
-        <button
-          onClick={() => navigate("/settings")}
-          className="flex items-center gap-3 text-white hover:text-[#D3FC50] transition-colors"
-          style={{
-            fontFamily: 'Lufga',
-            fontWeight: 500,
-            fontSize: '14px',
-            lineHeight: '150%',
-            letterSpacing: '0%',
-          }}
-        >
-          <Settings className="w-4 h-4" />
-          <span>Settings</span>
-        </button>
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-3 text-white hover:text-[#D3FC50] transition-colors"
-          style={{
-            fontFamily: 'Lufga',
-            fontWeight: 500,
-            fontSize: '14px',
-            lineHeight: '150%',
-            letterSpacing: '0%',
-          }}
-        >
-          <LogOut className="w-4 h-4" />
-          <span>Log Out</span>
-        </button>
-      </div>
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import { Roles } from 'common/decorator/roles.decorator';
 import { ZodValidationPipe } from 'common/validator/zod.validator';
 import { MonitoringAlertService } from './monitoring-alert.service';
@@ -15,6 +15,32 @@ export class MonitoringAlertController {
   @Get()
   findAll() {
     return this.monitoringAlertService.findAll();
+  }
+
+  /**
+   * Reporting is done by ordinary users, so this route widens the admin-only
+   * roles set on the controller.
+   */
+  @Post('report-listing')
+  @Roles(['USER', 'SELLER', 'ADMIN', 'MONITER'])
+  reportListing(
+    @Req() req: any,
+    @Body() body: { listingId: string; reason: string; notes?: string },
+  ) {
+    return this.monitoringAlertService.reportListing(req.user.id, {
+      listingId: body.listingId,
+      reason: body.reason,
+      notes: body.notes,
+    });
+  }
+
+  @Post('report-chat')
+  @Roles(['USER', 'SELLER', 'ADMIN', 'MONITER'])
+  async reportChat(
+    @Req() req: any,
+    @Body() body: { chatId: string; reason: string; notes?: string },
+  ) {
+    return this.monitoringAlertService.reportChat(req?.user?.id, body);
   }
 
   @Patch(':id/status')

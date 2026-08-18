@@ -27,6 +27,12 @@ import {
 import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
 import { toast } from "sonner";
 import { getAdminFinancialsTemplateVersion } from "@/lib/financialTableUtils";
+import { useAdInformationQuestions } from "@/hooks/useAdInformationQuestions";
+import { getListingPriceFromForm } from "@/lib/packagePricing";
+
+/** Packages pricing is derived from the listing price, so it must exist first. */
+const PACKAGES_LOCKED_MESSAGE =
+  "Please enter a listing price before accessing the Packages section. Pricing is calculated automatically based on the listing price you provide";
 
 export type DashboardStep = 
   | "category" 
@@ -61,6 +67,7 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
     Boolean(matchListingEdit || matchDashboardEdit);
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [activeStep, setActiveStep] = useState<DashboardStep>("category");
+  const { data: adInformationQuestions } = useAdInformationQuestions();
   const [formData, setFormData] = useState<any>({});
   /** Edit flow: start true so we never paint steps with empty formData before hydrate (fixes broken pre-fill). */
   const [loadingListing, setLoadingListing] = useState(() =>
@@ -446,6 +453,7 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
                 { key: "Forecast 2025", label: "Forecast 2025" },
               ];
               transformedData.financialData = tableData.financialData || {};
+              transformedData.currency = tableData.currency || "USD";
               transformedData.financialsFromListing = true;
             }
           } catch {
@@ -587,20 +595,32 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
     setFormData((prev: any) => ({ ...prev, ...stepData }));
   };
 
+  // Packages stay locked until the seller has entered a listing price, since
+  // every package/add-on/success-fee amount is derived from it.
+  const listingPrice = getListingPriceFromForm(formData, adInformationQuestions);
+  const handleStepChange = (step: DashboardStep) => {
+    if (step === "packages" && listingPrice === null) {
+      toast.error(PACKAGES_LOCKED_MESSAGE);
+      return;
+    }
+    setActiveStep(step);
+  };
+
   const renderStep = () => {
     switch (activeStep) {
       case "category":
-        return <CategoryStep formData={formData} onNext={(data) => { updateFormData(data); setActiveStep("brand-information"); }} />;
+        return <CategoryStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("brand-information"); }} />;
       case "brand-information":
-        return <BrandInformationStep formData={formData} onNext={(data) => { updateFormData(data); setActiveStep("tools"); }} onBack={() => setActiveStep("category")} />;
+        return <BrandInformationStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("tools"); }} onBack={() => setActiveStep("category")} />;
       case "tools":
-        return <ToolsStep formData={formData} onNext={(data) => { updateFormData(data); setActiveStep("financials"); }} onBack={() => setActiveStep("brand-information")} />;
+        return <ToolsStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("financials"); }} onBack={() => setActiveStep("brand-information")} />;
       case "financials":
         return (
           <FinancialsStep
             key={`financials-${getAdminFinancialsTemplateVersion()}`}
             isEditListing={isEditMode}
             formData={formData}
+            onPersist={updateFormData}
             onNext={(data) => {
               updateFormData(data);
               setActiveStep("statistics");
@@ -612,6 +632,7 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
         return (
           <AdditionalInformationStep
             formData={formData}
+            onPersist={updateFormData}
             onNext={(data) => { updateFormData(data); setActiveStep("products"); }}
             onBack={() => setActiveStep("financials")}
             defaultTab="statistics"
@@ -621,6 +642,7 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
         return (
           <AdditionalInformationStep
             formData={formData}
+            onPersist={updateFormData}
             onNext={(data) => { updateFormData(data); setActiveStep("management"); }}
             onBack={() => setActiveStep("statistics")}
             defaultTab="products"
@@ -630,17 +652,18 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
         return (
           <AdditionalInformationStep
             formData={formData}
+            onPersist={updateFormData}
             onNext={(data) => { updateFormData(data); setActiveStep("accounts"); }}
             onBack={() => setActiveStep("products")}
             defaultTab="management"
           />
         );
       case "accounts":
-        return <AccountsStep formData={formData} onNext={(data) => { updateFormData(data); setActiveStep("ad-informations"); }} onBack={() => setActiveStep("management")} />;
+        return <AccountsStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("ad-informations"); }} onBack={() => setActiveStep("management")} />;
       case "ad-informations":
-        return <AdInformationsStep formData={formData} onNext={(data) => { updateFormData(data); setActiveStep("handover"); }} onBack={() => setActiveStep("accounts")} />;
+        return <AdInformationsStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("handover"); }} onBack={() => setActiveStep("accounts")} />;
       case "handover":
-        return <HandoverStep formData={formData} onNext={(data) => { updateFormData(data); setActiveStep("packages"); }} onBack={() => setActiveStep("ad-informations")} />;
+        return <HandoverStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("packages"); }} onBack={() => setActiveStep("ad-informations")} />;
       case "packages":
         return (
           <PackagesStep
@@ -681,13 +704,13 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
   return (
     <div className="flex min-h-screen w-full bg-background">
       {/* Desktop Sidebar */}
-      <DashboardSidebar activeStep={activeStep} onStepChange={setActiveStep} isMobile={false} />
+      <DashboardSidebar activeStep={activeStep} onStepChange={handleStepChange} isMobile={false} />
       
       <div className="flex-1 flex flex-col w-full overflow-hidden">
         {/* Mobile Header with Hamburger Menu */}
         <div className="md:hidden border-b border-border bg-background sticky top-0 z-40">
           <div className="flex items-center gap-3 px-4 py-3">
-            <DashboardSidebar activeStep={activeStep} onStepChange={setActiveStep} isMobile={true} />
+            <DashboardSidebar activeStep={activeStep} onStepChange={handleStepChange} isMobile={true} />
             <h1 className="text-lg font-semibold shrink-0">
               {isEditMode ? "Edit Listing" : "Create Listing"}
             </h1>

@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { ChatLabelType, MessageType, Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisAdapterService } from 'src/redis-adapter/redis-adapter.service';
@@ -17,10 +17,11 @@ export class ChatService {
   private async findProhibitedWords(content: string) {
     const normalizedContent = content.toLowerCase();
     const words = await this.db.prohibitedWord.findMany({
-      select: { word: true },
+      select: { id: true, word: true },
     });
 
     const matches: string[] = [];
+    const matchedIds: string[] = [];
     for (const entry of words) {
       const rawWord = (entry.word || '').trim();
       if (!rawWord) continue;
@@ -29,6 +30,7 @@ export class ChatService {
       if (normalizedWord.includes(' ')) {
         if (normalizedContent.includes(normalizedWord)) {
           matches.push(rawWord);
+          matchedIds.push(entry.id);
         }
         continue;
       }
@@ -36,7 +38,27 @@ export class ChatService {
       const regex = new RegExp(`\\b${this.escapeRegex(normalizedWord)}\\b`, 'i');
       if (regex.test(content)) {
         matches.push(rawWord);
+        matchedIds.push(entry.id);
       }
+    }
+
+    /**
+     * Counted once per message, not once per occurrence.
+     *
+     * The number on the Detect Words screen answers "is this rule earning its
+     * place". Three hits inside one message are still one message stopped, and
+     * counting each would make a word look three times as busy as it is.
+     */
+    if (matchedIds.length > 0) {
+      void this.db.prohibitedWord
+        .updateMany({
+          where: { id: { in: matchedIds } },
+          data: { usageCount: { increment: 1 }, lastUsedAt: new Date() },
+        })
+        .catch((error) => {
+          // A counter is not worth failing a moderation decision over.
+          console.error('Failed to record prohibited-word usage:', error);
+        });
     }
 
     return matches;
@@ -87,6 +109,154 @@ export class ChatService {
     }
   }
 
+  /**
+   * Record that a message was blocked, as a real message in the thread.
+   *
+   * One row, not two. Both parties need to be told, but they need to be told
+   * different things — the sender that *their* message did not go through, the
+   * other that something was withheld. Storing the blocked sender's id lets
+   * each side be given the right wording when the thread is read, including
+   * after a refresh, which the old socket-only notice could not do.
+   */
+  async recordBlockedMessageNotice(chatId: string, blockedSenderId: string) {
+    try {
+      const notice = await this.db.message.create({
+        data: {
+          chatId,
+          senderId: null,
+          type: MessageType.SYSTEM,
+          content: null,
+          read: true,
+          metadata: {
+            kind: 'BLOCKED_MESSAGE',
+            blockedSenderId,
+          },
+        },
+      });
+      return notice;
+    } catch (error) {
+      console.error('❌ Failed to record blocked-message notice:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Metadata for the platform's own messages, built in one place.
+   *
+   * These objects are used both to write a row and to look it up again, and
+   * MongoDB matches a JSON value by exact shape — including key order. Two
+   * literals written at two call sites would compare equal today and stop
+   * matching the moment someone reorders one of them, which would silently
+   * turn the duplicate guards off. One builder, one order.
+   */
+  private static reminderMeta(atMessage: number) {
+    return { kind: 'GUIDELINE_REMINDER', atMessage };
+  }
+
+  private static dealStartedMeta(requesterId: string) {
+    return { kind: 'DEAL_STARTED', requesterId };
+  }
+
+  /**
+   * Record that one side asked to begin the deal process.
+   *
+   * Written into the conversation rather than kept in a private queue: the
+   * other party needs to know it happened, and both need to be able to see
+   * when. `isOffered` on the chat is what the team's dashboards already filter
+   * on, so that is set too rather than inventing a second flag.
+   */
+  async startDealProcess(chatId: string, requesterId: string) {
+    const chat = await this.db.chat.findUnique({
+      where: { id: chatId },
+      select: { id: true, userId: true, sellerId: true },
+    });
+    if (!chat) {
+      throw new HttpException('Chat not found', 404);
+    }
+    if (chat.userId !== requesterId && chat.sellerId !== requesterId) {
+      throw new HttpException('You are not part of this conversation', 403);
+    }
+
+    // Asking twice is not an error — people click things twice — but it should
+    // not post the notice again.
+    const existing = await this.db.message.findFirst({
+      where: {
+        chatId,
+        type: MessageType.SYSTEM,
+        metadata: { equals: ChatService.dealStartedMeta(requesterId) },
+      },
+    });
+    if (existing) return existing;
+
+    const [notice] = await this.db.$transaction([
+      this.db.message.create({
+        data: {
+          chatId,
+          senderId: null,
+          type: MessageType.SYSTEM,
+          content: null,
+          read: true,
+          metadata: ChatService.dealStartedMeta(requesterId),
+        },
+      }),
+      this.db.chat.update({
+        where: { id: chatId },
+        data: { isOffered: true },
+      }),
+    ]);
+
+    return notice;
+  }
+
+  /** How often the platform repeats the keep-it-on-the-platform reminder. */
+  private static readonly REMINDER_EVERY = 20;
+
+  /**
+   * Post the periodic reminder once a conversation crosses another 20 messages.
+   *
+   * Counts only what the two parties said — counting the platform's own posts
+   * would make the reminder trigger itself, and the gap would shrink each time.
+   */
+  async maybePostGuidelineReminder(chatId: string) {
+    try {
+      const humanMessages = await this.db.message.count({
+        where: { chatId, senderId: { not: null } },
+      });
+
+      if (
+        humanMessages === 0 ||
+        humanMessages % ChatService.REMINDER_EVERY !== 0
+      ) {
+        return null;
+      }
+
+      // Stripe-style double-fire protection: if this milestone already has a
+      // reminder, do not post a second one.
+      const already = await this.db.message.findFirst({
+        where: {
+          chatId,
+          type: MessageType.SYSTEM,
+          metadata: { equals: ChatService.reminderMeta(humanMessages) },
+        },
+      });
+      if (already) return null;
+
+      return await this.db.message.create({
+        data: {
+          chatId,
+          senderId: null,
+          type: MessageType.SYSTEM,
+          content: null,
+          read: true,
+          metadata: ChatService.reminderMeta(humanMessages),
+        },
+      });
+    } catch (error) {
+      console.error('❌ Failed to post guideline reminder:', error);
+      return null;
+    }
+  }
+
   async getChatRoom(userId: string, sellerId: string, listingId?: string) {
     // CRITICAL: Find ALL chat rooms between these users and merge their messages
     const whereConditions = [
@@ -115,8 +285,10 @@ export class ChatService {
             id: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
+            // The details panel says "Last online 2 hours ago".
+            is_online: true,
+            last_offline: true,
           },
         },
         seller: {
@@ -124,8 +296,10 @@ export class ChatService {
             id: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
+            // The details panel says "Last online 2 hours ago".
+            is_online: true,
+            last_offline: true,
           },
         },
         messages: {
@@ -138,17 +312,20 @@ export class ChatService {
                 id: true,
                 first_name: true,
                 last_name: true,
-                email: true,
                 profile_pic: true,
                 role: true, // CRITICAL: Include role for admin messages
               },
             },
           },
         },
+        // The window header names the conversation after its listing, and a
+        // listing's name lives in the brand/advertisement answers rather than
+        // in a column — so those come along.
         listing: {
-          select: {
-            id: true,
-            status: true,
+          include: {
+            brand: true,
+            advertisement: true,
+            category: true,
           },
         },
         chatLabels: {
@@ -168,38 +345,33 @@ export class ChatService {
       return null;
     }
 
-    // Get the most recent chat room as the primary one
-    const primaryChatRoom = allChatRooms[0];
-    
-    // Merge ALL messages from ALL chat rooms
-    const allMessages = allChatRooms.flatMap(room => 
-      room.messages.map(msg => ({
-        ...msg,
-        chatId: room.id, // Keep original chatId for reference
-      }))
-    );
+    /**
+     * One conversation is about one listing.
+     *
+     * This used to merge the messages of every room the two people shared into
+     * a single thread. Two people who enquired about three businesses saw all
+     * three discussions interleaved, and the details panel could only show one
+     * listing for the lot — which is the "wrong listing in the corner" report.
+     * A conversation now stands on its own room.
+     */
+    const scoped = listingId
+      ? allChatRooms.filter((room) => room.listingId === listingId)
+      : allChatRooms;
 
-    const allChatLabels = allChatRooms.flatMap((room) => room.chatLabels || []);
+    // Asking for a listing these two have never discussed is not the same as
+    // asking for their newest chat; say so rather than answering with another
+    // listing's conversation.
+    if (scoped.length === 0) {
+      return null;
+    }
 
-    // Sort all messages by creation date
-    allMessages.sort((a, b) => 
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
+    // Newest first from the query above, so the head is the most recent.
+    const chatRoom = scoped[0];
 
-    // Return the primary chat room with ALL merged messages
-    const mergedChatRoom = {
-      ...primaryChatRoom,
-      messages: allMessages,
-      chatLabel: allChatLabels,
-      // Update updatedAt to the most recent message time
-      updatedAt: allMessages.length > 0 
-        ? new Date(allMessages[allMessages.length - 1].createdAt)
-        : primaryChatRoom.updatedAt,
+    return {
+      ...chatRoom,
+      chatLabel: chatRoom.chatLabels || [],
     };
-    
-    const chatRoom = mergedChatRoom;
-    
-    return chatRoom;
   }
 
   // Everything the conversation list needs in one shot, so the frontend no
@@ -212,8 +384,9 @@ export class ChatService {
         id: true,
         first_name: true,
         last_name: true,
-        email: true,
         profile_pic: true,
+        is_online: true,
+        last_offline: true,
       },
     },
     seller: {
@@ -221,8 +394,9 @@ export class ChatService {
         id: true,
         first_name: true,
         last_name: true,
-        email: true,
         profile_pic: true,
+        is_online: true,
+        last_offline: true,
       },
     },
     chatLabels: true,
@@ -410,8 +584,10 @@ export class ChatService {
             id: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
+            // The details panel says "Last online 2 hours ago".
+            is_online: true,
+            last_offline: true,
           },
         },
       },
@@ -581,8 +757,10 @@ export class ChatService {
       const userIds = Array.from(
         new Set(
           chatsRaw
-            .flatMap((chat) => [chat.userId, chat.sellerId])
-            .filter(Boolean),
+            // The assigned team member is fetched in the same round trip as the
+            // two participants, so the Responsible column costs no extra query.
+            .flatMap((chat) => [chat.userId, chat.sellerId, chat.responsibleId])
+            .filter((id): id is string => Boolean(id)),
         ),
       );
       const listingIds = Array.from(
@@ -606,10 +784,18 @@ export class ChatService {
           listingIds.length
             ? this.db.listing.findMany({
                 where: { id: { in: listingIds } },
+                // portfolioLink is confidential and no chat screen reads it,
+                // so it is not selected here.
                 select: {
                   id: true,
                   status: true,
-                  portfolioLink: true,
+                  // The overview tags conversations whose business the team
+                  // looks after, and each row is headed by the listing's name.
+                  // The name lives in the seller's answers, not in a column,
+                  // so the two question sets that can hold it come along.
+                  managed_by_ex: true,
+                  advertisement: { select: { question: true, answer: true } },
+                  brand: { select: { question: true, answer: true } },
                 },
               })
             : [],
@@ -736,6 +922,11 @@ export class ChatService {
               user,
               seller,
               listing,
+              // Who on the team owns this conversation, resolved for the
+              // Responsible column. Null when nobody has taken it on.
+              responsible: chat.responsibleId
+                ? userMap.get(chat.responsibleId) || null
+                : null,
               messages,
               unreadCount,
               chatLabel,
@@ -809,15 +1000,20 @@ export class ChatService {
               
               if (chatMessages.length === 0) continue;
               
-              // Get unique participants
+              // Get unique participants. Messages posted by the platform have
+              // no sender and say nothing about who the two parties are.
               const participants = Array.from(
-                new Map(chatMessages.map(m => [m.sender.id, m.sender])).values()
+                new Map(
+                  chatMessages
+                    .filter((m) => m.sender)
+                    .map((m) => [m.sender!.id, m.sender!]),
+                ).values(),
               );
-              
+
               if (participants.length < 2) {
                 continue;
               }
-              
+
               // Determine user and seller
               const user = participants.find(p => p.role === 'USER') || participants[0];
               const seller = participants.find(p => p.role === 'SELLER') || participants[1] || participants[0];
@@ -898,8 +1094,10 @@ export class ChatService {
             id: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
+            // The details panel says "Last online 2 hours ago".
+            is_online: true,
+            last_offline: true,
           },
         },
         seller: {
@@ -907,17 +1105,20 @@ export class ChatService {
             id: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
+            // The details panel says "Last online 2 hours ago".
+            is_online: true,
+            last_offline: true,
           },
         },
+        // Loading a conversation by its id is now the main path, and both the
+        // window header and the details panel name it after the listing — so
+        // the answer rows that hold that name have to come with it.
         listing: {
-          select: {
-            id: true,
-            status: true,
-            portfolioLink: true,
-            created_at: true,
-            updated_at: true,
+          include: {
+            brand: true,
+            advertisement: true,
+            category: true,
           },
         },
         messages: {
@@ -930,7 +1131,6 @@ export class ChatService {
                 id: true,
                 first_name: true,
                 last_name: true,
-                email: true,
                 profile_pic: true,
               },
             },
@@ -965,6 +1165,97 @@ export class ChatService {
     };
   }
 
+  /**
+   * Put a conversation in a team member's hands, or take it back out.
+   *
+   * Distinct from ChatMonitor, which only records who has looked at a chat.
+   * This is the assignment the overview filters and counts on.
+   */
+  async setChatResponsible(chatId: string, responsibleId: string | null) {
+    const chat = await this.db.chat.findUnique({
+      where: { id: chatId },
+      select: { id: true },
+    });
+    if (!chat) {
+      throw new HttpException('Chat not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (responsibleId) {
+      const member = await this.db.user.findUnique({
+        where: { id: responsibleId },
+        select: { id: true, role: true },
+      });
+      if (!member) {
+        throw new HttpException('Team member not found', HttpStatus.NOT_FOUND);
+      }
+      // Only the team can be made responsible for a conversation.
+      if (member.role !== 'ADMIN' && member.role !== 'MONITER') {
+        throw new HttpException(
+          'Only admins and moderators can be assigned to a chat',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+
+    return this.db.chat.update({
+      where: { id: chatId },
+      data: { responsibleId },
+      include: {
+        responsible: {
+          select: { id: true, first_name: true, last_name: true, profile_pic: true, role: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * The conversation between two people that belongs to no listing.
+   *
+   * getChatRoom() deliberately merges every room between a pair, so it will
+   * happily hand back a listing-specific one. Support needs the opposite: a
+   * general thread with the member, not a thread about a particular business.
+   * This looks only for `listingId: null`, and opens one if there is none.
+   */
+  async getOrCreateDirectChat(userId: string, otherUserId: string) {
+    if (userId === otherUserId) {
+      throw new HttpException(
+        'You cannot start a conversation with yourself',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const existing = await this.db.chat.findFirst({
+      where: {
+        AND: [
+          {
+            // On MongoDB a field that was never written is absent, not null,
+            // and `listingId: null` does not match an absent field. Rooms
+            // opened before this existed have no listingId at all, so both
+            // shapes have to be accepted or we would open a second room on
+            // every visit.
+            OR: [{ listingId: null }, { listingId: { isSet: false } }],
+          },
+          {
+            OR: [
+              { userId, sellerId: otherUserId },
+              { userId: otherUserId, sellerId: userId },
+            ],
+          },
+        ],
+      },
+      include: this.conversationRoomInclude,
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (existing) return existing;
+
+    return this.db.chat.create({
+      // Written explicitly so the field exists and the lookup above matches it.
+      data: { userId, sellerId: otherUserId, listingId: null },
+      include: this.conversationRoomInclude,
+    });
+  }
+
   async createChatRoom(userId: string, sellerId: string, listingId?: string) {
     // CRITICAL: Check if chat room exists first
     const existingRoom = await this.getChatRoom(userId, sellerId, listingId);
@@ -981,7 +1272,6 @@ export class ChatService {
                 id: true,
                 first_name: true,
                 last_name: true,
-                email: true,
                 profile_pic: true,
               },
             },
@@ -990,7 +1280,6 @@ export class ChatService {
                 id: true,
                 first_name: true,
                 last_name: true,
-                email: true,
                 profile_pic: true,
               },
             },
@@ -1022,8 +1311,10 @@ export class ChatService {
             id: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
+            // The details panel says "Last online 2 hours ago".
+            is_online: true,
+            last_offline: true,
           },
         },
         seller: {
@@ -1031,8 +1322,10 @@ export class ChatService {
             id: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
+            // The details panel says "Last online 2 hours ago".
+            is_online: true,
+            last_offline: true,
           },
         },
         listing: {
@@ -1392,7 +1685,6 @@ export class ChatService {
             id: true,
             first_name: true,
             last_name: true,
-            email: true,
             profile_pic: true,
             role: true,
           },

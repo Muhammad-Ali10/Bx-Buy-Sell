@@ -2,11 +2,14 @@ import { Button } from "./ui/button";
 import ListingCard from "./ListingCard";
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api";
+import { parseMediaUrls } from "@/lib/mediaUtils";
 import { useNavigate } from "react-router-dom";
 import { useCategories } from "@/hooks/useCategories";
 import { formatBusinessAge } from "@/lib/dateUtils";
 import { useAuth } from "@/hooks/useAuth";
 
+import { formatNumber } from "@/lib/formatNumber";
+import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 interface ListingsProps {
   searchQuery: string;
 }
@@ -153,8 +156,12 @@ const Listings = ({ searchQuery }: ListingsProps) => {
           </p>
 
           {/* Category Slider - Mobile: horizontal scroll, Desktop: flex-wrap */}
+          {/* category-scroll belongs on the element that actually scrolls —
+              on the inner one the webkit rule never applied, so Chrome drew a
+              scrollbar under the pills. py-2 leaves room for the active pill's
+              shadow, which overflow-y-hidden was clipping flat. */}
           <div
-            className="mb-6 sm:mb-8 px-4 overflow-x-auto overflow-y-hidden"
+            className="mb-6 sm:mb-8 px-4 py-2 overflow-x-auto overflow-y-hidden category-scroll"
             style={{
               scrollbarWidth: "none" /* Firefox */,
               msOverflowStyle: "none" /* IE and Edge */,
@@ -167,7 +174,7 @@ const Listings = ({ searchQuery }: ListingsProps) => {
               }
             `}</style>
             <div
-              className="flex flex-nowrap sm:flex-wrap justify-start sm:justify-center gap-2 sm:gap-3 category-scroll"
+              className="flex flex-nowrap sm:flex-wrap justify-start sm:justify-center gap-2 sm:gap-3"
               style={{
                 width: "max-content",
                 minWidth: "100%",
@@ -284,10 +291,12 @@ const Listings = ({ searchQuery }: ListingsProps) => {
                       a.question?.toLowerCase().includes("photo") ||
                       a.answer_type === "PHOTO",
                   );
+                  // Same as the full feed: say why the picture is blurred.
+                  const imageIsLocked = Boolean(
+                    photoQuestion?.locked || photoQuestion?.blurredPreview,
+                  );
                   if (photoQuestion?.answer) {
-                    imageUrl = Array.isArray(photoQuestion.answer)
-                      ? photoQuestion.answer[0]
-                      : photoQuestion.answer;
+                    imageUrl = parseMediaUrls(photoQuestion.answer)[0] || "";
                   }
                   if (!imageUrl) {
                     const brandInfo = brandQuestions[0];
@@ -462,10 +471,12 @@ const Listings = ({ searchQuery }: ListingsProps) => {
                     >
                       <ListingCard
                         image={imageUrl}
+                        imageLocked={imageIsLocked}
+                        imageLockType={photoQuestion?.lockType ?? null}
                         category={categoryInfo?.name || "Other"}
                         name={businessName}
                         description={adDescription || businessDescription}
-                        price={`$${Number(askingPrice).toLocaleString()}`}
+                        price={`${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`}
                         profitMultiple={profitMultiple}
                         revenueMultiple={revenueMultiple}
                         location={location}
@@ -473,12 +484,12 @@ const Listings = ({ searchQuery }: ListingsProps) => {
                         businessAge={businessAge}
                         netProfit={
                           avgNetProfit > 0
-                            ? `$${Math.round(avgNetProfit).toLocaleString()}`
+                            ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}`
                             : undefined
                         }
                         revenue={
                           avgRevenue > 0
-                            ? `$${Math.round(avgRevenue).toLocaleString()}`
+                            ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}`
                             : undefined
                         }
                         managedByEx={
@@ -486,6 +497,9 @@ const Listings = ({ searchQuery }: ListingsProps) => {
                           listing.managed_by_ex === 1 ||
                           listing.managed_by_ex === "true" ||
                           listing.managed_by_ex === "1"
+                        }
+                        isPremium={
+                          String(listing.selectedPackage || "").toUpperCase() === "PREMIUM"
                         }
                         listingId={listing.id}
                         sellerId={listing.userId || listing.user_id}

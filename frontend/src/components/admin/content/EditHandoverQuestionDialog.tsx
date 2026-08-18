@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUpdateHandoverQuestion } from "@/hooks/useUpdateHandoverQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { X } from "lucide-react";
@@ -11,13 +12,14 @@ import { X } from "lucide-react";
 interface EditHandoverQuestionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  question: { id: string; question: string; answer_type: string; option?: string[] } | null;
+  question: { id: string; question: string; answer_type: string; option?: string[]; required?: boolean | null } | null;
 }
 
 export const EditHandoverQuestionDialog = ({ open, onOpenChange, question }: EditHandoverQuestionDialogProps) => {
   const [questionText, setQuestionText] = useState("");
   const [answerType, setAnswerType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateHandoverQuestion();
 
   useEffect(() => {
@@ -29,6 +31,7 @@ export const EditHandoverQuestionDialog = ({ open, onOpenChange, question }: Edi
       };
       setAnswerType(answerTypeMap[question.answer_type] || question.answer_type);
       setOptions(question.option && Array.isArray(question.option) ? question.option.join(", ") : "");
+      setRequired(question.required !== false);
     }
   }, [question]);
 
@@ -55,7 +58,7 @@ export const EditHandoverQuestionDialog = ({ open, onOpenChange, question }: Edi
     }
 
     updateQuestion.mutate(
-      { id: question.id, question: trimmedQuestion, answer_type: answerType, options: optionsArray },
+      { id: question.id, question: trimmedQuestion, answer_type: answerType, options: optionsArray, required },
       {
         onSuccess: () => {
           onOpenChange(false);
@@ -125,6 +128,7 @@ export const EditHandoverQuestionDialog = ({ open, onOpenChange, question }: Edi
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button

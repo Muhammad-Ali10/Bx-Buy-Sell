@@ -178,3 +178,79 @@ export const formatBusinessAge = (dateString: string | Date | null | undefined):
   }
 };
 
+
+/**
+ * Read a listing date answer, which the wizard stores either as "YYYY-MM-DD"
+ * or, from the month/year picker, as "YYYY-MM".
+ */
+export function parseListingDateAnswer(raw: unknown): Date | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) {
+    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const ym = s.match(/^(\d{4})-(\d{2})$/);
+  if (ym) {
+    const d = new Date(Number(ym[1]), Number(ym[2]) - 1, 1);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  return null;
+}
+
+/**
+ * Whole years since the business started, from the seller's own start date.
+ *
+ * The companion to formatListingBusinessAge, for the places that need a number
+ * to compare against — the age filter, mainly. Returns null when there is no
+ * usable date, so a caller can skip filtering rather than treat it as zero.
+ */
+export function listingBusinessAgeYears(startDateAnswer: unknown): number | null {
+  const start = parseListingDateAnswer(startDateAnswer);
+  if (!start) return null;
+
+  const now = new Date();
+  if (start > now) return null;
+
+  let years = now.getFullYear() - start.getFullYear();
+  const monthDiff = now.getMonth() - start.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < start.getDate())) {
+    years -= 1;
+  }
+  return Math.max(0, years);
+}
+
+/**
+ * Business age in the format the listing page specifies:
+ *   under a year -> "9 months"
+ *   otherwise    -> "1 year | 5 months" / "2 years | 6 months"
+ * Returns null when there is no usable start date, so callers can show "Unknown"
+ * instead of a made-up figure.
+ */
+export function formatListingBusinessAge(startDateAnswer: unknown): string | null {
+  const start = parseListingDateAnswer(startDateAnswer);
+  if (!start) return null;
+
+  const now = new Date();
+  if (start > now) return null;
+
+  let months =
+    (now.getFullYear() - start.getFullYear()) * 12 +
+    (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months -= 1;
+  if (months < 0) months = 0;
+
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+
+  const monthLabel = `${remainingMonths} ${remainingMonths === 1 ? 'month' : 'months'}`;
+  if (years === 0) return monthLabel;
+
+  const yearLabel = `${years} ${years === 1 ? 'year' : 'years'}`;
+  return `${yearLabel} | ${monthLabel}`;
+}

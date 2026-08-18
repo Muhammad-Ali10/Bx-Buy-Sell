@@ -24,7 +24,13 @@ export const ProductsStep = ({ onNext, onBack }: ProductsStepProps) => {
     // Check if all questions have answers
     questions.forEach((question: any) => {
       const value = formData[question.id];
-      
+
+      // Admin can mark a question as optional; skip empty-answer validation for those.
+      const isAnswerEmpty = !value || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0);
+      if (question.required === false && isAnswerEmpty) {
+        return;
+      }
+
       // Required fields validation
       if (!value || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0)) {
         errors.push(`${question.question} is required`);

@@ -8,6 +8,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { chatRoomsQueryKey, fetchChatRooms, type EnrichedChatRoom } from "@/lib/chatRooms";
+import { getChatListingImage, getChatListingTitle } from "@/lib/chatListing";
+import ConfidentialAccessRequests from "@/components/chat/ConfidentialAccessRequests";
 import { formatChatTime } from "@/lib/timeFormatter";
 import { cn } from "@/lib/utils";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
@@ -22,6 +24,9 @@ interface Conversation {
   userId: string;
   sellerId: string;
   listingId?: string | null; // CRITICAL: Include listingId to scope chats to specific listings
+  /** The card leads with the listing, not the person — one chat, one business. */
+  listingTitle: string;
+  listingImage?: string;
   otherUserId: string;
   otherUserName: string;
   otherUserAvatar?: string;
@@ -36,13 +41,25 @@ interface Conversation {
 
 interface ConversationListProps {
   selectedConversation: string | null;
-  onSelectConversation: (id: string, userId: string, sellerId: string) => void;
+  onSelectConversation: (
+    id: string,
+    userId: string,
+    sellerId: string,
+    /** The listing this conversation is about; scopes the window and panel. */
+    listingId?: string | null,
+  ) => void;
   userId: string;
   refreshTrigger?: string | null; // Trigger refresh when conversation changes
   onConversationDeleted?: () => void; // Callback when conversation is deleted
+  /**
+   * Open the conversation about this listing as soon as the list has loaded.
+   * Used when arriving from the admin listings table, which knows the listing
+   * but not which conversation belongs to it.
+   */
+  autoSelectListingId?: string | null;
 }
 
-export const ConversationList = ({ selectedConversation, onSelectConversation, userId, refreshTrigger, onConversationDeleted }: ConversationListProps) => {
+export const ConversationList = ({ selectedConversation, onSelectConversation, userId, refreshTrigger, onConversationDeleted, autoSelectListingId }: ConversationListProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   // Bumped when pinned chats change (cross-tab storage event) so the ordering
@@ -197,82 +214,58 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
     if (!rooms.length) return [];
     const pinnedChatIds = readPinnedChatIds();
 
-    // Merge all rooms with the same user-pair into ONE conversation (a pair may
-    // have chatted about several listings). Everything the card needs — the
-    // other participant, last message, per-user label and unread count — comes
-    // enriched from the API, so there are no extra per-room requests.
-    const roomGroups = new Map<string, ChatRoom[]>();
-    rooms.forEach((room) => {
-      const userPair = [room.userId, room.sellerId].sort().join('-');
-      const group = roomGroups.get(userPair);
-      if (group) group.push(room);
-      else roomGroups.set(userPair, [room]);
+    /**
+     * One card per conversation, and a conversation is one listing.
+     *
+     * Rooms used to be merged by user-pair, which put three enquiries about
+     * three different businesses behind a single card and left the details
+     * panel guessing which listing to show. Each room now stands alone, so the
+     * card can carry that listing's own name and picture.
+     */
+    const conversationsWithDetails = rooms.map((room) => {
+      const otherUserId = room.userId === userId ? room.sellerId : room.userId;
+      const otherUser = room.userId === userId ? room.seller : room.user;
+      const fullName =
+        `${otherUser?.first_name || ''} ${otherUser?.last_name || ''}`.trim() ||
+        otherUser?.email ||
+        'Unknown User';
+
+      const latest = room.messages?.[0];
+      const lastMessage = latest?.content || '';
+      const lastMessageAt = latest?.createdAt || room.updatedAt;
+
+      const isSelected = room.id === selectedConversation;
+      const unreadCount = isSelected ? 0 : room.unreadCount || 0;
+
+      // This user's label for the conversation (labels are per user).
+      const labels = room.chatLabels || [];
+      const labelEntry = labels.find((l) => l.userId === userId) || labels[0];
+      const rawLabel = labelEntry?.label ?? null;
+      const label: 'GOOD' | 'MEDIUM' | 'BAD' | null =
+        rawLabel === 'GOOD' || rawLabel === 'MEDIUM' || rawLabel === 'BAD'
+          ? rawLabel
+          : null;
+
+      return {
+        id: room.id,
+        userId: room.userId,
+        sellerId: room.sellerId,
+        listingId: room.listingId ?? null,
+        // Older chats were started before conversations were tied to a listing.
+        // They keep working and say so, rather than borrowing another's name.
+        listingTitle: room.listing ? getChatListingTitle(room.listing) : 'General enquiry',
+        listingImage: room.listing ? getChatListingImage(room.listing) : undefined,
+        otherUserId,
+        otherUserName: fullName,
+        otherUserAvatar: otherUser?.profile_pic,
+        lastMessage,
+        lastMessageAt,
+        unreadCount,
+        label,
+        isArchived: room.status === 'ARCHIVED',
+        isPinned: pinnedChatIds.includes(room.id),
+      };
     });
-
-      const conversationsWithDetails = Array.from(roomGroups.values()).map(
-        (groupRooms) => {
-          // Representative = the most recently updated room in the pair.
-          const room = groupRooms.reduce((a, b) =>
-            new Date(b.updatedAt || b.createdAt || 0).getTime() >
-            new Date(a.updatedAt || a.createdAt || 0).getTime()
-              ? b
-              : a,
-          );
-
-          const otherUserId = room.userId === userId ? room.sellerId : room.userId;
-          const otherUser = room.userId === userId ? room.seller : room.user;
-          const fullName =
-            `${otherUser?.first_name || ''} ${otherUser?.last_name || ''}`.trim() ||
-            otherUser?.email ||
-            'Unknown User';
-
-          // Most recent message across the merged rooms (each carries its latest).
-          let lastMsg: { content?: string; createdAt: string } | null = null;
-          groupRooms.forEach((r) => {
-            const m = r.messages?.[0];
-            if (
-              m &&
-              (!lastMsg ||
-                new Date(m.createdAt).getTime() > new Date(lastMsg.createdAt).getTime())
-            ) {
-              lastMsg = m;
-            }
-          });
-          const latest = lastMsg as { content?: string; createdAt: string } | null;
-          const lastMessage = latest?.content || '';
-          const lastMessageAt = latest?.createdAt || room.updatedAt;
-
-          // Unread summed across the merged rooms (0 while the chat is open).
-          const isSelected = groupRooms.some((r) => r.id === selectedConversation);
-          const unreadCount = isSelected
-            ? 0
-            : groupRooms.reduce((sum, r) => sum + (r.unreadCount || 0), 0);
-
-          // This user's label for the conversation (labels are per user).
-          const labels = room.chatLabels || [];
-          const labelEntry = labels.find((l) => l.userId === userId) || labels[0];
-          const rawLabel = labelEntry?.label ?? null;
-          const label: 'GOOD' | 'MEDIUM' | 'BAD' | null =
-            rawLabel === 'GOOD' || rawLabel === 'MEDIUM' || rawLabel === 'BAD'
-              ? rawLabel
-              : null;
-
-          return {
-            id: room.id, // Use the most recent chat room's ID as the conversation ID
-            userId: room.userId,
-            sellerId: room.sellerId,
-            listingId: null, // Not used - merged conversation
-            otherUserId,
-            otherUserName: fullName,
-            otherUserAvatar: otherUser?.profile_pic,
-            lastMessage,
-            lastMessageAt,
-            unreadCount,
-            label,
-            isArchived: room.status === 'ARCHIVED',
-            isPinned: pinnedChatIds.includes(room.id),
-          };
-        });
 
     // Sort pinned chats first, then by last message time
     conversationsWithDetails.sort((a, b) => {
@@ -285,6 +278,21 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
     // pinnedVersion re-derives pin order after cross-tab changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rooms, selectedConversation, userId, pinnedVersion]);
+
+  /**
+   * Arriving from the admin listings table, we know the listing but not the
+   * conversation. Pick it once the rooms have loaded, and only once — a later
+   * manual choice must not be overridden.
+   */
+  const autoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (!autoSelectListingId || autoSelectedRef.current) return;
+    const match = conversations.find((c) => c.listingId === autoSelectListingId);
+    if (!match) return;
+    autoSelectedRef.current = true;
+    onSelectConversation(match.id, match.userId, match.sellerId, match.listingId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSelectListingId, conversations]);
 
   const filteredConversations = useMemo(() => {
     const query = searchQuery.toLowerCase();
@@ -383,69 +391,47 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
         </button>
       </div>
 
-      {/* Archived Chats Toggle */}
-      <div
-        style={{
-          marginTop: '16px',
-          width: '343px',
-          height: '45px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px',
-          borderRadius: '50px',
-          cursor: 'pointer',
-        }}
+      {/* A control, not a heading. It used to read as a title sitting above
+          the list, so the ordinary conversations underneath looked archived —
+          and nothing showed whether it was on or off. */}
+      <button
+        type="button"
         onClick={() => setShowArchived(!showArchived)}
+        aria-pressed={showArchived}
+        title={showArchived ? "Back to your open conversations" : "Show archived conversations"}
+        className={`mt-4 flex w-full items-center justify-between rounded-full border px-3 py-2.5 transition-colors ${
+          showArchived
+            ? "border-accent bg-accent/15 text-black"
+            : "border-black/10 bg-[rgba(250,250,250,1)] text-black hover:bg-black/[0.03]"
+        }`}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <img 
-            src={archiveIcon} 
-            alt="Archive" 
-            style={{ 
-              width: '20px', 
-              height: '20px',
-              flexShrink: 0,
-            }} 
-          />
+        <span className="flex items-center gap-2.5">
+          <img src={archiveIcon} alt="" style={{ width: '20px', height: '20px', flexShrink: 0 }} />
           <span
-            className="text-base lg:text-[13px] xl:text-base text-black"
-            style={{
-              fontFamily: 'Lufga',
-              fontWeight: 500,
-              lineHeight: '100%',
-              letterSpacing: '0%',
-            }}
+            className="text-base lg:text-[13px] xl:text-base"
+            style={{ fontFamily: 'Lufga', fontWeight: 500, lineHeight: '100%' }}
           >
-            Archived Chats
+            {showArchived ? 'Showing archived' : 'Archived chats'}
           </span>
-        </div>
-        <div
-          style={{
-            width: '20px',
-            height: '20px',
-            borderRadius: '100px',
-            backgroundColor: 'rgba(165, 165, 165, 1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
+        </span>
+
+        <span className="flex items-center gap-2">
           <span
-            style={{
-              fontFamily: 'Lufga',
-              fontWeight: 600,
-              fontSize: '10px',
-              lineHeight: '100%',
-              letterSpacing: '0%',
-              color: 'rgba(250, 250, 250, 1)',
-            }}
+            className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
+              showArchived ? 'bg-black text-white' : 'bg-[rgba(165,165,165,1)] text-white'
+            }`}
           >
-            {conversations.filter(c => c.isArchived).length}
+            {conversations.filter((c) => c.isArchived).length}
           </span>
-        </div>
-      </div>
+          {showArchived && (
+            <span className="text-[11px] font-medium underline underline-offset-2">Back</span>
+          )}
+        </span>
+      </button>
+
+      {/* Sellers who vet buyers by hand decide here, above the conversations.
+          Renders nothing when there is no one waiting. */}
+      <ConfidentialAccessRequests />
 
       {/* Conversations List */}
       <div 
@@ -484,10 +470,12 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
             <div
               key={convo.id}
               onClick={() => {
-                onSelectConversation(convo.id, convo.userId, convo.sellerId);
+                onSelectConversation(convo.id, convo.userId, convo.sellerId, convo.listingId);
               }}
               className={cn(
-                "w-full flex items-center transition-colors cursor-pointer group relative h-[70px] lg:h-[60px] xl:h-[70px]"
+                // Three lines now (listing, person, message), so the row is
+                // taller than when it only carried a name and a message.
+                "w-full flex items-center transition-colors cursor-pointer group relative h-[82px] lg:h-[74px] xl:h-[82px]"
               )}
               style={{
                 paddingTop: '10px',
@@ -508,24 +496,34 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                 }
               }}
             >
-              {/* First Section: Profile Image with Status */}
-              <div style={{ position: 'relative', flexShrink: 0 }}>
-                  <Avatar 
-                  className="w-11 h-11 lg:w-10 lg:h-10 xl:w-11 xl:h-11"
-                  style={{
-                    borderRadius: '20px',
-                  }}
-                >
-                  <AvatarImage src={convo.otherUserAvatar} />
-                  <AvatarFallback className="text-sm lg:text-[11px] xl:text-sm">
-                    {convo.otherUserName.charAt(0).toUpperCase() || 'U'}
-                  </AvatarFallback>
-                </Avatar>
-                {/* Online Status Indicator */}
-                {convo.isOnline && (
-                  <div
-                    className="absolute bottom-0 right-0 w-3 h-3 lg:w-2.5 lg:h-2.5 xl:w-3 xl:h-3 rounded-full bg-green-500 border-2 border-white z-[1]"
+              {/* The listing, not the person: a rectangle suits a shopfront
+                  photo, and it is what tells the two chats with the same
+                  seller apart at a glance. */}
+              <div
+                style={{
+                  position: 'relative',
+                  flexShrink: 0,
+                  width: '52px',
+                  height: '44px',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  background: 'rgba(0, 0, 0, 0.06)',
+                }}
+              >
+                {convo.listingImage ? (
+                  <img
+                    src={convo.listingImage}
+                    alt=""
+                    loading="lazy"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
+                ) : (
+                  <div
+                    className="w-full h-full flex items-center justify-center text-[10px] text-black/40"
+                    style={{ fontFamily: 'Lufga' }}
+                  >
+                    {convo.listingTitle.charAt(0).toUpperCase() || '—'}
+                  </div>
                 )}
               </div>
 
@@ -549,7 +547,7 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                       letterSpacing: '0%',
                     }}
                   >
-                    {convo.otherUserName}
+                    {convo.listingTitle || convo.otherUserName}
                   </h4>
                   {convo.label && (
                     <div
@@ -588,6 +586,27 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                       </span>
                     </div>
                   )}
+                </div>
+                {/* Who you are talking to, under the business you are talking
+                    about — the same seller can appear on several cards. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+                  <Avatar className="w-4 h-4 shrink-0">
+                    <AvatarImage src={convo.otherUserAvatar} />
+                    <AvatarFallback className="text-[8px]">
+                      {convo.otherUserName.charAt(0).toUpperCase() || 'U'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span
+                    className="text-[11px] lg:text-[10px] xl:text-[11px] overflow-hidden text-ellipsis whitespace-nowrap"
+                    style={{
+                      fontFamily: 'Lufga',
+                      fontWeight: 500,
+                      lineHeight: '100%',
+                      color: 'rgba(0, 0, 0, 0.75)',
+                    }}
+                  >
+                    {convo.otherUserName}
+                  </span>
                 </div>
                 <p
                   className="text-xs lg:text-[10px] xl:text-xs m-0 overflow-hidden text-ellipsis whitespace-nowrap"

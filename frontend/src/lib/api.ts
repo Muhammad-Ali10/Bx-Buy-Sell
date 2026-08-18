@@ -446,11 +446,226 @@ class ApiClient {
     return this.request(`/listing/secure/${id}`);
   }
 
+  /**
+   * Buyer accepts the confidentiality agreement. Returns `granted: true` when
+   * the seller allows automatic access, or `pendingApproval: true` when the
+   * seller approves buyers manually.
+   */
+  async acceptConfidentialityAgreement(listingId: string) {
+    return this.request(`/listing/${listingId}/confidential/accept-agreement`, {
+      method: 'POST',
+    });
+  }
+
+  /** The signed-in user's own proof-of-funds verification status. */
+  async getMyAcquisitionCapacity() {
+    return this.request('/acquisition-capacity/me', { method: 'GET' });
+  }
+
+  /** Upload proof of funds for review. */
+  /** SMS, email, identity and funds status in one call. */
+  async getVerificationOverview() {
+    return this.request('/user/me/verification', { method: 'GET' });
+  }
+
+  /** Where the identity check stands. */
+  async getIdentityStatus() {
+    return this.request('/identity/me', { method: 'GET' });
+  }
+
+  /** Begin an identity check; returns the provider URL to send the user to. */
+  async startIdentityVerification() {
+    return this.request('/identity/me/session', { method: 'POST' });
+  }
+
+  /** Email a code to a new address. The switch only happens on verify. */
+  async sendEmailChangeCode(email: string) {
+    return this.request('/user/me/email/send-code', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  /** Confirm the code and switch the sign-in address. */
+  async verifyEmailChangeCode(code: string) {
+    return this.request('/user/me/email/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  /** Text a verification code to a phone number. */
+  async sendPhoneCode(phone: string) {
+    return this.request('/user/me/phone/send-code', {
+      method: 'POST',
+      body: JSON.stringify({ phone }),
+    });
+  }
+
+  /** Confirm the SMS code; the number is only saved once this passes. */
+  async verifyPhoneCode(code: string) {
+    return this.request('/user/me/phone/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  /** Moderator's verdict on one uploaded proof-of-funds file. */
+  /**
+   * A moderator's verdict on one uploaded document, with what it proves. The
+   * case total is the sum of these across verified documents — it is never
+   * sent, only recomputed on the server.
+   */
+  async reviewAcquisitionDocument(
+    documentId: string,
+    status: 'IN_REVIEW' | 'VERIFIED' | 'DECLINED',
+    note?: string | null,
+    verifiedCapital?: number | null,
+  ) {
+    return this.request(`/acquisition-capacity/documents/${documentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, note, verifiedCapital }),
+    });
+  }
+
+  /** Hand a case to a moderator; null clears it. Assigning starts the review. */
+  async assignAcquisitionReviewer(id: string, reviewerId: string | null) {
+    return this.request(`/acquisition-capacity/${id}/responsible`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reviewerId }),
+    });
+  }
+
+  /** Files as `{ url, name }`, so the review table can name them. */
+  async submitAcquisitionDocuments(
+    documents: Array<string | { url: string; name?: string }>,
+  ) {
+    return this.request('/acquisition-capacity/me/documents', {
+      method: 'POST',
+      body: JSON.stringify({ documents }),
+    });
+  }
+
+  /** A buyer's verified capital — only returned to a seller in touch with them. */
+  async getBuyerAcquisitionCapacity(buyerId: string) {
+    return this.request(`/acquisition-capacity/buyer/${buyerId}`, { method: 'GET' });
+  }
+
+  /** Admin dashboard counts, revenue and daily series — all counted server-side. */
+  async getDashboardStats() {
+    return this.request('/dashboard/stats', { method: 'GET' });
+  }
+
+  /** Listings still in their early-access window, with days until they go public. */
+  async getOffMarketListings() {
+    return this.request('/listing/off-market', { method: 'GET' });
+  }
+
+  /** Moderator queue of proof-of-funds cases, with the verified total. */
+  async getAcquisitionCapacityCases(params?: Record<string, string>) {
+    const query = params ? new URLSearchParams(params).toString() : '';
+    return this.request(`/acquisition-capacity${query ? `?${query}` : ''}`, { method: 'GET' });
+  }
+
+  /**
+   * Moderator records the case status and notes. The verified total is not
+   * accepted here: it is the sum of the verified documents.
+   */
+  async reviewAcquisitionCapacity(
+    id: string,
+    payload: {
+      status?: 'UNASSIGNED' | 'IN_REVIEW' | 'COMPLETED';
+      notes?: string | null;
+    },
+  ) {
+    return this.request(`/acquisition-capacity/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /** Report a listing to the moderation team. */
+  /** Report a conversation. Lands in the same monitoring queue as the rest. */
+  async reportChat(payload: { chatId: string; reason: string; notes?: string }) {
+    return this.request('/monitoring-alerts/report-chat', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async reportListing(payload: { listingId: string; reason: string; notes?: string }) {
+    return this.request('/monitoring-alerts/report-listing', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /** Start Stripe checkout for a listing's package + add-on. */
+  async createListingPackageCheckout(
+    listingId: string,
+    payload: {
+      packageId: 'MINIMUM' | 'STARTER' | 'PREMIUM';
+      addon?: 'NONE' | 'CATEGORY_PAGE' | 'START_PAGE' | 'BUNDLE';
+      billingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
+    },
+  ) {
+    return this.request(`/listing/${listingId}/package-checkout`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async updateListing(id: string, listingData: any) {
     return this.request(`/listing/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(listingData),
     });
+  }
+
+  /** Begin the assisted deal process for a conversation. */
+  async startDealProcess(chatId: string) {
+    return this.request(`/chat/start-deal/${chatId}`, { method: 'POST' });
+  }
+
+  /** A listing's package and add-on, priced for that listing's own tier. */
+  async getListingPackage(listingId: string) {
+    return this.request(`/listing/${listingId}/package`, { method: 'GET' });
+  }
+
+  /** Add, replace or cancel a listing's add-on. 'NONE' cancels. */
+  async changeListingAddon(listingId: string, addon: string) {
+    return this.request(`/listing/${listingId}/addon`, {
+      method: 'POST',
+      body: JSON.stringify({ addon }),
+    });
+  }
+
+  /** Past payments, for the Billing tab's invoice list. */
+  async getPaymentHistory() {
+    return this.request('/subscription/payment-history', { method: 'GET' });
+  }
+
+  /** Stripe's own billing portal — where cards are actually managed. */
+  async getBillingPortalUrl(returnUrl: string) {
+    return this.request(
+      `/subscription/portal?returnUrl=${encodeURIComponent(returnUrl)}`,
+      { method: 'GET' },
+    );
+  }
+
+  /** Close the signed-in member's own account. */
+  async closeOwnAccount() {
+    return this.request('/user/me', { method: 'DELETE' });
+  }
+
+  /** The signed-in member's subscription: plan, status, period end, pending change. */
+  async getCurrentSubscription() {
+    return this.request('/subscription/current', { method: 'GET' });
+  }
+
+  /** Every active plan, ordered by tier. */
+  async getSubscriptionPlans() {
+    return this.request('/subscription/plans', { method: 'GET' });
   }
 
   async getSubscriptionRules() {
@@ -459,10 +674,57 @@ class ApiClient {
     });
   }
 
+  /** Start a Stripe checkout for an upgrade. Returns the hosted-page URL. */
+  async createSubscriptionCheckout(planSlug: string, billingCycle: string) {
+    return this.request('/subscription/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ planSlug, billingCycle }),
+    });
+  }
+
+  /**
+   * Queue a move to a cheaper plan (or to Minimum, which is a cancellation)
+   * for the end of the paid period. Nothing is charged or removed today.
+   */
+  async scheduleSubscriptionChange(planSlug: string, billingCycle: string) {
+    return this.request('/subscription/schedule-change', {
+      method: 'POST',
+      body: JSON.stringify({ planSlug, billingCycle }),
+    });
+  }
+
+  /** Drop a queued change; the current plan simply continues. */
+  async cancelScheduledSubscriptionChange() {
+    return this.request('/subscription/cancel-change', {
+      method: 'POST',
+    });
+  }
+
   /** Free-plan rules for the create-listing wizard when the user is not signed in */
   async getSubscriptionRulesPreview() {
     return this.request('/subscription/rules-preview', {
       method: 'GET',
+    });
+  }
+
+  /** Buyers waiting on the signed-in seller to approve confidential access. */
+  async getConfidentialRequests() {
+    return this.request('/listing/confidential-requests', { method: 'GET' });
+  }
+
+  /** Turn a buyer's request down. */
+  async declineConfidentialAccess(listingId: string, buyerId: string) {
+    return this.request(`/listing/${listingId}/confidential/decline`, {
+      method: 'POST',
+      body: JSON.stringify({ buyerId }),
+    });
+  }
+
+  /** Approve a buyer's request from the requests list. */
+  async approveConfidentialAccess(listingId: string, buyerId: string, chatId?: string) {
+    return this.request(`/listing/${listingId}/confidential/grant`, {
+      method: 'POST',
+      body: JSON.stringify({ buyerId, chatId }),
     });
   }
 
@@ -485,6 +747,11 @@ class ApiClient {
   }
 
   // Categories endpoint
+  /** Categories that actually have published listings, busiest first. */
+  async getTrendingCategories(limit = 4) {
+    return this.request(`/category/trending?limit=${limit}`, { method: 'GET' });
+  }
+
   async getCategories() {
     return this.request('/category');
   }
@@ -585,14 +852,17 @@ class ApiClient {
     return this.request(`/prohibited-word/${id}`);
   }
 
-  async createProhibitedWord(wordData: { word: string }) {
+  /** Category values are the stored enum: CONTACT_INFO, PAYMENT_METHODS, … */
+  async createProhibitedWord(wordData: { word: string; category?: string }) {
     return this.request('/prohibited-word', {
       method: 'POST',
       body: JSON.stringify(wordData),
     });
   }
 
-  async updateProhibitedWord(id: string, wordData: { word?: string; is_active?: boolean; category?: string }) {
+  // `is_active` is gone: there is no such column, so sending it did nothing
+  // beyond making the UI claim success.
+  async updateProhibitedWord(id: string, wordData: { word?: string; category?: string }) {
     return this.request(`/prohibited-word/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(wordData),
@@ -619,12 +889,15 @@ class ApiClient {
     return this.request(`/question-admin/type/${type}`);
   }
 
-  async createAdminQuestion(questionData: { 
-    question: string; 
+  async createAdminQuestion(questionData: {
+    question: string;
     answer_type: string;
     answer_for: string;
     option?: string[];
     options?: string[];
+    dependsOnQuestionId?: string | null;
+    dependsOnValue?: string | null;
+    required?: boolean | null;
   }) {
     // Backend DTO expects 'options' (plural), not 'option' (singular)
     const payload: any = {
@@ -632,41 +905,54 @@ class ApiClient {
       answer_type: questionData.answer_type === 'UMBER' ? 'NUMBER' : questionData.answer_type,
       answer_for: questionData.answer_for,
     };
-    
+
     // Only include options if it's provided and not empty
     const normalizedOptions = questionData.options ?? questionData.option;
     if (normalizedOptions && normalizedOptions.length > 0) {
       payload.options = normalizedOptions; // Send as 'options' to match DTO
     }
-    
+
+    // Optional conditional-display dependency.
+    if (questionData.dependsOnQuestionId) payload.dependsOnQuestionId = questionData.dependsOnQuestionId;
+    if (questionData.dependsOnValue) payload.dependsOnValue = questionData.dependsOnValue;
+    if (typeof questionData.required === 'boolean') payload.required = questionData.required;
+
     return this.request('/question-admin', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   }
 
-  async updateAdminQuestion(id: string, questionData: { 
-    question?: string; 
+  async updateAdminQuestion(id: string, questionData: {
+    question?: string;
     answer_type?: string;
     answer_for?: string;
     option?: string[];
     options?: string[];
+    dependsOnQuestionId?: string | null;
+    dependsOnValue?: string | null;
+    required?: boolean | null;
   }) {
     // Backend DTO expects 'options' (plural), not 'option' (singular)
     const payload: any = {};
-    
+
     if (questionData.question !== undefined) payload.question = questionData.question;
     if (questionData.answer_type !== undefined) {
       payload.answer_type = questionData.answer_type === 'UMBER' ? 'NUMBER' : questionData.answer_type;
     }
     if (questionData.answer_for !== undefined) payload.answer_for = questionData.answer_for;
-    
+
     // Include options if it's provided (even if empty array to clear options)
     const normalizedOptions = questionData.options ?? questionData.option;
     if (normalizedOptions !== undefined) {
       payload.options = normalizedOptions; // Send as 'options' to match DTO
     }
-    
+
+    // Include dependency when provided (null clears it).
+    if (questionData.dependsOnQuestionId !== undefined) payload.dependsOnQuestionId = questionData.dependsOnQuestionId || null;
+    if (questionData.dependsOnValue !== undefined) payload.dependsOnValue = questionData.dependsOnValue || null;
+    if (questionData.required !== undefined) payload.required = questionData.required;
+
     return this.request(`/question-admin/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
@@ -811,6 +1097,8 @@ class ApiClient {
     first_name?: string;
     last_name?: string;
     email?: string;
+    /** Plain calendar date, YYYY-MM-DD. `null` clears it. */
+    birthday?: string | null;
     phone?: string;
     address?: string;
     country?: string;
@@ -844,6 +1132,14 @@ class ApiClient {
     active?: boolean;
     availability_status?: string;
     verified?: boolean;
+    is_email_verified?: boolean;
+    is_phone_verified?: boolean;
+    /**
+     * The new password in plain text. Despite the name, the server hashes it
+     * before storing and drops the account's refresh token, so sessions opened
+     * with the old password end.
+     */
+    password_hash?: string;
   }) {
     return this.request(`/user/update-by-admin/${id}`, {
       method: 'PATCH',
@@ -866,6 +1162,61 @@ class ApiClient {
       method: 'PATCH',
       body: JSON.stringify(preferences),
     });
+  }
+
+  /**
+   * Account-level moderation: refuses sign-in, ends open sessions and takes the
+   * listings off the marketplace. Not to be confused with blockUser() further
+   * down, which is one member blocking another inside a chat.
+   */
+  async blockAccount(id: string, reason?: string) {
+    return this.request(`/user/${id}/block`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason ?? null }),
+    });
+  }
+
+  async unblockAccount(id: string) {
+    return this.request(`/user/${id}/unblock`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * The general conversation with a member — deliberately not attached to any
+   * listing, so support messages do not land inside a thread about a business.
+   * Returns the existing one, or opens it.
+   */
+  async getOrCreateDirectChat(otherUserId: string) {
+    return this.request(`/chat/direct/${otherUserId}`);
+  }
+
+  /** Hand a conversation to a team member; pass null to clear the assignment. */
+  async setChatResponsible(chatId: string, responsibleId: string | null) {
+    return this.request(`/chat/responsible/${chatId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ responsibleId }),
+    });
+  }
+
+  /** Another user's invoices, for the Billing tab. Staff only, read-only. */
+  async getPaymentHistoryForUser(userId: string) {
+    return this.request(`/subscription/payment-history/${userId}`);
+  }
+
+  /** Everything a given member has done, newest first. */
+  async getActivityLogByUser(userId: string) {
+    return this.request(`/activity-log/user/${userId}`);
+  }
+
+  /** Listings, chats and activity a team member is responsible for. */
+  async getTeamMemberStats(userId: string) {
+    return this.request(`/user/${userId}/team-stats`);
+  }
+
+  /** Accounts sharing an email address; sign-in only ever reaches the oldest. */
+  async getDuplicateAccounts() {
+    return this.request('/user/duplicates');
   }
 
   async deleteUser(id: string) {

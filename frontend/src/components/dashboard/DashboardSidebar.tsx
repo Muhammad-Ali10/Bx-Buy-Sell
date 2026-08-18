@@ -5,7 +5,32 @@ import { Link } from "react-router-dom";
 import logo from "@/assets/_App Icon 1 (2).png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-
+import {
+  Grid,
+  GridBlack,
+  Svg2,
+  Svg3,
+  Svg4,
+  Svg5,
+  Svg6,
+  Svg7,
+  Svg8,
+  Svg9,
+  Svg10,
+  Svg11,
+  Svg12,
+  Svg2Black,
+  Svg3Black,
+  Svg4Black,
+  Svg5Black,
+  Svg6Black,
+  Svg7Black,
+  Svg8Black,
+  Svg9Black,
+  Svg10Black,
+  Svg11Black,
+  Svg12Black,
+} from "@/assets/svg"
 interface DashboardSidebarProps {
   activeStep: DashboardStep;
   onStepChange: (step: DashboardStep) => void;
@@ -13,17 +38,18 @@ interface DashboardSidebarProps {
 }
 
 const menuItems = [
-  { id: "category" as DashboardStep, label: "Category", icon: LayoutGrid },
-  { id: "brand-information" as DashboardStep, label: "Brand Information", icon: Building2 },
-  { id: "tools" as DashboardStep, label: "Tools you use", icon: Wrench },
-  { id: "financials" as DashboardStep, label: "Financials", icon: CreditCard },
-  { id: "statistics" as DashboardStep, label: "Statistics", icon: TrendingUp },
-  { id: "products" as DashboardStep, label: "Products", icon: ShoppingBag },
-  { id: "management" as DashboardStep, label: "Management", icon: Target },
-  { id: "accounts" as DashboardStep, label: "Accounts", icon: Users },
-  { id: "ad-informations" as DashboardStep, label: "Ad Informations", icon: Megaphone },
-  { id: "handover" as DashboardStep, label: "Handover", icon: HandHeart },
-  { id: "packages" as DashboardStep, label: "Packages", icon: Package },
+  { id: "category" as DashboardStep, label: "Category", iconActive: Grid , iconInactive: GridBlack },
+  { id: "brand-information" as DashboardStep, label: "Brand Information", iconActive: Svg2, iconInactive: Svg2Black },
+  { id: "tools" as DashboardStep, label: "Tools you use", iconActive: Svg3, iconInactive: Svg3Black },
+  { id: "financials" as DashboardStep, label: "Financials", iconActive: Svg4, iconInactive: Svg4Black },
+  { id: "statistics" as DashboardStep, label: "Statistics", iconActive: Svg5, iconInactive: Svg5Black },
+  { id: "products" as DashboardStep, label: "Products", iconActive: Svg6, iconInactive: Svg6Black },
+  { id: "management" as DashboardStep, label: "Management", iconActive: Svg7, iconInactive: Svg7Black },
+
+  { id: "accounts" as DashboardStep, label: "Accounts", iconActive: Svg8, iconInactive: Svg8Black },
+  { id: "ad-informations" as DashboardStep, label: "Ad Informations", iconActive: Svg9, iconInactive: Svg9Black },
+  { id: "handover" as DashboardStep, label: "Handover", iconActive: Svg10, iconInactive: Svg10Black },
+  { id: "packages" as DashboardStep, label: "Packages", iconActive: Svg11, iconInactive: Svg11Black },
 ];
 
 const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep: DashboardStep; onStepChange: (step: DashboardStep) => void; onLinkClick?: () => void }) => {
@@ -36,14 +62,14 @@ const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep:
     <>
       <div className="p-4 sm:p-6">
         <Link to="/" className="flex items-center justify-start" onClick={onLinkClick}>
-          <img 
-            src={logo} 
-            alt="EX Logo" 
+          <img
+            src={logo}
+            alt="EX Logo"
             className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
           />
         </Link>
       </div>
-      
+
       <nav
         className="flex-1 overflow-y-auto"
         style={{
@@ -56,29 +82,28 @@ const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep:
         }}
       >
         {menuItems.map((item) => {
-          const Icon = item.icon;
+          const Icon = activeStep === item.id ? item.iconInactive : item.iconActive ;
           const isActive = activeStep === item.id;
 
           return (
             <button
               key={item.id}
               onClick={() => handleStepChange(item.id)}
-              className={`w-full flex items-center transition-all ${
-                isActive ? "" : "hover:bg-white/5 rounded-lg px-3 sm:px-4 py-2.5 sm:py-3"
-              }`}
+              className={`w-full flex items-center transition-all ${isActive ? "" : "hover:bg-white/5 rounded-lg px-3 sm:px-4 py-2.5 sm:py-3"
+                }`}
               style={
                 isActive
                   ? {
-                      width: "100%",
-                      minHeight: "48px",
-                      borderRadius: "12px",
-                      paddingTop: "12px",
-                      paddingRight: "16px",
-                      paddingBottom: "12px",
-                      paddingLeft: "16px",
-                      gap: "6px",
-                      backgroundColor: "rgba(174, 243, 31, 1)",
-                    }
+                    width: "100%",
+                    minHeight: "48px",
+                    borderRadius: "12px",
+                    paddingTop: "12px",
+                    paddingRight: "16px",
+                    paddingBottom: "12px",
+                    paddingLeft: "16px",
+                    gap: "6px",
+                    backgroundColor: "rgba(174, 243, 31, 1)",
+                  }
                   : { gap: "6px" }
               }
             >
@@ -87,7 +112,7 @@ const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep:
                 style={{
                   width: "20px",
                   height: "20px",
-                  color: isActive ? "rgba(0, 0, 0, 1)" : "rgba(255, 255, 255, 1)",
+                  color: isActive ? "#000000" : "#6b7280", // e.g. active/inactive alag rakhein
                   opacity: 1,
                 }}
               />

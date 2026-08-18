@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ListingsSidebar } from "@/components/listings/ListingsSidebar";
-import { Button } from "@/components/ui/button";
-import { ShieldCheck } from "lucide-react";
+import Header from "@/components/Header";
+import { AccountVerification } from "@/components/account/AccountVerification";
 import { useAuth } from "@/hooks/useAuth";
 
 const VerifyAccount = () => {
@@ -29,19 +29,13 @@ const VerifyAccount = () => {
   return (
     <div className="flex min-h-screen bg-background">
       <ListingsSidebar />
+      <Header sidebarOffset />
 
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-6">
-            <ShieldCheck className="w-10 h-10 text-muted-foreground" />
-          </div>
-          <h1 className="text-3xl font-bold mb-4">Verify Your Account</h1>
-          <p className="text-muted-foreground mb-8">
-            Get verified to build trust with buyers and sellers. Verified accounts get priority placement and enhanced features.
-          </p>
-          <Button className="bg-[#D3FC50] text-black hover:bg-[#D3FC50]/90 rounded-full">
-            Start Verification
-          </Button>
+      {/* The same component the Account Details tab renders, so the sidebar
+          link keeps working and there is only one version of this screen. */}
+      <div className="flex-1 px-4 pb-8 pt-28 sm:px-6 md:px-8">
+        <div className="mx-auto w-full max-w-3xl">
+          <AccountVerification />
         </div>
       </div>
     </div>

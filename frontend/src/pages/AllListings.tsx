@@ -1,12 +1,16 @@
 import ListingCard from "@/components/ListingCard";
-import FilterSidebar, { FilterState } from "@/components/listings/FilterSidebar";
+import { resolveListingTitle } from "@/lib/listingTitle";
+import FilterSidebar, { FilterState, PRICE_MAX, AGE_MAX, MONEY_MAX, MULTIPLE_MAX } from "@/components/listings/FilterSidebar";
+import Header from "@/components/Header";
+import OffMarketSection from "@/components/listings/OffMarketSection";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api";
+import { parseMediaUrls } from "@/lib/mediaUtils";
 import { useSearchParams, Link } from "react-router-dom";
 import { useCategories } from "@/hooks/useCategories";
 import { detectCountryFromLocation } from "@/lib/countryUtils";
-import { formatBusinessAge } from "@/lib/dateUtils";
+import { formatListingBusinessAge, listingBusinessAgeYears } from "@/lib/dateUtils";
 import logo from "@/assets/_App Icon 1 (2).png";
 import notificationIcon from "@/assets/notification.svg";
 import heartIcon from "@/assets/Heart.svg";
@@ -22,6 +26,8 @@ import { NotificationDropdown } from "@/components/NotificationDropdown";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { createSocketConnection } from "@/lib/socket";
+import { formatNumber } from "@/lib/formatNumber";
+import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -273,17 +279,17 @@ const AllListings = () => {
     search: searchParams.get('search') || "",
     niche: searchParams.get('category') || "all",
     revenueGenerating: "all",
-    priceRange: [0, 100000], // Default to show all price ranges (matches slider max)
+    priceRange: [0, PRICE_MAX], // Default to show all price ranges (matches slider max)
     businessLocation: "all",
     advancedFilters: {
       targetCountry: "all",
       targetCountryPercentage: 50,
-      ageRange: [0, 20], // Default to show all ages (matches slider max)
-      monthlyRevenue: [0, 50000], // Default to show all revenue ranges (matches slider max)
-      monthlyProfit: [0, 50000], // Default to show all profit ranges (matches slider max)
+      ageRange: [0, AGE_MAX], // Default to show all ages (matches slider max)
+      monthlyRevenue: [0, MONEY_MAX], // Default to show all revenue ranges (matches slider max)
+      monthlyProfit: [0, MONEY_MAX], // Default to show all profit ranges (matches slider max)
       monthlyPageviews: [0, 1000000], // Default to show all pageview ranges (matches slider max)
-      revenueMultiple: [0, 50], // Default to show all multiples (matches slider max)
-      profitMultiple: [0, 50], // Default to show all multiples (matches slider max)
+      revenueMultiple: [0, MULTIPLE_MAX], // Default to show all multiples (matches slider max)
+      profitMultiple: [0, MULTIPLE_MAX], // Default to show all multiples (matches slider max)
     },
   });
   
@@ -436,10 +442,7 @@ const AllListings = () => {
       return question?.answer || null;
     };
     
-    const businessName = getBrandAnswer(['business name', 'company name', 'brand name', 'name']) || 
-                        brandQuestions[0]?.answer || 
-                        listing.title || 
-                        'Unnamed Business';
+    const businessName = resolveListingTitle(listing, 'Unnamed Business');
     const categoryName = listing.category?.[0]?.name || '';
     const askingPrice = parseFloat(getAdAnswer(['listing price', 'price']) || 
                       getBrandAnswer(['asking price', 'price', 'selling price']) || 
@@ -448,24 +451,13 @@ const AllListings = () => {
     const location = getBrandAnswer(['country', 'location', 'address']) || 
                     listing.location || 
                     'Not specified';
-    // Calculate business age for filtering (use user account creation date, convert to years for filtering)
-    // For filtering purposes, we'll use a numeric value (years) but for display we'll use formatted string
-    const userCreatedAt = listing.user?.created_at || listing.user?.createdAt;
-    let businessAge = 0;
-    
-    if (userCreatedAt) {
-      try {
-        const startDate = new Date(userCreatedAt);
-        if (!isNaN(startDate.getTime())) {
-          const now = new Date();
-          const diffMs = now.getTime() - startDate.getTime();
-          const diffYears = diffMs / (1000 * 60 * 60 * 24 * 365.25);
-          businessAge = Math.floor(diffYears);
-        }
-      } catch (e) {
-        // Ignore errors, businessAge remains 0
-      }
-    }
+    // Business age comes from the seller's own start date, not from when their
+    // account was created — every listing by one seller shared that number.
+    const businessAge =
+      listingBusinessAgeYears(
+        getBrandAnswer(['starting date', 'start date', 'founded']),
+      ) ?? 0;
+
     
     // Calculate average financials from all financials
     const allFinancials = listing.financials || [];
@@ -615,7 +607,8 @@ const AllListings = () => {
     }
     
     // 4. Price range filter
-    if (askingPrice < filters.priceRange[0] || askingPrice > filters.priceRange[1]) {
+    if (askingPrice < filters.priceRange[0]) return false;
+    if (filters.priceRange[1] < PRICE_MAX && askingPrice > filters.priceRange[1]) {
       return false;
     }
     
@@ -743,11 +736,10 @@ const AllListings = () => {
     }
     
     // Default "show all" values - only apply filters if they're not at default max values
-    const DEFAULT_AGE_MAX = 20;
-    const DEFAULT_REVENUE_MAX = 50000;
-    const DEFAULT_PROFIT_MAX = 50000;
-    const DEFAULT_PAGEVIEWS_MAX = 1000000;
-    const DEFAULT_MULTIPLE_MAX = 50;
+    const DEFAULT_AGE_MAX = AGE_MAX;
+    const DEFAULT_REVENUE_MAX = MONEY_MAX;
+    const DEFAULT_PROFIT_MAX = MONEY_MAX;
+    const DEFAULT_MULTIPLE_MAX = MULTIPLE_MAX;
     
     // Age range filter - only apply if not at default "show all" (0 to max)
     if (adv.ageRange[0] > 0 || adv.ageRange[1] < DEFAULT_AGE_MAX) {
@@ -766,13 +758,6 @@ const AllListings = () => {
     // Monthly profit filter - only apply if not at default "show all" (0 to max)
     if (adv.monthlyProfit[0] > 0 || adv.monthlyProfit[1] < DEFAULT_PROFIT_MAX) {
       if (isNaN(monthlyProfit) || monthlyProfit < adv.monthlyProfit[0] || monthlyProfit > adv.monthlyProfit[1]) {
-        return false;
-      }
-    }
-    
-    // Monthly pageviews filter - only apply if not at default "show all" (0 to max)
-    if (adv.monthlyPageviews[0] > 0 || adv.monthlyPageviews[1] < DEFAULT_PAGEVIEWS_MAX) {
-      if (isNaN(monthlyPageviews) || monthlyPageviews < adv.monthlyPageviews[0] || monthlyPageviews > adv.monthlyPageviews[1]) {
         return false;
       }
     }
@@ -821,17 +806,17 @@ const AllListings = () => {
       search: "",
       niche: "all",
       revenueGenerating: "all",
-      priceRange: [0, 100000], // Reset to show all price ranges (matches slider max)
+      priceRange: [0, PRICE_MAX], // Reset to show all price ranges (matches slider max)
       businessLocation: "all",
       advancedFilters: {
         targetCountry: "all",
         targetCountryPercentage: 50,
-        ageRange: [0, 20], // Reset to show all ages (matches slider max)
-        monthlyRevenue: [0, 50000], // Reset to show all revenue ranges (matches slider max)
-        monthlyProfit: [0, 50000], // Reset to show all profit ranges (matches slider max)
+        ageRange: [0, AGE_MAX], // Reset to show all ages (matches slider max)
+        monthlyRevenue: [0, MONEY_MAX], // Reset to show all revenue ranges (matches slider max)
+        monthlyProfit: [0, MONEY_MAX], // Reset to show all profit ranges (matches slider max)
         monthlyPageviews: [0, 1000000], // Reset to show all pageview ranges (matches slider max)
-        revenueMultiple: [0, 50], // Reset to show all multiples (matches slider max)
-        profitMultiple: [0, 50], // Reset to show all multiples (matches slider max)
+        revenueMultiple: [0, MULTIPLE_MAX], // Reset to show all multiples (matches slider max)
+        profitMultiple: [0, MULTIPLE_MAX], // Reset to show all multiples (matches slider max)
       },
     });
   };
@@ -929,499 +914,9 @@ const AllListings = () => {
 
           {/* Right Content Area */}
           <div className="flex-1 min-w-0 flex flex-col">
-            {/* Custom Header for All Listings Page - only covers content area */}
-            <header 
-              className="bg-white md:bg-black w-full"
-              style={{
-                width: "100%",
-                height: "100px",
-                display: "flex",
-                alignItems: "center",
-                paddingLeft: "16px",
-                paddingRight: "16px",
-              }}
-            >
-              <div className="flex items-center justify-between w-full">
-                {/* Mobile Header Layout */}
-                <div className="flex items-center gap-3 md:hidden w-full">
-                  {/* Hamburger Menu Button */}
-                  <button 
-                    className="text-black"
-                    onClick={() => setIsMobileMenuOpen(true)}
-                  >
-                    <Menu className="w-6 h-6" />
-                  </button>
-                  
-                  {/* Logo - Original Image */}
-                  <Link to="/" className="flex items-center">
-                    <img 
-                      src={logo} 
-                      alt="EX Logo" 
-                      className="h-10 w-10 object-contain"
-                    />
-                  </Link>
-                  
-                  {/* Spacer to push right items */}
-                  <div className="flex-1"></div>
-                  
-                  {/* Search Icon */}
-                  <button
-                    type="button"
-                    className="text-black"
-                    style={{
-                      width: "40px",
-                      height: "40px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Search className="w-5 h-5" />
-                  </button>
-                  
-                  {/* Notification Icon */}
-                  {isAuthenticated && user ? (
-                    <div className="[&_button]:bg-black/5 [&_img]:invert">
-                      <NotificationButtonWithCount userId={user.id} />
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="relative"
-                      style={{
-                        width: "40px",
-                        height: "40px",
-                        padding: "8px",
-                        borderRadius: "20px",
-                        background: "rgba(0, 0, 0, 0.05)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        border: "none",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <img 
-                        src={notificationIcon} 
-                        alt="Notifications" 
-                        className="w-5 h-5"
-                        style={{ filter: "invert(1)" }}
-                      />
-                    </button>
-                  )}
-                  
-                  {/* User Profile */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="relative"
-                        style={{
-                          border: "none",
-                          background: "transparent",
-                          padding: "0",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <Avatar className="w-10 h-10">
-                          <AvatarImage src="" alt="Manuel" />
-                          <AvatarFallback 
-                            className="bg-blue-200 text-blue-800 text-sm font-semibold"
-                            style={{
-                              backgroundColor: "rgba(147, 197, 253, 0.3)",
-                              color: "rgba(30, 64, 175, 1)",
-                            }}
-                          >
-                            M
-                          </AvatarFallback>
-                        </Avatar>
-                        {/* Profile Badge */}
-                        <span
-                          style={{
-                            position: "absolute",
-                            top: "-2px",
-                            right: "-2px",
-                            width: "18px",
-                            height: "18px",
-                            borderRadius: "50%",
-                            backgroundColor: "#EF4444",
-                            color: "white",
-                            fontSize: "11px",
-                            fontWeight: 600,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            lineHeight: "1",
-                            border: "2px solid black",
-                          }}
-                        >
-                          3
-                        </span>
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="bg-black border-gray-700 text-white w-56">
-                      {/* Mobile-only: Notification and Favorite items */}
-                      <div className="md:hidden">
-                        {/* Notification Item */}
-                        <DropdownMenuItem 
-                          className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-800 focus:bg-gray-800"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            // On mobile, clicking notification will be handled by the NotificationDropdown component
-                            // For now, just close the user menu
-                          }}
-                        >
-                          <div className="relative">
-                            <img 
-                              src={notificationIcon} 
-                              alt="Notifications" 
-                              className="w-5 h-5"
-                            />
-                            {/* Note: Badge count would need to be fetched separately for mobile menu */}
-                          </div>
-                          <span className="font-lufga text-sm">Notifications</span>
-                        </DropdownMenuItem>
-                        
-                        {/* Favorite Item */}
-                        <DropdownMenuItem 
-                          className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-800 focus:bg-gray-800"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleFavoritesClick();
-                          }}
-                        >
-                          <div className="relative">
-                            <img 
-                              src={heartIcon} 
-                              alt="Favorites" 
-                              className="w-5 h-5"
-                            />
-                            {isAuthenticated && user && favoritesCount > 0 && (
-                              <span
-                                className="absolute -top-1 -right-1 w-4 h-4 text-[10px] font-semibold rounded-full bg-white text-black flex items-center justify-center"
-                              >
-                                {favoritesCount > 9 ? "9+" : favoritesCount}
-                              </span>
-                            )}
-                          </div>
-                          <span className="font-lufga text-sm">Favorites</span>
-                        </DropdownMenuItem>
-                        
-                        <div className="border-t border-gray-700 my-1"></div>
-                      </div>
-                      
-                      {/* User menu items */}
-                      <DropdownMenuItem className="px-4 py-3 hover:bg-gray-800 focus:bg-gray-800">
-                        <span className="font-lufga text-sm">Profile</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="px-4 py-3 hover:bg-gray-800 focus:bg-gray-800">
-                        <span className="font-lufga text-sm">Settings</span>
-                      </DropdownMenuItem>
-                      <div className="border-t border-gray-700 my-1"></div>
-                      <DropdownMenuItem className="px-4 py-3 hover:bg-gray-800 focus:bg-gray-800">
-                        <span className="font-lufga text-sm">Logout</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                
-                {/* Desktop Header Layout */}
-                <div className="hidden md:flex items-center justify-between w-full">
-                  {/* Navigation Menu - Desktop */}
-                  <nav className="flex items-center gap-1 lg:gap-2 flex-wrap">
-                  <Link
-                    to="/"
-                    className="font-lufga text-xs md:text-sm"
-                    style={{
-                      height: "48px",
-                      paddingTop: "12px",
-                      paddingRight: "20px",
-                      paddingBottom: "12px",
-                      paddingLeft: "20px",
-                      gap: "10px",
-                      borderRadius: "30px",
-                      backgroundColor: "rgba(255, 255, 255, 0.05)",
-                      fontWeight: 400,
-                      fontSize: "14px",
-                      lineHeight: "150%",
-                      letterSpacing: "0%",
-                      textTransform: "capitalize",
-                      color: "rgba(255, 255, 255, 0.7)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      textDecoration: "none",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    Home
-                  </Link>
-                  
-                  <Link
-                    to="/all-listings"
-                    className="font-lufga text-xs md:text-sm"
-                    style={{
-                      height: "48px",
-                      paddingTop: "12px",
-                      paddingRight: "20px",
-                      paddingBottom: "12px",
-                      paddingLeft: "20px",
-                      gap: "10px",
-                      borderRadius: "30px",
-                      backgroundColor: "rgba(196, 252, 30, 1)",
-                      fontWeight: 600,
-                      fontSize: "14px",
-                      lineHeight: "150%",
-                      letterSpacing: "0%",
-                      textTransform: "capitalize",
-                      color: "rgba(0, 0, 0, 1)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      textDecoration: "none",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    All Listings
-                  </Link>
-                  
-                  <Link
-                    to="/how-to-buy"
-                    className="font-lufga text-xs md:text-sm"
-                    style={{
-                      height: "48px",
-                      paddingTop: "12px",
-                      paddingRight: "20px",
-                      paddingBottom: "12px",
-                      paddingLeft: "20px",
-                      gap: "10px",
-                      borderRadius: "30px",
-                      backgroundColor: "rgba(255, 255, 255, 0.05)",
-                      fontWeight: 400,
-                      fontSize: "14px",
-                      lineHeight: "150%",
-                      letterSpacing: "0%",
-                      textTransform: "capitalize",
-                      color: "rgba(255, 255, 255, 0.7)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      textDecoration: "none",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    How To Buy
-                  </Link>
-                  
-                  <Link
-                    to="/how-to-sell"
-                    className="font-lufga text-xs md:text-sm"
-                    style={{
-                      height: "48px",
-                      paddingTop: "12px",
-                      paddingRight: "20px",
-                      paddingBottom: "12px",
-                      paddingLeft: "20px",
-                      gap: "10px",
-                      borderRadius: "30px",
-                      backgroundColor: "rgba(255, 255, 255, 0.05)",
-                      fontWeight: 400,
-                      fontSize: "14px",
-                      lineHeight: "150%",
-                      letterSpacing: "0%",
-                      textTransform: "capitalize",
-                      color: "rgba(255, 255, 255, 0.7)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      textDecoration: "none",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    How To Sell
-                  </Link>
-                </nav>
-
-                  {/* Right Side Icons - Desktop */}
-                  <div className="flex items-center gap-3">
-                    {/* Notification Icon with Badge */}
-                    {isAuthenticated && user ? (
-                      <NotificationButtonWithCount userId={user.id} />
-                    ) : (
-                      <button
-                        type="button"
-                        className="relative"
-                        style={{
-                          width: "44px",
-                          height: "44px",
-                          padding: "10px",
-                          gap: "10px",
-                          borderRadius: "28px",
-                          background: "rgba(255, 255, 255, 0.1)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          border: "none",
-                          cursor: "pointer",
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        <img 
-                          src={notificationIcon} 
-                          alt="Notifications" 
-                          style={{
-                            width: "24px",
-                            height: "24px",
-                            opacity: 1,
-                            display: "block",
-                            flexShrink: 0,
-                          }}
-                        />
-                      </button>
-                    )}
-
-                    {/* Heart/Favorite Icon with Badge */}
-                    <button
-                      type="button"
-                      onClick={handleFavoritesClick}
-                      className="relative"
-                      style={{
-                        width: "52px",
-                        height: "52px",
-                        padding: "14px",
-                        gap: "10px",
-                        borderRadius: "28px",
-                        background: "rgba(255, 255, 255, 0.1)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        border: "none",
-                        cursor: "pointer",
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      <img 
-                        src={heartIcon} 
-                        alt="Favorites" 
-                        style={{
-                          width: "24px",
-                          height: "24px",
-                          opacity: 1,
-                          display: "block",
-                          flexShrink: 0,
-                        }}
-                      />
-                      {/* Heart Badge - Only show if count > 0 */}
-                      {isAuthenticated && user && favoritesCount > 0 && (
-                        <span
-                          style={{
-                            position: "absolute",
-                            top: "6px",
-                            right: "6px",
-                            width: "18px",
-                            height: "18px",
-                            borderRadius: "50%",
-                            backgroundColor: "white",
-                            color: "black",
-                            fontSize: "11px",
-                            fontWeight: 600,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            lineHeight: "1",
-                          }}
-                        >
-                          {favoritesCount > 9 ? "9+" : favoritesCount}
-                        </span>
-                      )}
-                    </button>
-
-                    {/* User Profile Section with Dropdown */}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 cursor-pointer"
-                          style={{
-                            border: "none",
-                            background: "transparent",
-                            padding: "4px",
-                          }}
-                        >
-                          <div className="relative">
-                            <Avatar className="w-10 h-10">
-                              <AvatarImage src="" alt="Manuel" />
-                              <AvatarFallback 
-                                className="bg-blue-200 text-blue-800 text-sm font-semibold"
-                                style={{
-                                  backgroundColor: "rgba(147, 197, 253, 0.3)",
-                                  color: "rgba(30, 64, 175, 1)",
-                                }}
-                              >
-                                M
-                              </AvatarFallback>
-                            </Avatar>
-                            {/* Profile Badge */}
-                            <span
-                              style={{
-                                position: "absolute",
-                                top: "-2px",
-                                right: "-2px",
-                                width: "18px",
-                                height: "18px",
-                                borderRadius: "50%",
-                                backgroundColor: "#EF4444",
-                                color: "white",
-                                fontSize: "11px",
-                                fontWeight: 600,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                lineHeight: "1",
-                                border: "2px solid black",
-                              }}
-                            >
-                              3
-                            </span>
-                          </div>
-                          <span
-                            className="font-lufga text-sm md:text-base"
-                            style={{
-                              color: "rgba(255, 255, 255, 1)",
-                              fontSize: "16px",
-                              fontWeight: 500,
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            Manuel
-                          </span>
-                          <ChevronDown 
-                            className="text-white" 
-                            size={16}
-                            style={{
-                              color: "rgba(255, 255, 255, 1)",
-                            }}
-                          />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="bg-black border-gray-700 text-white w-56">
-                        {/* User menu items */}
-                        <DropdownMenuItem className="px-4 py-3 hover:bg-gray-800 focus:bg-gray-800">
-                          <span className="font-lufga text-sm">Profile</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="px-4 py-3 hover:bg-gray-800 focus:bg-gray-800">
-                          <span className="font-lufga text-sm">Settings</span>
-                        </DropdownMenuItem>
-                        <div className="border-t border-gray-700 my-1"></div>
-                        <DropdownMenuItem className="px-4 py-3 hover:bg-gray-800 focus:bg-gray-800">
-                          <span className="font-lufga text-sm">Logout</span>
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-          </div>
-            </header>
+            {/* Shared transparent bar, same as the rest of the portal. */}
+            <Header sidebarOffset />
+            <div className="h-20 sm:h-24" />
             
             {/* Main Content Area - White Background */}
             <div className="flex-1 bg-white min-w-0 p-5 md:px-2 lg:px-4 md:py-4 lg:py-8 w-full">
@@ -1488,7 +983,7 @@ const AllListings = () => {
                       margin: 0,
                     }}
                   >
-                    Looking to Sell Your Shopify Store?
+                    Looking to Sell Your Business?
                   </h2>
 
                   {/* Body Text */}
@@ -1509,6 +1004,7 @@ const AllListings = () => {
                   {/* Button */}
                   <button
                     type="button"
+                    onClick={() => navigate("/dashboard")}
                     className="font-lufga text-xs"
                     style={{
                       width: "auto",
@@ -1606,7 +1102,7 @@ const AllListings = () => {
                         margin: 0,
                       }}
                     >
-                      Get Deals First. 21 Days Before the Rest
+                      Get Deals First. 7 Days Before the Rest
                     </h2>
                   </div>
 
@@ -1674,7 +1170,7 @@ const AllListings = () => {
                       margin: 0,
                     }}
                   >
-                    JOIN Premium now! Gain early access to All Listings 21 days before they become public. Don't wait—Stay ahead of your competitiors.{" "}
+                    JOIN Premium now! Gain early access to All Listings 7 days before they become public. Don't wait—Stay ahead of your competitiors.{" "}
                     <span
                       className="font-lufga text-xs md:text-sm"
                       style={{
@@ -1706,6 +1202,11 @@ const AllListings = () => {
                   {/* Join Premium Button */}
                   <button
                     type="button"
+                    onClick={() =>
+                      document
+                        .getElementById("off-market")
+                        ?.scrollIntoView({ behavior: "smooth" })
+                    }
                     className="font-lufga text-xs"
                     style={{
                       fontFamily: "Lufga, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
@@ -1768,12 +1269,14 @@ const AllListings = () => {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    Discover 25 Off-Market Listings
+                    Discover Off-Market Listings
                   </button>
                 </div>
 
                 {/* Slider for premium listings - only visible to pro users */}
               </div>
+
+              <OffMarketSection />
 
               {/* All Listings Cards Container */}
               <div
@@ -1844,10 +1347,7 @@ const AllListings = () => {
                         return question?.answer || null;
                       };
                       
-                      const businessName = getBrandAnswer(['business name', 'company name', 'brand name', 'name']) || 
-                                          brandQuestions[0]?.answer || 
-                                          listing.title || 
-                                          'Unnamed Business';
+                      const businessName = resolveListingTitle(listing, 'Unnamed Business');
                       const businessDescription = getBrandAnswer(['description', 'about', 'business description']) || 
                                                  listing.description || 
                                                  '';
@@ -1870,9 +1370,11 @@ const AllListings = () => {
                                      listing.location || 
                                      'Not specified';
                       // Calculate business age from user account creation date for display
-                      // Use user account creation date to show how long the business has been on the platform
-                      const userCreatedAtForDisplay = listing.user?.created_at || listing.user?.createdAt;
-                      const businessAgeForDisplay = userCreatedAtForDisplay ? formatBusinessAge(userCreatedAtForDisplay) : undefined;
+                      // The business's own age, from the seller's start date.
+                      const businessAgeForDisplay =
+                        formatListingBusinessAge(
+                          getBrandAnswer(['starting date', 'start date', 'founded']),
+                        ) ?? undefined;
                       const adDescription = getAdAnswer(['description']) || businessDescription;
                       
                       // Get image
@@ -1881,8 +1383,15 @@ const AllListings = () => {
                         a.question?.toLowerCase().includes('photo') || a.answer_type === 'PHOTO'
                       );
                       if (photoQuestion?.answer) {
-                        imageUrl = Array.isArray(photoQuestion.answer) ? photoQuestion.answer[0] : photoQuestion.answer;
+                        imageUrl = parseMediaUrls(photoQuestion.answer)[0] || '';
                       }
+                      // The server blurs the photo for anyone who has not
+                      // unlocked the listing and says so on the answer. Without
+                      // reading that here the feed showed a blurred picture with
+                      // nothing explaining why.
+                      const imageIsLocked = Boolean(
+                        photoQuestion?.locked || photoQuestion?.blurredPreview,
+                      );
                       if (!imageUrl) {
                         const brandInfo = brandQuestions[0];
                         imageUrl = brandInfo?.businessPhoto?.[0] || 
@@ -2015,18 +1524,21 @@ const AllListings = () => {
                         <ListingCard
                           key={listingKey}
                           image={imageUrl}
+                          imageLocked={imageIsLocked}
+                          imageLockType={photoQuestion?.lockType ?? null}
                           category={categoryInfo?.name || 'Other'}
                           name={businessName}
                           description={adDescription || businessDescription}
-                          price={`$${Number(askingPrice).toLocaleString()}`}
+                          price={`${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`}
                           profitMultiple={profitMultiple}
                           revenueMultiple={revenueMultiple}
                           location={location}
                           locationFlag={location}
                           businessAge={businessAgeForDisplay}
-                          netProfit={avgNetProfit > 0 ? `$${Math.round(avgNetProfit).toLocaleString()}` : undefined}
-                          revenue={avgRevenue > 0 ? `$${Math.round(avgRevenue).toLocaleString()}` : undefined}
+                          netProfit={avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined}
+                          revenue={avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined}
                           managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
+                          isPremium={String(listing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
                           listingId={listing.id}
                           sellerId={listing.userId || listing.user_id}
                           lockRedirectTo={listing?.lockAction?.redirectTo || '/pricing'}

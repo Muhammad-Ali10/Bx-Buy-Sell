@@ -3,6 +3,7 @@ import * as RechartsPrimitive from "recharts";
 
 import { cn } from "@/lib/utils";
 
+import { formatNumber } from "@/lib/formatNumber";
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
 
@@ -209,7 +210,10 @@ const ChartTooltipContent = React.forwardRef<
                       </div>
                       {item.value && (
                         <span className="font-mono font-medium tabular-nums text-foreground">
-                          {item.value.toLocaleString()}
+                          {/* Recharts hands back a range for banded series. */}
+                          {Array.isArray(item.value)
+                            ? item.value.map((entry) => formatNumber(entry)).join(" – ")
+                            : formatNumber(item.value)}
                         </span>
                       )}
                     </div>

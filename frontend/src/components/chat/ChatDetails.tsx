@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { apiClient } from "@/lib/api";
 import { getCachedChatRoom, getCachedListing, setCachedListing } from "@/lib/chatRoomCache";
+import { parseMediaUrls } from "@/lib/mediaUtils";
+import { formatLastSeen } from "@/lib/timeFormatter";
+import StartDealProcessDialog from "@/components/chat/StartDealProcessDialog";
+import AcquisitionCapacityCard from "@/components/AcquisitionCapacityCard";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +18,8 @@ import reportIcon from "@/assets/report.svg";
 import handshakeIcon from "@/assets/fi_3585639.svg";
 import ListingCard from "@/components/ListingCard";
 
+import { formatNumber } from "@/lib/formatNumber";
+import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 interface ChatDetailsProps {
   conversationId: string;
   userId?: string;
@@ -47,9 +53,8 @@ const getListingTitle = (l: any): string => {
 // Derive the participants shown in the panel header from a cached chat room, so
 // they can be painted on the very first render (together with the chat window)
 // instead of after the effect/network round-trip.
-const seedInitialParticipants = (userId?: string, sellerId?: string): any[] => {
-  if (!userId || !sellerId) return [];
-  const cached = getCachedChatRoom(userId, sellerId);
+const seedInitialParticipants = (chatId?: string): any[] => {
+  const cached = getCachedChatRoom(chatId);
   if (!cached) return [];
   return [cached.user, cached.seller].filter(Boolean).map((u: any) => ({
     id: u.id,
@@ -57,21 +62,20 @@ const seedInitialParticipants = (userId?: string, sellerId?: string): any[] => {
     avatar_url: u.profile_pic,
     email: u.email,
     is_online: u.is_online || false,
+    last_offline: u.last_offline,
   }));
 };
 
 // The listing's full data (for its name/image/price) keyed by the cached room's
 // listingId, so a revisited conversation shows it on the first render.
-const seedInitialListing = (userId?: string, sellerId?: string): any => {
-  if (!userId || !sellerId) return null;
-  const room = getCachedChatRoom(userId, sellerId);
+const seedInitialListing = (chatId?: string): any => {
+  const room = getCachedChatRoom(chatId);
   const listingId = room?.listing?.id || room?.listingId;
   return getCachedListing(listingId);
 };
 
-const seedInitialLabel = (userId?: string, sellerId?: string): "GOOD" | "MEDIUM" | "BAD" | null => {
-  if (!userId || !sellerId) return null;
-  const labels = getCachedChatRoom(userId, sellerId)?.chatLabels || [];
+const seedInitialLabel = (chatId?: string, userId?: string): "GOOD" | "MEDIUM" | "BAD" | null => {
+  const labels = getCachedChatRoom(chatId)?.chatLabels || [];
   const entry = labels.find((l: any) => l.userId === userId) || labels[0];
   const label = entry?.label;
   return label === "GOOD" || label === "MEDIUM" || label === "BAD" ? label : null;
@@ -79,15 +83,38 @@ const seedInitialLabel = (userId?: string, sellerId?: string): "GOOD" | "MEDIUM"
 
 export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }: ChatDetailsProps) => {
   const { user } = useAuth();
-  const [listing, setListing] = useState<any>(() => seedInitialListing(userId, sellerId));
+  // The seller is the party who is not the buyer on this chat.
+  const isSellerViewing = Boolean(user?.id && sellerId && user.id === sellerId);
+  const [buyerVerifiedFunds, setBuyerVerifiedFunds] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isSellerViewing || !userId) return;
+    let cancelled = false;
+    apiClient
+      .getBuyerAcquisitionCapacity(userId)
+      .then((res) => {
+        if (cancelled) return;
+        const data = res.data as { verifiedFunds?: number | null } | undefined;
+        setBuyerVerifiedFunds(res.success ? (data?.verifiedFunds ?? null) : null);
+      })
+      .catch(() => {
+        /* stays unverified */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSellerViewing, userId]);
+  const [listing, setListing] = useState<any>(() => seedInitialListing(conversationId));
   // Seed header data from the shared cache on the first render (mounts fresh per
   // conversation via key=), so the panel switches together with the chat window.
-  const [participants, setParticipants] = useState<any[]>(() => seedInitialParticipants(userId, sellerId));
+  const [participants, setParticipants] = useState<any[]>(() => seedInitialParticipants(conversationId));
+  // Whoever is not the signed-in user. The panel speaks about them.
+  const otherParticipant = participants.find((p: any) => p?.id && p.id !== user?.id);
   const [memberCount, setMemberCount] = useState(2);
   const [onlineCount, setOnlineCount] = useState(0);
   const [messages, setMessages] = useState<any[]>([]);
   const [mediaCount, setMediaCount] = useState(0);
-  const [chatLabel, setChatLabel] = useState<'GOOD' | 'MEDIUM' | 'BAD' | null>(() => seedInitialLabel(userId, sellerId));
+  const [chatLabel, setChatLabel] = useState<'GOOD' | 'MEDIUM' | 'BAD' | null>(() => seedInitialLabel(conversationId, userId));
   // The pair currently selected; a late fetch for a previous conversation drops
   // its result if the user has since switched (prevents right-panel mix-up).
   const currentPairRef = useRef<string>("");
@@ -98,6 +125,21 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [mediaFiles, setMediaFiles] = useState<any[]>([]);
+  const [startDealOpen, setStartDealOpen] = useState(false);
+
+  const handleStartDealProcess = async () => {
+    if (!conversationId) return;
+    try {
+      const response: any = await apiClient.startDealProcess(conversationId);
+      if (response?.success === false) {
+        toast.error(response?.error || 'Could not start the deal process.');
+        return;
+      }
+      toast.success('The deal process has started. Our team will be in touch.');
+    } catch {
+      toast.error('Could not start the deal process. Please try again.');
+    }
+  };
 
   const hydrateListing = async (listingId?: string, currentListing?: any) => {
     if (!listingId) return;
@@ -120,11 +162,12 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
     }
 
     // Remember which conversation this hydrate was for, so a late response
-    // doesn't set the previous chat's listing after a switch.
-    const pairAtCall = userId && sellerId ? [userId, sellerId].sort().join("-") : "";
+    // doesn't set the previous chat's listing after a switch. Compared against
+    // the same value the ref holds — a conversation id, not a pair of people.
+    const conversationAtCall = conversationId;
     try {
       const listingResponse = await apiClient.getListingById(listingId);
-      if (pairAtCall && currentPairRef.current !== pairAtCall) return;
+      if (conversationAtCall && currentPairRef.current !== conversationAtCall) return;
       if (listingResponse.success && listingResponse.data) {
         const listingData = (listingResponse.data as any).data || listingResponse.data;
         if (listingData) {
@@ -138,7 +181,9 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
   };
 
   useEffect(() => {
-    if (userId && sellerId) {
+    // Both paths now load by conversation id; the cached fast-path is the only
+    // difference, so it is preferred whenever there is a conversation to key on.
+    if (conversationId) {
       fetchChatRoomData();
     } else {
       fetchDetails();
@@ -169,6 +214,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             avatar_url: buyer.profile_pic,
             email: buyer.email,
             is_online: buyer.is_online || false,
+            last_offline: buyer.last_offline,
           } : null;
 
           const sellerProfile = seller ? {
@@ -177,6 +223,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             avatar_url: seller.profile_pic,
             email: seller.email,
             is_online: seller.is_online || false,
+            last_offline: seller.last_offline,
           } : null;
 
           setParticipants([buyerProfile, sellerProfile].filter(Boolean));
@@ -230,6 +277,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             avatar_url: user.profile_pic,
             email: user.email,
             is_online: user.is_online || false,
+            last_offline: user.last_offline,
           });
         }
         
@@ -242,6 +290,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             avatar_url: seller.profile_pic,
             email: seller.email,
             is_online: seller.is_online || false,
+            last_offline: seller.last_offline,
           });
         }
 
@@ -297,19 +346,21 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
   };
 
   const fetchChatRoomData = async () => {
-    if (!userId || !sellerId) return;
-    const pair = [userId, sellerId].sort().join("-");
-    currentPairRef.current = pair;
+    if (!conversationId) return;
+    currentPairRef.current = conversationId;
     // The component mounts fresh per conversation (key=), and header data is
     // seeded from cache in useState, so no manual reset is needed here — just
     // repaint from cache (full data incl. media) then refresh from the server.
-    const cached = getCachedChatRoom(userId, sellerId);
+    const cached = getCachedChatRoom(conversationId);
     if (cached) applyChatDetails(cached);
-    // Refresh from the server in the background.
+    // Refresh from the server in the background. Fetched by conversation, not
+    // by the pair of people: two people can have several conversations, and
+    // asking by pair returned whichever was newest — so the panel described
+    // the wrong listing.
     try {
-      const response = await apiClient.getChatRoom(userId, sellerId);
+      const response = await apiClient.getChatById(conversationId);
       // Drop this result if the user has since switched to another chat.
-      if (currentPairRef.current !== pair) return;
+      if (currentPairRef.current !== conversationId) return;
       if (response.success && response.data) {
         const chatData = (response.data as any).data || response.data;
         applyChatDetails(chatData);
@@ -364,9 +415,18 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
         return;
       }
 
-      // TODO: Implement report API call when available
-      // For now, just show a success message
-      toast.success('Report submitted successfully');
+      // This used to congratulate the reporter and throw the report away, which
+      // is why reported chats never reached the monitoring queue.
+      const response: any = await apiClient.reportChat({
+        chatId: conversationId,
+        reason: 'chat',
+        notes: reportReason.trim(),
+      });
+      if (response?.success === false) {
+        toast.error(response?.error || 'Could not submit the report.');
+        return;
+      }
+      toast.success('Report submitted. Our team will look into it.');
       setReportReason("");
       setIsReportDialogOpen(false);
     } catch (error) {
@@ -397,16 +457,18 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
   const adQuestions = Array.isArray(listing?.advertisement) ? listing.advertisement : [];
   const brandQuestions = Array.isArray(listing?.brand) ? listing.brand : [];
 
-  const listingImages = adQuestions
+  const listingImages: string[] = adQuestions
     .filter((a: any) => a?.answer_type === 'PHOTO' && a?.answer)
-    .map((a: any) => a.answer);
+    .flatMap((a: any) => parseMediaUrls(a.answer));
 
   if (listingImages.length === 0) {
-    const photo = adQuestions.find(
+    const photoRow = adQuestions.find(
       (a: any) =>
         a?.question?.toLowerCase?.().includes('photo') || a?.answer_type === 'PHOTO'
-    )?.answer || listing?.image_url;
-    if (photo) listingImages.push(photo);
+    );
+    const parsed = photoRow ? parseMediaUrls(photoRow.answer) : [];
+    if (parsed.length > 0) listingImages.push(...parsed);
+    else if (listing?.image_url) listingImages.push(listing.image_url);
   }
 
   const listingImage =
@@ -511,8 +573,24 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
           ))}
         </div>
 
-        {/* Listing Title - Centered */}
-        <h4 
+        {/* The window header already names the listing. This panel is about
+            the person on the other end, so it says who they are and when they
+            were last around. */}
+        <p
+          style={{
+            fontFamily: 'Lufga',
+            fontWeight: 400,
+            fontSize: '13px',
+            lineHeight: '100%',
+            color: 'rgba(0, 0, 0, 0.5)',
+            textAlign: 'center',
+            margin: 0,
+            marginBottom: '6px',
+          }}
+        >
+          Chat with
+        </p>
+        <h4
           style={{
             fontFamily: 'Lufga',
             fontWeight: 600,
@@ -525,11 +603,10 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             marginBottom: '8px',
           }}
         >
-          {getListingTitle(listing) || 'Online Fashion Store'}
+          {otherParticipant?.full_name || 'Unknown User'}
         </h4>
 
-        {/* Member Count and Online Status - Centered */}
-        <p 
+        <p
           style={{
             fontFamily: 'Lufga',
             fontWeight: 400,
@@ -542,7 +619,9 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             marginBottom: '24px',
           }}
         >
-          {memberCount} Members, {onlineCount} online
+          {otherParticipant?.is_online
+            ? 'Online now'
+            : formatLastSeen(otherParticipant?.last_offline)}
         </p>
 
         {/* Three Rows Section */}
@@ -761,8 +840,11 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
           </div>
         </div>
 
-        {/* Make Offer Button */}
+        {/* Start Deal Process — replaces "Make Offer", which had no click
+            handler at all and so did nothing when pressed. */}
         <button
+          type="button"
+          onClick={() => setStartDealOpen(true)}
           style={{
             width: '343px',
             height: '50px',
@@ -796,9 +878,15 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
               color: 'rgba(0, 0, 0, 1)',
             }}
           >
-          Make Offer
+          Start Deal Process
           </span>
         </button>
+
+        <StartDealProcessDialog
+          open={startDealOpen}
+          onOpenChange={setStartDealOpen}
+          onConfirm={handleStartDealProcess}
+        />
 
         <div
           style={{
@@ -833,19 +921,31 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             category={categoryName}
             name={listingName}
             description={listingDescription}
-            price={askingPrice ? `$${Number(askingPrice).toLocaleString()}` : "Price not available"}
+            price={askingPrice ? `${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}` : "Price not available"}
             profitMultiple={profitMultiple}
             revenueMultiple={revenueMultiple}
             location={location}
             locationFlag={location}
             businessAge={listing?.business_age || listing?.businessAge || undefined}
-            netProfit={avgNetProfit > 0 ? `$${Math.round(avgNetProfit).toLocaleString()}` : undefined}
-            revenue={avgRevenue > 0 ? `$${Math.round(avgRevenue).toLocaleString()}` : undefined}
+            netProfit={avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined}
+            revenue={avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined}
             managedByEx={listing?.managed_by_ex === true || listing?.managed_by_ex === 1 || listing?.managed_by_ex === 'true' || listing?.managed_by_ex === '1'}
+            isPremium={String(listing?.selectedPackage || '').toUpperCase() === 'PREMIUM'}
             listingId={listing?.id}
             sellerId={listing?.userId || listing?.user_id}
           />
         </div>
+
+        {/* Shown to the seller: how much of the asking price this buyer has
+            actually had verified, so genuine interest is easy to spot. */}
+        {isSellerViewing && (
+          <div style={{ width: '343px', marginTop: '12px' }}>
+            <AcquisitionCapacityCard
+              verifiedFunds={buyerVerifiedFunds}
+              listingPrice={Number(askingPrice) || null}
+            />
+          </div>
+        )}
       </div>
 
       {/* Media Dialog */}

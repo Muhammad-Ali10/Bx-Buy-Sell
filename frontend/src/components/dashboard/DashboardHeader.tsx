@@ -15,7 +15,6 @@ import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { NotificationDropdown } from "@/components/NotificationDropdown";
 import type { User } from "@/hooks/useAuth";
-import searchIcon from "@/assets/seach icon.svg";
 
 interface DashboardHeaderProps {
   user: User;
@@ -76,25 +75,6 @@ export const DashboardHeader = ({ user }: DashboardHeaderProps) => {
   return (
     <header className="h-14 sm:h-16 border-b border-border bg-background flex items-center justify-between px-4 sm:px-6 md:px-8 sticky top-0 z-40">
       <div />
-      <div className="hidden sm:flex items-center gap-3 flex-1 max-w-md mx-4 justify-end">
-        <div
-          style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "8px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "transparent",
-          }}
-        >
-          <img
-            src={searchIcon}
-            alt="Search"
-            style={{ width: "20px", height: "20px", opacity: 1 }}
-          />
-        </div>
-      </div>
       
       <div className="flex items-center gap-2 sm:gap-4">
         <NotificationDropdown userId={user.id} variant="dark" />

@@ -15,6 +15,7 @@ import { Roles } from 'common/decorator/roles.decorator';
 import { Public } from 'common/decorator/public.decorator';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { subscriptionConfig } from '../config/stripe.config';
+import { BillingCycle } from '@prisma/client';
 
 @ApiTags('Subscription')
 @Controller('subscription')
@@ -96,12 +97,35 @@ export class SubscriptionController {
   @ApiOperation({ summary: 'Change billing cycle' })
   async changeBilling(
     @Req() req: any,
-    @Body() body: { billingCycle: 'MONTHLY' | 'YEARLY' },
+    @Body() body: { billingCycle: BillingCycle },
   ) {
     return this.subscriptionService.changeBillingCycle(
       req.user.id,
       body.billingCycle,
     );
+  }
+
+  @Roles(['USER', 'SELLER', 'ADMIN'])
+  @Post('schedule-change')
+  @ApiOperation({
+    summary: 'Queue a downgrade or cancellation for the end of the paid period',
+  })
+  async scheduleChange(
+    @Req() req: any,
+    @Body() body: { planSlug: string; billingCycle: BillingCycle },
+  ) {
+    return this.subscriptionService.scheduleChange(
+      req.user.id,
+      body.planSlug,
+      body.billingCycle,
+    );
+  }
+
+  @Roles(['USER', 'SELLER', 'ADMIN'])
+  @Post('cancel-change')
+  @ApiOperation({ summary: 'Drop a queued change and keep the current plan' })
+  async cancelChange(@Req() req: any) {
+    return this.subscriptionService.cancelScheduledChange(req.user.id);
   }
 
   @Roles(['USER', 'SELLER', 'ADMIN'])
@@ -121,7 +145,8 @@ export class SubscriptionController {
 
     const session = await this.stripeService.createPortalSession(
       (subscription as any).stripeCustomerId,
-      returnUrl || `${subscriptionConfig.frontendUrl}/settings`,
+      // Settings was merged into Account Details; /settings no longer exists.
+      returnUrl || `${subscriptionConfig.frontendUrl}/profile`,
     );
 
     return { url: session.url };
@@ -153,6 +178,18 @@ export class SubscriptionController {
   @ApiOperation({ summary: 'Get user subscription (Admin)' })
   async getUserSubscription(@Param('userId') userId: string) {
     return this.subscriptionService.getCurrentSubscription(userId);
+  }
+
+  /**
+   * Someone else's invoices, for the Billing tab on their account page.
+   * Read-only on purpose: staff should be able to answer "what were they
+   * charged", not alter what a member is billed.
+   */
+  @Roles(['ADMIN', 'MONITER'])
+  @Get('payment-history/:userId')
+  @ApiOperation({ summary: "Get a user's payment history (staff)" })
+  async getPaymentHistoryForUser(@Param('userId') userId: string) {
+    return this.subscriptionService.getPaymentHistory(userId);
   }
 
   @Roles(['ADMIN'])

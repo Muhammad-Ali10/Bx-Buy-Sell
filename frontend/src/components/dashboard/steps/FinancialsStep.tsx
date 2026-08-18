@@ -1,6 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CurrencySelect, getCurrencySymbol } from "@/components/CurrencySelect";
 import { toast } from "sonner";
 import {
   displayRowLabel,
@@ -17,12 +19,14 @@ import {
   type AdminFinancialsTemplate,
   type FinancialColumn,
 } from "@/lib/financialTableUtils";
+import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 
 interface FinancialsStepProps {
   formData?: any;
   isEditListing?: boolean;
   onNext: (data: any) => void;
   onBack: () => void;
+  onPersist?: (data: any) => void;
 }
 
 // Get today's date in DD.MM.YYYY format
@@ -32,6 +36,36 @@ const getTodayDate = () => {
   const month = String(today.getMonth() + 1).padStart(2, '0');
   const year = today.getFullYear();
   return `${day}.${month}.${year}`;
+};
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+/** Only digits and a single decimal point (blocks + - ` e and other symbols). */
+const sanitizeNumber = (raw: string): string => {
+  let v = raw.replace(/[^0-9.]/g, "");
+  const dot = v.indexOf(".");
+  if (dot !== -1) {
+    v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "");
+  }
+  return v;
+};
+
+/** "Forecast 2025" -> "Forecast <current year>" (unless the label was customized). */
+const displayColumnLabel = (col: FinancialColumn): string => {
+  if (!col.labelCustomized && /^Forecast\s+\d{4}$/.test(col.label)) {
+    return `Forecast ${CURRENT_YEAR}`;
+  }
+  return col.label;
+};
+
+const isoToDmy = (iso: string): string => {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : "";
+};
+
+const dmyToIso = (dmy: string): string => {
+  const m = dmy.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
 };
 
 /** Legacy tables / localStorage may omit the simple-mode aggregate row. */
@@ -136,6 +170,7 @@ export const FinancialsStep = ({
   isEditListing = false,
   onNext,
   onBack,
+  onPersist,
 }: FinancialsStepProps) => {
   const initialTable = buildInitialTableState(isEditListing);
   const [financialType, setFinancialType] = useState<"detailed" | "simple">("detailed");
@@ -147,6 +182,84 @@ export const FinancialsStep = ({
   const [templateLoading, setTemplateLoading] = useState(!isEditListing);
   const financialDataRef = useRef(financialData);
   financialDataRef.current = financialData;
+
+  // Selected display currency. Amounts are stored in USD; only the chosen
+  // currency code is persisted (inside the financials JSON) so it is remembered.
+  const [currency, setCurrency] = useState<string>(parentFormData?.currency || "USD");
+  // Inline editing state for the "as-of" date column (#4) and custom rows (#6).
+  const [editingDate, setEditingDate] = useState(false);
+  const [customRows, setCustomRows] = useState<string[]>([]);
+  const [addingRow, setAddingRow] = useState(false);
+  const [newRowName, setNewRowName] = useState("");
+  // Tracks the cell being typed in, so converted editing doesn't jump mid-type.
+  const [editingCell, setEditingCell] = useState<{ row: string; col: string; value: string } | null>(null);
+
+  // Currency conversion (frontend-only): amounts are entered in USD (base) and
+  // shown converted when another currency is selected. Rates fetched live.
+  const [rates, setRates] = useState<Record<string, number>>({ USD: 1 });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("https://open.er-api.com/v6/latest/USD")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d?.rates && typeof d.rates === "object") {
+          setRates({ USD: 1, ...d.rates });
+        }
+      })
+      .catch(() => {
+        // Approximate fallback if the rates API is unreachable.
+        if (!cancelled) {
+          setRates({
+            USD: 1, EUR: 0.92, GBP: 0.79, PKR: 278, INR: 83, AED: 3.67,
+            CAD: 1.36, AUD: 1.52, JPY: 156, CNY: 7.2, SAR: 3.75, TRY: 32,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Restore the seller's saved currency when editing an existing listing.
+  useEffect(() => {
+    if (parentFormData?.currency) {
+      setCurrency(parentFormData.currency);
+    }
+  }, [parentFormData?.currency]);
+
+  const setColumnLabel = (key: string, label: string) => {
+    setColumnLabels((prev) =>
+      prev.map((c) =>
+        c.key === key ? { ...c, label, labelCustomized: true } : c,
+      ),
+    );
+  };
+
+  const addCustomRow = () => {
+    const name = newRowName.trim();
+    if (!name) return;
+    if (rowLabels.includes(name)) {
+      toast.error("A row with this name already exists");
+      return;
+    }
+    const newRows = [...rowLabels, name];
+    setRowLabels(newRows);
+    setFinancialData((prev) => syncFinancialGrid(newRows, columnLabels, prev));
+    setCustomRows((prev) => [...prev, name]);
+    setNewRowName("");
+    setAddingRow(false);
+  };
+
+  const removeCustomRow = (label: string) => {
+    setRowLabels((prev) => prev.filter((r) => r !== label));
+    setFinancialData((prev) => {
+      const next = { ...prev };
+      delete next[label];
+      return next;
+    });
+    setCustomRows((prev) => prev.filter((r) => r !== label));
+  };
 
   const applyTable = (
     rows: string[],
@@ -271,7 +384,7 @@ export const FinancialsStep = ({
       ...prev,
       [row]: {
         ...prev[row] || {},
-        [col]: value
+        [col]: sanitizeNumber(value)
       }
     }));
   };
@@ -281,7 +394,8 @@ export const FinancialsStep = ({
     if (financialType === "simple") {
       const gross = parseFloat(financialData[REVENUE_ROW]?.[col] || financialData[GROSS_REVENUE_ROW]?.[col] || "0");
       const costs = parseFloat(financialData[OVERALL_COSTS_ROW]?.[col] || "0");
-      return (gross - costs).toFixed(2);
+      // Keep full precision; rounding happens at display time (in the shown currency).
+      return String(gross - costs);
     }
     let total = 0;
     rowLabels.forEach((row) => {
@@ -293,7 +407,8 @@ export const FinancialsStep = ({
         total -= value;
       }
     });
-    return total.toFixed(2);
+    // Keep full precision; rounding happens at display time (in the shown currency).
+    return String(total);
   };
 
   const visibleDataRows =
@@ -303,58 +418,85 @@ export const FinancialsStep = ({
 
 
   // Validate and continue
-  const handleContinue = () => {
-    // Check if at least one cell has data
-    let hasData = false;
-    visibleDataRows.forEach((row) => {
-      columnLabels.forEach((col) => {
-        if (financialData[row]?.[col.key] && parseFloat(financialData[row][col.key]) !== 0) {
-          hasData = true;
-        }
-      });
-    });
+  usePersistOnUnmount(onPersist, () => ({
+    financialType,
+    rowLabels,
+    columnLabels,
+    financialData,
+    currency,
+    financialsFromListing: isEditListing ? parentFormData?.financialsFromListing : false,
+  }));
 
-    if (!hasData) {
-      toast.error("Please enter financial data in at least one cell");
+  const handleContinue = () => {
+    const isFilled = (row: string) =>
+      columnLabels.some(
+        (col) =>
+          !!financialData[row]?.[col.key] &&
+          parseFloat(financialData[row][col.key] || "0") !== 0,
+      );
+
+    // Mandatory (#9): at least Revenue AND one cost field, from any year.
+    const hasRevenue = isFilled(REVENUE_ROW) || isFilled(GROSS_REVENUE_ROW);
+    const costRows =
+      financialType === "simple"
+        ? [OVERALL_COSTS_ROW]
+        : visibleDataRows.filter((r) => !r.toLowerCase().includes("revenue"));
+    const hasCost = costRows.some((r) => isFilled(r));
+
+    if (!hasRevenue) {
+      toast.error("Please enter Revenue for at least one year.");
+      return;
+    }
+    if (!hasCost) {
+      toast.error("Please enter at least one cost field (any year).");
       return;
     }
 
-    let outRows = rowLabels;
-    let outCols = columnLabels;
-    let outData = financialData;
-
-    if (!isEditListing) {
-      const adminTemplate = loadAdminFinancialsTemplate();
-      if (adminTemplate) {
-        outRows = resolveRowsForMode(adminTemplate.rowLabels, financialType, true);
-        outCols = adminTemplate.columnLabels;
-        outData = mergeFinancialCellValues(
-          adminTemplate.financialData,
-          financialData,
-          normalizeRowLabels(adminTemplate.rowLabels),
-          outCols,
-        );
-      }
-    }
-
+    // Output the current table as-is so per-listing edits (custom date/rows) persist.
     onNext({
       financialType,
-      rowLabels: outRows,
-      columnLabels: outCols,
-      financialData: outData,
+      rowLabels,
+      columnLabels,
+      financialData,
+      currency,
       financialsFromListing: isEditListing ? parentFormData?.financialsFromListing : false,
     });
   };
 
-  // Slightly narrower columns so the table fits more comfortably
-  const columnWidth = 200;
+  // Compact column width so the table stays a reasonable size.
+  const columnWidth = 150;
+  const gridWidth = columnWidth * (columnLabels.length + 1);
+
+  // Currency conversion: values are stored in USD; convert for display only.
+  const conversionRate = rates[currency] ?? 1;
+  const isBaseCurrency = currency === "USD";
+  const currencySymbol = getCurrencySymbol(currency);
+  const formatConverted = (usd: string): string => {
+    const n = parseFloat(usd || "0");
+    if (Number.isNaN(n)) return "0";
+    return (n * conversionRate).toLocaleString("en-US", {
+      maximumFractionDigits: 2,
+    });
+  };
+
+  // Editable conversion: show USD amounts in the selected currency, and convert
+  // typed values back to USD for storage (so any currency stays editable).
+  const usdToDisplay = (usd: string): string => {
+    const n = parseFloat(usd || "");
+    if (Number.isNaN(n)) return "";
+    return String(Math.round(n * conversionRate * 100) / 100);
+  };
+  const displayToUsd = (typed: string): string => {
+    const n = parseFloat(typed || "");
+    if (Number.isNaN(n)) return "";
+    return String(n / conversionRate);
+  };
 
   return (
     <div
       style={{
-        width: '1050px',
+        width: '100%',
         maxWidth: '100%',
-       
         borderRadius: '24px',
         border: '1px solid rgba(0, 0, 0, 0.1)',
         background: 'rgba(255, 255, 255, 1)',
@@ -439,9 +581,13 @@ export const FinancialsStep = ({
         <button
           onClick={() => {
             const adminTemplate = !isEditListing ? loadAdminFinancialsTemplate() : null;
-            const baseRows = adminTemplate
+            const templateRows = adminTemplate
               ? normalizeRowLabels(adminTemplate.rowLabels)
               : rowLabels.filter((row) => row !== OVERALL_COSTS_ROW);
+            const baseRows = [
+              ...templateRows,
+              ...customRows.filter((r) => !templateRows.includes(r)),
+            ];
             setFinancialType("detailed");
             setRowLabels(baseRows);
             setFinancialData((prev) => syncFinancialGrid(baseRows, columnLabels, prev));
@@ -497,99 +643,134 @@ export const FinancialsStep = ({
         style={{
           width: '100%',
           maxWidth: '100%',
-          height: '650px',
           opacity: templateLoading ? 0.5 : 1,
           pointerEvents: templateLoading ? 'none' : 'auto',
-          border: '3px solid rgba(255, 255, 255, 1)',
-          borderRadius: '14px',
-          overflow: 'hidden',
+          border: '1px solid rgba(0, 0, 0, 0.08)',
+          borderRadius: '16px',
+          overflowX: 'auto',
+          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
           position: 'relative',
         }}
       >
         {/* Black Header Section */}
-        <div 
+        <div
           style={{
+            position: 'relative',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: `${columnWidth * (columnLabels.length + 1)}px`,
-            height: '80px',
+            width: '100%', minWidth: `${gridWidth}px`,
+            minHeight: '58px',
             backgroundColor: '#000000',
+            padding: '8px 16px',
             marginBottom: 0,
           }}
         >
-          <h3 
+          <h3
             className="font-lufga text-white text-center px-2"
             style={{
               fontFamily: 'Lufga',
               fontWeight: 600,
-              fontStyle: 'normal',
-              fontSize: '32px',
+              fontSize: '22px',
               lineHeight: '100%',
-              letterSpacing: '0%',
               color: 'rgba(255, 255, 255, 1)',
             }}
           >
             Profit & Loss
           </h3>
+          <div
+            style={{
+              position: 'absolute',
+              right: '16px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <span style={{ fontFamily: 'Lufga', fontSize: '12px', color: 'rgba(255,255,255,0.65)' }}>
+              Currency
+            </span>
+            <CurrencySelect value={currency} onChange={setCurrency} />
+          </div>
         </div>
 
         {/* Green Header Row */}
-        <div 
+        <div
           className="flex"
           style={{
-            width: `${columnWidth * (columnLabels.length + 1)}px`,
-            height: '60px',
+            width: '100%', minWidth: `${gridWidth}px`,
+            height: '48px',
             backgroundColor: '#C6FE1F',
           }}
         >
-          <div 
-            className="flex items-center px-4"
+          <div
+            className="flex items-center px-3"
             style={{
-              width: `${columnWidth}px`,
-              height: '100%',
-              border: '2.66px solid rgba(255, 255, 255, 1)',
+              flex: '1 1 0px', minWidth: 0,
+              alignSelf: 'stretch',
+              border: '1px solid rgba(255, 255, 255, 1)',
             }}
           >
-            <span 
+            <span
               className="font-lufga text-black"
-              style={{
-                fontFamily: 'Lufga',
-                fontWeight: 700,
-                fontStyle: 'normal',
-                fontSize: '20px',
-                lineHeight: '100%',
-                letterSpacing: '0%',
-                color: 'rgba(0, 0, 0, 1)',
-              }}
+              style={{ fontFamily: 'Lufga', fontWeight: 700, fontSize: '15px', color: 'rgba(0, 0, 0, 1)' }}
             >
               Timeframe
             </span>
           </div>
           {columnLabels.map((col) => (
-            <div 
+            <div
               key={col.key}
               className="flex items-center justify-center"
               style={{
-                width: `${columnWidth}px`,
-                height: '100%',
-                border: '2.66px solid rgba(255, 255, 255, 1)',
+                flex: '1 1 0px', minWidth: 0,
+                alignSelf: 'stretch',
+                border: '1px solid rgba(255, 255, 255, 1)',
               }}
             >
-              <span 
-                className="font-lufga text-black text-center px-1"
-                style={{
-                  fontFamily: 'Lufga',
-                  fontWeight: 700,
-                  fontStyle: 'normal',
-                  fontSize: '20px',
-                  lineHeight: '100%',
-                  letterSpacing: '0%',
-                  color: 'rgba(0, 0, 0, 1)',
-                }}
-              >
-                {col.label}
-              </span>
+              {editingDate && col.isToday ? (
+                <input
+                  type="date"
+                  autoFocus
+                  defaultValue={dmyToIso(col.label)}
+                  onBlur={(e) => {
+                    const dmy = isoToDmy(e.target.value);
+                    if (dmy) setColumnLabel(col.key, dmy);
+                    setEditingDate(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    if (e.key === "Escape") setEditingDate(false);
+                  }}
+                  style={{
+                    width: '90%',
+                    fontFamily: 'Lufga',
+                    fontSize: '12px',
+                    border: '1px solid rgba(0,0,0,0.3)',
+                    borderRadius: '4px',
+                    padding: '2px 4px',
+                  }}
+                />
+              ) : (
+                <span
+                  className="font-lufga text-black text-center px-1 inline-flex items-center gap-1"
+                  style={{ fontFamily: 'Lufga', fontWeight: 700, fontSize: '14px', color: 'rgba(0, 0, 0, 1)' }}
+                >
+                  {displayColumnLabel(col)}
+                  {col.isToday && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingDate(true)}
+                      title="Edit date"
+                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, display: 'inline-flex' }}
+                    >
+                      <Pencil style={{ width: 12, height: 12 }} />
+                    </button>
+                  )}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -606,83 +787,156 @@ export const FinancialsStep = ({
                 key={row}
                 className="flex"
                 style={{
-                  width: `${columnWidth * (columnLabels.length + 1)}px`,
-                  height: '64px',
+                  width: '100%', minWidth: `${gridWidth}px`,
+                  minHeight: '46px',
                   backgroundColor: bgColor,
                 }}
               >
                 <div 
-                  className={`flex items-center px-4`}
+                  className="flex items-center justify-between gap-1 px-3"
                   style={{
-                    width: `${columnWidth}px`,
-                    height: '100%',
-                    border: '2.66px solid rgba(255, 255, 255, 1)',
+                    flex: '1 1 0px', minWidth: 0,
+                    minHeight: '46px',
+                    border: '1px solid rgba(255, 255, 255, 1)',
                   }}
                 >
-                  <span 
+                  <span
                     className="font-lufga break-words"
-                    style={{
-                      fontFamily: 'Lufga',
-                      fontWeight: 500,
-                      fontStyle: 'normal',
-                      fontSize: '16px',
-                      lineHeight: '100%',
-                      letterSpacing: '0%',
-                      color: textColor,
-                    }}
+                    style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '13px', lineHeight: 1.2, color: textColor }}
                   >
                     {displayRowLabel(row)}
                   </span>
+                  {customRows.includes(row) && (
+                    <button
+                      type="button"
+                      onClick={() => removeCustomRow(row)}
+                      title="Remove row"
+                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: textColor, padding: 0, display: 'inline-flex' }}
+                    >
+                      <X style={{ width: 14, height: 14 }} />
+                    </button>
+                  )}
                 </div>
                 {columnLabels.map((col) => (
                   <div 
                     key={col.key}
                     className="flex items-center justify-center"
                     style={{
-                      width: `${columnWidth}px`,
-                      height: '100%',
+                      flex: '1 1 0px', minWidth: 0,
+                      alignSelf: 'stretch',
                       backgroundColor: bgColor,
-                      border: '2.66px solid rgba(255, 255, 255, 1)',
+                      border: '1px solid rgba(255, 255, 255, 1)',
                     }}
                   >
-                    <Input
-                      type="number"
-                      value={financialData[row]?.[col.key] || ""}
-                      onChange={(e) => handleCellChange(row, col.key, e.target.value)}
-                      className="w-11/12 text-center border-2 bg-transparent"
-                      style={{
-                        fontFamily: 'Lufga',
-                        fontWeight: 500,
-                        fontStyle: 'normal',
-                        fontSize: '16px',
-                        lineHeight: '100%',
-                        letterSpacing: '0%',
-                        color: textColor,
-                        borderColor: 'rgba(0, 0, 0, 0.3)',
-                      }}
-                      placeholder="0"
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', width: '92%' }}>
+                      <span style={{ fontFamily: 'Lufga', fontSize: '12px', color: textColor, opacity: 0.55 }}>{currencySymbol}</span>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={
+                          isBaseCurrency
+                            ? financialData[row]?.[col.key] || ""
+                            : editingCell && editingCell.row === row && editingCell.col === col.key
+                              ? editingCell.value
+                              : usdToDisplay(financialData[row]?.[col.key] || "")
+                        }
+                        onFocus={() => {
+                          if (!isBaseCurrency) {
+                            setEditingCell({
+                              row,
+                              col: col.key,
+                              value: usdToDisplay(financialData[row]?.[col.key] || ""),
+                            });
+                          }
+                        }}
+                        onChange={(e) => {
+                          const s = sanitizeNumber(e.target.value);
+                          if (isBaseCurrency) {
+                            handleCellChange(row, col.key, s);
+                          } else {
+                            setEditingCell({ row, col: col.key, value: s });
+                            handleCellChange(row, col.key, displayToUsd(s));
+                          }
+                        }}
+                        onBlur={() => setEditingCell(null)}
+                        className="text-center"
+                        style={{
+                          width: '100%',
+                          fontFamily: 'Lufga',
+                          fontWeight: 500,
+                          fontSize: '13px',
+                          height: '32px',
+                          borderRadius: '8px',
+                          color: textColor,
+                          background: isGrossRevenue ? 'rgba(255,255,255,0.08)' : '#ffffff',
+                          border: isGrossRevenue ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.12)',
+                        }}
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
             );
           })}
 
+          {/* Add custom cost row (#6) — detailed mode */}
+          {financialType === "detailed" && (
+            <div
+              className="flex items-center"
+              style={{ width: '100%', minWidth: `${gridWidth}px`, minHeight: '46px', backgroundColor: '#F3F8E8', padding: '6px 12px', gap: '8px' }}
+            >
+              {addingRow ? (
+                <>
+                  <Input
+                    autoFocus
+                    value={newRowName}
+                    onChange={(e) => setNewRowName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addCustomRow();
+                      if (e.key === "Escape") { setAddingRow(false); setNewRowName(""); }
+                    }}
+                    placeholder="Row name (e.g. Software)"
+                    style={{ height: '32px', width: '220px', fontFamily: 'Lufga', fontSize: '13px' }}
+                  />
+                  <Button type="button" onClick={addCustomRow} style={{ height: '32px', padding: '0 14px' }}>
+                    Add
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => { setAddingRow(false); setNewRowName(""); }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'Lufga', fontSize: '13px' }}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAddingRow(true)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#000000', color: '#C6FE1F', border: 'none', borderRadius: '20px', padding: '7px 20px', cursor: 'pointer', fontFamily: 'Lufga', fontWeight: 600, fontSize: '13px' }}
+                >
+                  Add row
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Net Profit Row */}
           <div 
             className="flex"
             style={{
-              width: `${columnWidth * (columnLabels.length + 1)}px`,
-              height: '64px',
+              width: '100%', minWidth: `${gridWidth}px`,
+              minHeight: '46px',
               backgroundColor: '#C6FE1F',
             }}
           >
             <div 
               className="flex items-center px-4"
               style={{
-                width: `${columnWidth}px`,
-                height: '100%',
-                border: '2.66px solid rgba(255, 255, 255, 1)',
+                flex: '1 1 0px', minWidth: 0,
+                alignSelf: 'stretch',
+                border: '1px solid rgba(255, 255, 255, 1)',
               }}
             >
               <span 
@@ -702,30 +956,35 @@ export const FinancialsStep = ({
             </div>
             {columnLabels.map((col) => {
               const profit = calculateNetProfit(col.key);
+              const profitNum = parseFloat(profit) || 0;
               return (
                 <div 
                   key={col.key}
                   className="flex items-center justify-center"
                   style={{
-                    width: `${columnWidth}px`,
-                    height: '100%',
+                    flex: '1 1 0px', minWidth: 0,
+                    alignSelf: 'stretch',
                     backgroundColor: '#C6FE1F',
-                    border: '2.66px solid rgba(255, 255, 255, 1)',
+                    border: '1px solid rgba(255, 255, 255, 1)',
                   }}
                 >
-                  <span 
-                    className="font-lufga text-black px-1"
+                  <span
+                    className="font-lufga px-1"
                     style={{
                       fontFamily: 'Lufga',
                       fontWeight: 700,
-                      fontStyle: 'normal',
-                      fontSize: '16px',
+                      fontSize: '14px',
                       lineHeight: '100%',
-                      letterSpacing: '0%',
-                      color: 'rgba(0, 0, 0, 1)',
+                      whiteSpace: 'nowrap',
+                      color:
+                        profitNum === 0
+                          ? 'rgba(0,0,0,0.4)'
+                          : profitNum < 0
+                            ? '#b00020'
+                            : 'rgba(0,0,0,1)',
                     }}
                   >
-                    {profit !== "0.00" ? profit : "-"}
+                    {profitNum !== 0 ? `${currencySymbol} ${formatConverted(profit)}` : "—"}
                   </span>
                 </div>
               );
@@ -733,6 +992,12 @@ export const FinancialsStep = ({
           </div>
         </div>
       </div>
+
+      {!isBaseCurrency && (
+        <p style={{ fontFamily: 'Lufga', fontSize: '12px', color: 'rgba(0,0,0,0.45)', marginTop: '10px' }}>
+          Shown in {currency}, converted from the USD base · you can edit in any currency.
+        </p>
+      )}
 
       {/* Navigation Buttons */}
       <div style={{ display: 'flex', gap: '16px', marginTop: 'auto', paddingTop: '24px' }}>

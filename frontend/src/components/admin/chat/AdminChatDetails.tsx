@@ -16,6 +16,8 @@ import docIcon from "@/assets/doc.svg";
 import redInfoIcon from "@/assets/red info icon.svg";
 import dateIcon from "@/assets/date.svg";
 
+import { formatNumber } from "@/lib/formatNumber";
+import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 interface AdminChatDetailsProps {
   conversationId: string;
 }
@@ -528,7 +530,7 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
                         color: 'rgba(0, 0, 0, 1)',
                       }}
                     >
-                      ${typeof listing.price === 'number' ? listing.price.toLocaleString() : listing.price}
+                      {getListingCurrencySymbol(listing)}{typeof listing.price === 'number' ? formatNumber(listing.price) : listing.price}
                     </p>
                   )}
                   {((listing.status === 'published' || listing.status === 'PUBLISH' || listing.status === 'PUBLISHED') && unread_messages_count > 0) ? (

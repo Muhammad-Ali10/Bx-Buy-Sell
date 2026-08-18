@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useAddManagementQuestion } from "@/hooks/useAddManagementQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 import { toast } from "sonner";
 
 interface AddManagementQuestionDialogProps {
@@ -29,6 +30,7 @@ export const AddManagementQuestionDialog = ({ open, onOpenChange }: AddManagemen
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  const [required, setRequired] = useState(true);
   const addQuestion = useAddManagementQuestion();
 
   const handleSave = () => {
@@ -57,6 +59,7 @@ export const AddManagementQuestionDialog = ({ open, onOpenChange }: AddManagemen
         question: trimmedQuestion,
         answer_type: questionType,
         options: optionsArray,
+        required,
       },
       {
         onSuccess: () => {
@@ -64,6 +67,7 @@ export const AddManagementQuestionDialog = ({ open, onOpenChange }: AddManagemen
           setHintText("");
           setQuestionType("TEXT");
           setOptions("");
+          setRequired(true);
           onOpenChange(false);
         },
         onError: (error: any) => {
@@ -79,6 +83,7 @@ export const AddManagementQuestionDialog = ({ open, onOpenChange }: AddManagemen
     setHintText("");
     setQuestionType("TEXT");
     setOptions("");
+    setRequired(true);
     onOpenChange(false);
   };
 
@@ -133,6 +138,7 @@ export const AddManagementQuestionDialog = ({ open, onOpenChange }: AddManagemen
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

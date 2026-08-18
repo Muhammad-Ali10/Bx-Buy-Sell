@@ -15,6 +15,15 @@ export interface AdminUser {
   user_type: string | null;
   listings_count: number;
   verified: boolean | null;
+  /** Moderation state — separate from `verified`, which is a KYC flag. */
+  blocked: boolean;
+  blocked_reason: string | null;
+  is_online: boolean;
+  /** Drives "last online 2 days ago" when the user is not connected. */
+  last_seen: string | null;
+  /** True while a paid plan is active — shows the PRO badge beside the name. */
+  is_pro: boolean;
+  plan_name: string | null;
   note?: string | null;
 }
 
@@ -73,13 +82,19 @@ export const useAdminUsers = () => {
         avatar_url: user.profile_pic || null,
         user_type: user.role === 'ADMIN' ? 'admin' : user.role?.toLowerCase() || null,
         listings_count: listingsCountMap.get(user.id) || 0,
-        // Backend verified field: 
-        // - false = blocked (explicitly set by admin)
-        // - true = verified/active
-        // - null/undefined = not set (treat as active, not blocked)
-        // Note: Backend defaults verified to false, but we'll only treat it as blocked if it's explicitly false
-        // For now, we'll use verified as-is from backend
+        // `verified` is the KYC flag and nothing else. Blocking lives in its
+        // own field, so an unverified account no longer reads as banned.
         verified: user.verified !== undefined ? user.verified : null,
+        blocked: user.blocked === true,
+        blocked_reason: user.blocked_reason ?? null,
+        is_online: user.is_online === true,
+        last_seen: user.last_seen || user.last_offline || null,
+        // The free tier is a plan too, so a subscription row alone does not
+        // make someone PRO — it has to be an active paid one.
+        is_pro:
+          user.subscription?.status === "ACTIVE" &&
+          user.subscription?.plan?.slug !== "free",
+        plan_name: user.subscription?.plan?.name ?? null,
         note: notesMap[user.id]?.text || null,
       }));
       

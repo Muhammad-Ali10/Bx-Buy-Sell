@@ -5,8 +5,17 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class ProhibitedWordService {
   constructor(private readonly db: PrismaService) {}
 
+  /**
+   * Busiest word first.
+   *
+   * The screen exists so the team can see which rules are catching things; a
+   * word that has stopped fifty messages is more interesting than one that has
+   * never fired, and alphabetical order buries it.
+   */
   findAll() {
-    return this.db.prohibitedWord.findMany();
+    return this.db.prohibitedWord.findMany({
+      orderBy: [{ usageCount: 'desc' }, { word: 'asc' }],
+    });
   }
 
   findOne(id: string) {

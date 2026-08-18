@@ -2,6 +2,7 @@ import { useState } from "react";
 import { MoreVertical, Share2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { LISTING_TITLE_COLOR } from "@/lib/listingTitle";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +11,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api";
+import ShareListingDialog from "@/components/ShareListingDialog";
+import ManageAddonsDialog from "@/components/listings/ManageAddonsDialog";
 import redInfoIcon from "@/assets/red info icon.svg";
 import dateIcon from "@/assets/date.svg";
 import { Link, useNavigate } from "react-router-dom";
@@ -18,13 +21,24 @@ interface ListingCardDashboardProps {
   title: string;
   price: number;
   image_url?: string;
-  status: "draft" | "published" | "archived";
+  status: "draft" | "published" | "archived" | "blocked";
   managed_by_ex: boolean;
   category?: string;
   created_at: string;
   requests_count: number;
   unread_messages_count: number;
   onUpdate: () => void;
+  /** Why the team blocked it, shown to the owner on hover. */
+  blockedReason?: string | null;
+  /**
+   * What clicking the card does.
+   *
+   * On My Listings the seller is managing their own listings, so the card
+   * opens the editor and viewing moves into the menu. An admin looking at
+   * someone else's listings wants the opposite — they are inspecting, and
+   * they have their own way in to editing.
+   */
+  primaryAction?: "view" | "edit";
 }
 
 export const ListingCardDashboard = ({
@@ -39,9 +53,13 @@ export const ListingCardDashboard = ({
   requests_count,
   unread_messages_count,
   onUpdate,
+  blockedReason,
+  primaryAction = "view",
 }: ListingCardDashboardProps) => {
   const navigate = useNavigate();
   const [isPublishing, setIsPublishing] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [addonsOpen, setAddonsOpen] = useState(false);
   const normalizedPrice =
     typeof price === "number" ? price : Number(price ?? 0);
   const displayPrice = Number.isFinite(normalizedPrice) ? normalizedPrice : 0;
@@ -70,14 +88,32 @@ export const ListingCardDashboard = ({
     }
   };
 
+  /**
+   * Blocked is a moderation state, so it reads differently from a Draft the
+   * seller simply has not finished.
+   */
+  const statusStyle =
+    status === 'published'
+      ? { label: 'Published', background: 'rgba(0,103,255,0.1)', color: 'rgba(0, 103, 255, 1)', minWidth: '90px' }
+      : status === 'blocked'
+        ? { label: 'Blocked', background: 'rgba(255,19,19,0.12)', color: 'rgba(200, 16, 16, 1)', minWidth: '80px' }
+        : { label: 'Draft', background: 'rgba(255,19,19,0.1)', color: 'rgba(255, 19, 19, 1)', minWidth: '70px' };
+
+  const shareUrl = `${window.location.origin}/listing/${id}`;
+
   const handleShare = () => {
-    navigator.clipboard.writeText(`${window.location.origin}/listing/${id}`);
-    toast.success("Link copied to clipboard");
+    setShareOpen(true);
   };
 
   const handleEdit = () => {
     navigate(`/listing/${id}/edit`);
   };
+
+  const viewHref = `/listing/${id}`;
+  const editHref = `/listing/${id}/edit`;
+  const opensEditor = primaryAction === "edit";
+  // The menu offers whichever of the two the card itself does not do.
+  const cardHref = opensEditor ? editHref : viewHref;
 
   const handleDelete = async () => {
     try {
@@ -109,7 +145,7 @@ export const ListingCardDashboard = ({
         minHeight: 'auto',
       }}
     >
-      <Link to={`/listing/${id}`}>
+      <Link to={cardHref}>
       {/* Image */}
       <div
         className="w-full rounded-[20px] overflow-hidden relative bg-[#e5e5e5]"
@@ -151,14 +187,38 @@ export const ListingCardDashboard = ({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={handleEdit}>Edit Listing</DropdownMenuItem>
+              {/* Real links, so right-click and open-in-new-tab work — the
+                  client reported that missing on "View Listing" before. */}
+              {opensEditor ? (
+                <DropdownMenuItem asChild>
+                  <Link to={viewHref}>View Listing</Link>
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem asChild>
+                  <Link to={editHref}>Edit Listing</Link>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  // The card is wrapped in a Link — do not open the listing.
+                  event.preventDefault();
+                  setAddonsOpen(true);
+                }}
+              >
+                Add-ons
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={handleDelete} className="text-destructive">
                 Delete Listing
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <button
-            onClick={handleShare}
+            onClick={(event) => {
+              // The card is wrapped in a Link — do not open the listing.
+              event.preventDefault();
+              event.stopPropagation();
+              handleShare();
+            }}
             className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 bg-white rounded-full flex items-center justify-center border-none cursor-pointer shadow-sm"
             title="Share"
           >
@@ -167,31 +227,38 @@ export const ListingCardDashboard = ({
         </div>
       </div>
       </Link>
+      <ShareListingDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        url={shareUrl}
+        title={title}
+      />
+      <ManageAddonsDialog
+        listingId={id}
+        listingTitle={title}
+        open={addonsOpen}
+        onOpenChange={setAddonsOpen}
+      />
       {/* Content */}
       <div className="flex flex-col mt-3 sm:mt-4 md:mt-4">
         {/* First Row: Title and Status */}
         <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
           <h3
-            className="flex-1 min-w-0 font-['Lufga'] font-semibold text-xs sm:text-sm md:text-base text-black m-0 line-clamp-2"
+            className="flex-1 min-w-0 font-['Lufga'] font-semibold text-xs sm:text-sm md:text-base m-0 line-clamp-2"
             style={{
               fontFamily: 'Lufga',
               fontWeight: 600,
               lineHeight: '140%',
               letterSpacing: '0%',
-              color: 'rgba(0, 0, 0, 1)',
+              color: LISTING_TITLE_COLOR,
             }}
           >
             {title}
           </h3>
           <div
-            className={`flex items-center justify-center flex-shrink-0 h-9 px-4 py-1.5 rounded-full ${
-              status === 'published' 
-                ? 'bg-[rgba(0,103,255,0.1)]' 
-                : 'bg-[rgba(255,19,19,0.1)]'
-            }`}
-            style={{
-              minWidth: status === 'published' ? '90px' : '70px',
-            }}
+            className="flex items-center justify-center flex-shrink-0 h-9 px-4 py-1.5 rounded-full"
+            style={{ background: statusStyle.background, minWidth: statusStyle.minWidth }}
+            title={status === 'blocked' && blockedReason ? blockedReason : undefined}
           >
             <span
               className="font-['Lufga'] font-medium text-sm sm:text-base"
@@ -200,12 +267,10 @@ export const ListingCardDashboard = ({
                 fontWeight: 500,
                 lineHeight: '140%',
                 letterSpacing: '0%',
-                color: status === 'published'
-                  ? 'rgba(0, 103, 255, 1)'
-                  : 'rgba(255, 19, 19, 1)',
+                color: statusStyle.color,
               }}
             >
-              {status === 'published' ? 'Published' : 'Draft'}
+              {statusStyle.label}
             </span>
           </div>
         </div>

@@ -7,12 +7,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useUpdateManagementQuestion } from "@/hooks/useUpdateManagementQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 
 interface ManagementQuestion {
   id: string;
   question: string;
   answer_type: string;
   option?: string[];
+  required?: boolean | null;
 }
 
 interface EditManagementQuestionDialogProps {
@@ -36,6 +38,7 @@ export const EditManagementQuestionDialog = ({ open, onOpenChange, question }: E
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateManagementQuestion();
 
   useEffect(() => {
@@ -43,6 +46,7 @@ export const EditManagementQuestionDialog = ({ open, onOpenChange, question }: E
       setQuestionText(question.question);
       setQuestionType(question.answer_type);
       setOptions(question.option && Array.isArray(question.option) ? question.option.join(", ") : "");
+      setRequired(question.required !== false);
     }
   }, [question]);
 
@@ -62,6 +66,7 @@ export const EditManagementQuestionDialog = ({ open, onOpenChange, question }: E
         question: questionText.trim(),
         answer_type: questionType,
         options: optionsArray,
+        required,
       },
       {
         onSuccess: () => {
@@ -132,6 +137,7 @@ export const EditManagementQuestionDialog = ({ open, onOpenChange, question }: E
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

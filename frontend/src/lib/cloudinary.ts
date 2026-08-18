@@ -21,6 +21,32 @@ console.log('🔧 Cloudinary Configuration:', {
   apiKey: CLOUDINARY_API_KEY.substring(0, 5) + '...',
 });
 
+/**
+ * Turns "P&L Statement 2024.xlsx" into "P-L-Statement-2024-k3f9a2.xlsx".
+ *
+ * Cloudinary needs a URL-safe id; the extension is kept so the listing page can
+ * still tell which icon to show, and the random suffix avoids collisions.
+ */
+function buildPublicId(fileName: string): string | null {
+  const name = String(fileName || '').trim();
+  if (!name) return null;
+
+  const lastDot = name.lastIndexOf('.');
+  const base = lastDot > 0 ? name.slice(0, lastDot) : name;
+  const ext = lastDot > 0 ? name.slice(lastDot + 1).toLowerCase() : '';
+
+  const safeBase = base
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+
+  if (!safeBase) return null;
+
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return ext ? `${safeBase}-${suffix}.${ext}` : `${safeBase}-${suffix}`;
+}
+
 export interface UploadResult {
   success: boolean;
   url?: string;
@@ -64,6 +90,15 @@ export async function uploadToCloudinary(
     // Add folder if specified
     if (folder) {
       formData.append('folder', folder);
+    }
+
+    // Keep the seller's own file name in the URL. Without this Cloudinary
+    // invents a random id and the listing page shows "fgg8rbrwmxlnp7w6pjyg.xlsx"
+    // instead of "P&L 2024.xlsx". A short suffix keeps two uploads of the same
+    // name from overwriting each other.
+    const publicId = buildPublicId(file.name);
+    if (publicId) {
+      formData.append('public_id', publicId);
     }
 
     // Determine resource type based on file type

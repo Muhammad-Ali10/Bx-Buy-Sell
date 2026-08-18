@@ -147,7 +147,8 @@ All colors MUST be HSL.
 
     --border: 0 0% 90%;
     --input: 0 0% 90%;
-    --ring: 225 100% 50%;
+    /* Focus ring uses the brand green (accent), not blue */
+    --ring: 72 100% 51%;
 
     --radius: 0.75rem;
 
@@ -187,7 +188,8 @@ All colors MUST be HSL.
 
     --border: 0 0% 20%;
     --input: 0 0% 20%;
-    --ring: 225 100% 55%;
+    /* Focus ring uses the brand green (accent), not blue */
+    --ring: 72 100% 51%;
   }
 }
 

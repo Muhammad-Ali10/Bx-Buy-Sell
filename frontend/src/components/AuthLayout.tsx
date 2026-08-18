@@ -121,7 +121,7 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
                   key={idx}
                   className={`h-2 rounded-full transition-all ${
                     idx + 1 === currentStep
-                      ? "w-12 bg-primary"
+                      ? "w-12 bg-accent"
                       : "w-2 bg-border"
                   }`}
                 />
@@ -162,7 +162,7 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
                 key={idx}
                 className={`h-2 rounded-full transition-all ${
                   idx + 1 === currentStep
-                    ? "w-12 bg-primary"
+                    ? "w-12 bg-accent"
                     : "w-2 bg-border"
                 }`}
               />
@@ -177,7 +177,31 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
         style={{ backgroundImage: `url(${authBackground})` }}
       >
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-        
+
+        {/* Frosted squares drifting over the photo, as in the design. Decorative
+            only, so they are hidden from assistive tech and ignore pointers. */}
+        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+          {[
+            { top: "6%", right: "8%", size: 96 },
+            { top: "14%", right: "20%", size: 56 },
+            { top: "34%", left: "12%", size: 76 },
+            { top: "42%", left: "24%", size: 44 },
+            { top: "52%", right: "14%", size: 84 },
+          ].map((box, index) => (
+            <span
+              key={index}
+              className="absolute rounded-2xl bg-white/15 border border-white/20 backdrop-blur-[2px]"
+              style={{
+                top: box.top,
+                left: box.left,
+                right: box.right,
+                width: box.size,
+                height: box.size,
+              }}
+            />
+          ))}
+        </div>
+
         <div className="relative z-10 max-w-2xl">
           <div className="backdrop-blur-xl bg-background/10 rounded-3xl p-8 border border-white/20">
             <blockquote className="text-white text-2xl font-medium mb-8 leading-relaxed">

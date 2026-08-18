@@ -1,162 +1,198 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Upload, X, Paperclip, ImageIcon, Loader2 } from "lucide-react";
 import { useAdInformationQuestions } from "@/hooks/useAdInformationQuestions";
 import { toast } from "sonner";
-import { uploadToCloudinary } from "@/lib/cloudinary";
+import { uploadMultipleToCloudinary } from "@/lib/cloudinary";
+import { parseMediaUrls } from "@/lib/mediaUtils";
+import {
+  ALLOWED_ATTACHMENT_LABEL,
+  ATTACHMENT_ACCEPT,
+  isAllowedAttachment,
+  maxBytesFor,
+} from "@/lib/fileTypes";
 
 interface AdInformationsStepProps {
   formData?: any;
   onNext: (data: any) => void;
   onBack: () => void;
+  /** Persist current input to the parent when leaving the step (e.g. sidebar tab switch). */
+  onPersist?: (data: any) => void;
 }
 
-export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack }: AdInformationsStepProps) => {
+type FieldKind = "photo" | "file" | "price" | "title" | "textarea";
+
+interface FieldConfig {
+  kind: FieldKind;
+  required: boolean;
+  placeholder: string;
+  maxLength?: number;
+  showCounter: boolean;
+}
+
+/**
+ * Map an admin Ad-Information question to the fixed client design (widget, limits,
+ * placeholder). Photos & attachments are never required; every other field is.
+ */
+const getFieldConfig = (question: any): FieldConfig => {
+  const type = String(question?.answer_type || "").toUpperCase();
+  const text = String(question?.question || "").toLowerCase();
+
+  if (type === "PHOTO" || type === "PHOTO_UPLOAD") {
+    return { kind: "photo", required: false, placeholder: "", showCounter: false };
+  }
+  if (type === "FILE" || type === "FILE_UPLOAD") {
+    return { kind: "file", required: false, placeholder: "", showCounter: false };
+  }
+  if (type === "NUMBER" || text.includes("price")) {
+    return { kind: "price", required: true, placeholder: "0", showCounter: false };
+  }
+  if (text.includes("title")) {
+    return { kind: "title", required: true, placeholder: "Enter Title", maxLength: 100, showCounter: false };
+  }
+  if (text.includes("intro")) {
+    return {
+      kind: "textarea",
+      required: true,
+      placeholder: "Write the best in the shortest form. This will be visible in the preview!",
+      maxLength: 150,
+      showCounter: true,
+    };
+  }
+  if (text.includes("usp")) {
+    return {
+      kind: "textarea",
+      required: true,
+      placeholder: "Unique Selling Points means define what makes your business stand out",
+      maxLength: 300,
+      showCounter: true,
+    };
+  }
+  if (text.includes("description")) {
+    return { kind: "textarea", required: true, placeholder: "Enter your Description", maxLength: 1000, showCounter: true };
+  }
+  return { kind: "textarea", required: true, placeholder: "Enter your answer", showCounter: false };
+};
+
+/** Read a media field (in-memory array, JSON array, legacy comma-joined, or single URL). */
+const toUrlArray = parseMediaUrls;
+
+export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, onPersist }: AdInformationsStepProps) => {
   const { data: questions, isLoading } = useAdInformationQuestions();
   const [formData, setFormData] = useState<Record<string, any>>(parentFormData || {});
-  const [photoPreview, setPhotoPreview] = useState<string>("");
   const [uploadingFiles, setUploadingFiles] = useState<Record<string, boolean>>({});
 
+  // Normalize media fields to arrays whenever the parent data (re)hydrates.
   useEffect(() => {
-    if (parentFormData) {
-      setFormData(parentFormData);
-      // Restore photo preview if exists (could be URL or base64)
-      const photoData = Object.values(parentFormData).find((val: any) => 
-        typeof val === 'string' && (val.startsWith('data:image') || val.startsWith('http'))
-      );
-      if (photoData) {
-        setPhotoPreview(photoData as string);
+    if (!parentFormData) return;
+    const normalized: Record<string, any> = { ...parentFormData };
+    (questions || []).forEach((q: any) => {
+      const cfg = getFieldConfig(q);
+      if (cfg.kind === "photo" || cfg.kind === "file") {
+        normalized[q.id] = toUrlArray(parentFormData[q.id]);
       }
-    }
-  }, [parentFormData]);
+    });
+    setFormData(normalized);
+  }, [parentFormData, questions]);
 
-  const handlePhotoUpload = async (questionId: string, file: File) => {
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error("Photo must be less than 10MB");
-      return;
+  // Flush current input back to the parent when the step unmounts (sidebar tab switch).
+  const latestRef = useRef<Record<string, any>>(formData);
+  latestRef.current = formData;
+  useEffect(() => {
+    return () => {
+      onPersist?.(latestRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleMultiUpload = async (
+    questionId: string,
+    fileList: FileList | null,
+    folder: string,
+    /** Attachments accept only the client's format list; photos stay open. */
+    isAllowedType?: (fileName: string) => boolean,
+  ) => {
+    if (!fileList || fileList.length === 0) return;
+    const all = Array.from(fileList);
+
+    // `accept` is only a browser hint, so re-check the type here.
+    const rightType = isAllowedType ? all.filter((f) => isAllowedType(f.name)) : all;
+    const wrongType = all.length - rightType.length;
+    if (wrongType > 0) {
+      toast.error(`${wrongType} file(s) skipped — allowed: ${ALLOWED_ATTACHMENT_LABEL}`);
     }
 
-    setUploadingFiles(prev => ({ ...prev, [questionId]: true }));
-    
+    // Video is allowed up to 100 MB; everything else stays at 10 MB.
+    const valid = rightType.filter((f) => f.size <= maxBytesFor(f.name));
+    const oversized = rightType.length - valid.length;
+    if (oversized > 0) {
+      toast.error(`${oversized} file(s) skipped — max 10 MB, or 100 MB for video`);
+    }
+    if (valid.length === 0) return;
+
+    setUploadingFiles((prev) => ({ ...prev, [questionId]: true }));
     try {
-      const result = await uploadToCloudinary(file, 'listings/ad-photos');
-      
-      if (result.success && result.url) {
-        setPhotoPreview(result.url);
-        setFormData(prev => ({ ...prev, [questionId]: result.url }));
-        console.log('✅ Photo uploaded successfully:', result.url);
-        toast.success("Photo uploaded successfully! ✅");
-      } else {
-        toast.error(result.error || "Failed to upload photo");
+      const results = await uploadMultipleToCloudinary(valid, folder);
+      const urls = results.filter((r) => r.success && r.url).map((r) => r.url as string);
+      const failed = results.length - urls.length;
+      if (urls.length > 0) {
+        setFormData((prev) => ({ ...prev, [questionId]: [...toUrlArray(prev[questionId]), ...urls] }));
+        toast.success(`${urls.length} file${urls.length > 1 ? "s" : ""} uploaded successfully ✅`);
       }
+      if (failed > 0) toast.error(`${failed} file${failed > 1 ? "s" : ""} failed to upload`);
     } catch (error) {
-      console.error('Photo upload error:', error);
-      toast.error("Failed to upload photo");
+      console.error("Upload error:", error);
+      toast.error("Failed to upload files");
     } finally {
-      setUploadingFiles(prev => ({ ...prev, [questionId]: false }));
+      setUploadingFiles((prev) => ({ ...prev, [questionId]: false }));
     }
   };
 
-  const handleFileUpload = async (questionId: string, file: File) => {
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error(`${file.name} is too large. Maximum size is 10MB`);
-      return;
-    }
-
-    setUploadingFiles(prev => ({ ...prev, [questionId]: true }));
-    
-    try {
-      const result = await uploadToCloudinary(file, 'listings/ad-attachments');
-      
-      if (result.success && result.url) {
-        const currentFiles = formData[questionId] || [];
-        const updatedFiles = Array.isArray(currentFiles) ? [...currentFiles, result.url] : [result.url];
-        setFormData(prev => ({ ...prev, [questionId]: updatedFiles }));
-        console.log('File uploaded successfully:', result.url);
-        toast.success(`File "${file.name}" uploaded successfully! ✅`);
-      } else {
-        console.error('File upload failed:', result.error);
-        toast.error(result.error || "Failed to upload file");
-      }
-    } catch (error) {
-      console.error('File upload error:', error);
-      toast.error("Failed to upload file");
-    } finally {
-      setUploadingFiles(prev => ({ ...prev, [questionId]: false }));
-    }
-  };
-
-  const removePhoto = (questionId: string) => {
-    setPhotoPreview("");
-    setFormData(prev => ({ ...prev, [questionId]: "" }));
-  };
-
-  const removeAttachment = (questionId: string, index: number) => {
-    const currentFiles = formData[questionId] || [];
-    const updatedFiles = Array.isArray(currentFiles) 
-      ? currentFiles.filter((_: any, i: number) => i !== index)
-      : [];
-    setFormData(prev => ({ ...prev, [questionId]: updatedFiles }));
+  const removeMediaAt = (questionId: string, index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      [questionId]: toUrlArray(prev[questionId]).filter((_, i) => i !== index),
+    }));
   };
 
   const handleInputChange = (questionId: string, value: string) => {
-    setFormData(prev => ({ ...prev, [questionId]: value }));
+    setFormData((prev) => ({ ...prev, [questionId]: value }));
   };
 
   const validateForm = (): { isValid: boolean; errors: string[] } => {
     const errors: string[] = [];
-    
-    // Check if all questions have answers
-    questions.forEach((question: any) => {
-      const value = formData[question.id];
-      
-      // Required fields validation
-      if (!value || 
-          (typeof value === 'string' && value.trim() === '') || 
-          (Array.isArray(value) && value.length === 0)) {
-        errors.push(`${question.question} is required`);
+    (questions || []).forEach((q: any) => {
+      const cfg = getFieldConfig(q);
+      if (cfg.kind === "photo" || cfg.kind === "file") return; // media is never required
+
+      const value = formData[q.id];
+      const empty =
+        !value ||
+        (typeof value === "string" && value.trim() === "") ||
+        (Array.isArray(value) && value.length === 0);
+      if (empty) {
+        errors.push(`${q.question} is required`);
+        return;
       }
-      
-      // Additional validations based on answer type
-      if (question.answer_type === 'NUMBER' && value && isNaN(Number(value))) {
-        errors.push(`${question.question} must be a valid number`);
-      }
-      
-      if (question.answer_type === 'PHOTO' || question.answer_type === 'PHOTO_UPLOAD') {
-        if (!value || value.trim() === '') {
-          errors.push(`${question.question} requires a photo upload`);
-        }
+      if (cfg.kind === "price" && isNaN(Number(value))) {
+        errors.push(`${q.question} must be a valid number`);
       }
     });
-    
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
+    return { isValid: errors.length === 0, errors };
   };
 
   const handleSubmit = () => {
-    // Check if any uploads are in progress
-    const isUploading = Object.values(uploadingFiles).some(uploading => uploading);
-    if (isUploading) {
-      toast.error("Please wait for file uploads to complete");
+    if (Object.values(uploadingFiles).some(Boolean)) {
+      toast.error("Please wait for uploads to complete");
       return;
     }
-
-    const validation = validateForm();
-    
-    if (!validation.isValid) {
-      // Show first error
-      if (validation.errors.length > 0) {
-        toast.error(validation.errors[0]);
-      } else {
-        toast.error("Please fill in all required fields");
-      }
+    const { isValid, errors } = validateForm();
+    if (!isValid) {
+      toast.error(errors[0] || "Please fill in all required fields");
       return;
     }
-    
     onNext(formData);
   };
 
@@ -175,197 +211,188 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack }:
 
       <div className="space-y-6">
         {questions && questions.length > 0 ? (
-          questions.map((question: any) => (
-            <div key={question.id} className="space-y-2">
-              <label className="text-sm font-medium">
-                {question.question}
-              </label>
-              
-              {(question.answer_type === "PHOTO" || question.answer_type === "PHOTO_UPLOAD") && (
-                <div>
-                  {(() => {
-                    const isUploading = uploadingFiles[question.id];
-                    const photoUrl = formData[question.id] || photoPreview;
-                    
-                    if (!photoUrl) {
-                      return (
-                        <div className="border-2 border-dashed border-border rounded-xl p-8 flex flex-col items-center justify-center hover:border-accent/50 transition-colors cursor-pointer bg-muted/30">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                handlePhotoUpload(question.id, file);
-                              }
-                            }}
-                            className="hidden"
-                            id={`photo-${question.id}`}
-                            disabled={isUploading}
-                          />
-                          <label htmlFor={`photo-${question.id}`} className="cursor-pointer text-center w-full">
-                            {isUploading ? (
-                              <>
-                                <Loader2 className="w-12 h-12 text-accent mb-3 mx-auto animate-spin" />
-                                <p className="text-sm text-muted-foreground">Uploading...</p>
-                              </>
-                            ) : (
-                              <>
-                                <ImageIcon className="w-12 h-12 text-muted-foreground mb-3 mx-auto" />
-                                <p className="text-sm text-muted-foreground">Click to upload photo</p>
-                                <p className="text-xs text-muted-foreground mt-1">PNG, JPG up to 10MB</p>
-                              </>
-                            )}
-                          </label>
-                        </div>
-                      );
-                    }
-                    
-                    return (
-                      <div className="relative inline-block w-full">
-                        <div className="relative border-2 border-accent rounded-xl overflow-hidden bg-muted/20 p-2">
-                          <img
-                            src={photoUrl}
-                            alt="Uploaded photo preview"
-                            className="w-full h-64 object-contain rounded-lg"
-                            onError={(e) => {
-                              console.error('Error loading image:', photoUrl);
-                              e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect width="200" height="200" fill="%23f0f0f0"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999"%3EImage not found%3C/text%3E%3C/svg%3E';
-                            }}
-                          />
-                          {isUploading && (
-                            <div className="absolute inset-0 bg-background/80 flex items-center justify-center rounded-lg">
-                              <div className="flex flex-col items-center gap-2">
-                                <Loader2 className="w-8 h-8 text-accent animate-spin" />
-                                <p className="text-sm text-muted-foreground">Uploading...</p>
-                              </div>
-                            </div>
-                          )}
-                          <div className="absolute top-4 right-4 flex items-center gap-2">
-                            <div className="bg-green-500 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                              Uploaded
-                            </div>
-                            <Button
+          questions.map((question: any) => {
+            const cfg = getFieldConfig(question);
+            const value = formData[question.id];
+            const textValue = typeof value === "string" ? value : "";
+            const isUploading = !!uploadingFiles[question.id];
+            const mediaUrls = toUrlArray(value);
+
+            return (
+              <div key={question.id} className="space-y-2">
+                <div className="flex items-center justify-between gap-4">
+                  <label className="text-sm font-medium text-foreground">{question.question}</label>
+                  {cfg.showCounter && cfg.maxLength && (
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {textValue.length}/{cfg.maxLength} characters
+                    </span>
+                  )}
+                </div>
+
+                {cfg.kind === "photo" && (
+                  <div className="space-y-3">
+                    {mediaUrls.length > 0 && (
+                      <div className="flex flex-wrap gap-3">
+                        {mediaUrls.map((url, i) => (
+                          <div key={i} className="relative w-28 h-28 rounded-xl overflow-hidden border border-border">
+                            <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
+                            <button
                               type="button"
-                              variant="destructive"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => removePhoto(question.id)}
-                              disabled={isUploading}
+                              onClick={() => removeMediaAt(question.id, i)}
+                              className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1"
+                              aria-label="Remove photo"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="w-[220px] max-w-full">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        id={`photo-${question.id}`}
+                        disabled={isUploading}
+                        onChange={(e) => {
+                          handleMultiUpload(question.id, e.target.files, "listings/ad-photos");
+                          e.target.value = "";
+                        }}
+                      />
+                      <label
+                        htmlFor={`photo-${question.id}`}
+                        className="border-2 border-dashed border-border rounded-xl h-[130px] flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-accent transition-colors bg-muted/30"
+                      >
+                        {isUploading ? (
+                          <Loader2 className="w-8 h-8 text-accent animate-spin" />
+                        ) : (
+                          <ImageIcon className="w-8 h-8 text-muted-foreground" />
+                        )}
+                        <span className="text-sm text-muted-foreground">{isUploading ? "Uploading..." : "Upload Photo"}</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {cfg.kind === "file" && (
+                  <div className="space-y-3">
+                    <input
+                      type="file"
+                      multiple
+                      accept={ATTACHMENT_ACCEPT}
+                      className="hidden"
+                      id={`file-${question.id}`}
+                      disabled={isUploading}
+                      onChange={(e) => {
+                        handleMultiUpload(
+                          question.id,
+                          e.target.files,
+                          "listings/ad-attachments",
+                          isAllowedAttachment,
+                        );
+                        e.target.value = "";
+                      }}
+                    />
+                    <label
+                      htmlFor={`file-${question.id}`}
+                      className="border-2 border-dashed border-border rounded-xl p-10 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-accent transition-colors bg-muted/30 text-center"
+                    >
+                      {isUploading ? (
+                        <Loader2 className="w-9 h-9 text-accent animate-spin" />
+                      ) : (
+                        <Upload className="w-9 h-9 text-muted-foreground" />
+                      )}
+                      <p className="text-sm text-muted-foreground">
+                        {isUploading ? (
+                          "Uploading..."
+                        ) : (
+                          <>
+                            Upload attachments like p&amp;l sheet,
+                            <br />
+                            tax statements, etc.
+                          </>
+                        )}
+                      </p>
+                      {!isUploading && (
+                        <span className="mt-2 inline-flex items-center px-5 py-1.5 rounded-md border border-border bg-background text-sm font-medium">
+                          Select Files
+                        </span>
+                      )}
+                    </label>
+                    {mediaUrls.length > 0 && (
+                      <div className="space-y-2">
+                        {mediaUrls.map((url, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center justify-between border border-border rounded-lg p-2.5 bg-muted/30"
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <Paperclip className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-accent hover:underline truncate"
+                                title={url}
+                              >
+                                File {i + 1}
+                              </a>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeMediaAt(question.id, i)}
+                              className="text-destructive p-1 flex-shrink-0"
+                              aria-label="Remove file"
                             >
                               <X className="w-4 h-4" />
-                            </Button>
+                            </button>
                           </div>
-                        </div>
+                        ))}
                       </div>
-                    );
-                  })()}
-                </div>
-              )}
-              
-              {(question.answer_type === "FILE" || question.answer_type === "FILE_UPLOAD") && (
-                <div className="space-y-4">
-                  {(() => {
-                    const isUploading = uploadingFiles[question.id];
-                    const fileUrls = Array.isArray(formData[question.id]) ? formData[question.id] : (formData[question.id] ? [formData[question.id]] : []);
-                    
-                    return (
-                      <>
-                        <div className="border-2 border-dashed border-border rounded-xl p-12 flex flex-col items-center justify-center hover:border-accent/50 transition-colors cursor-pointer bg-muted/30">
-                          <input
-                            type="file"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                handleFileUpload(question.id, file);
-                              }
-                            }}
-                            className="hidden"
-                            id={`file-${question.id}`}
-                            disabled={isUploading}
-                          />
-                          <label htmlFor={`file-${question.id}`} className="cursor-pointer text-center w-full">
-                            {isUploading ? (
-                              <>
-                                <Loader2 className="w-12 h-12 text-accent mb-3 mx-auto animate-spin" />
-                                <p className="text-sm text-muted-foreground">Uploading...</p>
-                              </>
-                            ) : (
-                              <>
-                                <Upload className="w-12 h-12 text-muted-foreground mb-3 mx-auto" />
-                                <p className="text-sm text-muted-foreground mb-1">Upload attachments</p>
-                                <p className="text-xs text-muted-foreground mb-2">PDF, DOC, etc. up to 10MB</p>
-                              </>
-                            )}
-                          </label>
-                        </div>
-                        {fileUrls.length > 0 && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-green-600 dark:text-green-400 font-medium mb-2">
-                              ✅ {fileUrls.length} file{fileUrls.length > 1 ? 's' : ''} uploaded successfully
-                            </p>
-                            {fileUrls.map((url: string, index: number) => (
-                              <div key={index} className="flex items-center justify-between border-2 border-green-500/50 rounded-lg p-3 bg-muted/30">
-                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  <div className="flex-shrink-0 bg-green-500 text-white rounded-full p-1">
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                  </div>
-                                  <Paperclip className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                                  <a 
-                                    href={url} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="text-sm text-accent hover:underline truncate flex-1"
-                                    title={url}
-                                  >
-                                    File {index + 1} - Click to view
-                                  </a>
-                                </div>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-destructive hover:text-destructive flex-shrink-0"
-                                  onClick={() => removeAttachment(question.id, index)}
-                                  disabled={isUploading}
-                                >
-                                  <X className="w-4 h-4" />
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-              
-              {question.answer_type === "NUMBER" && (
-                <Input
-                  type="number"
-                  placeholder="Enter number"
-                  value={formData[question.id] || ""}
-                  onChange={(e) => handleInputChange(question.id, e.target.value)}
-                  className="bg-muted/50"
-                />
-              )}
-              
-              {question.answer_type === "TEXT" && (
-                <Textarea
-                  placeholder="Enter your answer"
-                  value={formData[question.id] || ""}
-                  onChange={(e) => handleInputChange(question.id, e.target.value)}
-                  className="bg-muted/50 min-h-24"
-                />
-              )}
-            </div>
-          ))
+                    )}
+                  </div>
+                )}
+
+                {cfg.kind === "price" && (
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
+                      $
+                    </span>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="0"
+                      value={textValue}
+                      onChange={(e) => handleInputChange(question.id, e.target.value)}
+                      className="bg-muted/50 pl-7"
+                    />
+                  </div>
+                )}
+
+                {cfg.kind === "title" && (
+                  <Input
+                    placeholder={cfg.placeholder}
+                    value={textValue}
+                    maxLength={cfg.maxLength}
+                    onChange={(e) => handleInputChange(question.id, e.target.value)}
+                    className="bg-muted/50"
+                  />
+                )}
+
+                {cfg.kind === "textarea" && (
+                  <Textarea
+                    placeholder={cfg.placeholder}
+                    value={textValue}
+                    maxLength={cfg.maxLength}
+                    onChange={(e) => handleInputChange(question.id, e.target.value)}
+                    className="bg-muted/50 min-h-24"
+                  />
+                )}
+              </div>
+            );
+          })
         ) : (
           <div className="text-center py-12 text-muted-foreground">
             No ad information questions configured yet. Please contact admin to add questions.
@@ -376,7 +403,7 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack }:
           <Button type="button" variant="outline" onClick={onBack}>
             Back
           </Button>
-          <Button 
+          <Button
             onClick={handleSubmit}
             className="bg-accent hover:bg-accent/90 text-accent-foreground ml-auto px-16"
           >

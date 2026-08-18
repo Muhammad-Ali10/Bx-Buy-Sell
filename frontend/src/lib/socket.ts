@@ -70,6 +70,36 @@ export const createSocketConnection = (options?: {
 };
 
 /**
+ * Presence used to exist only while a chat screen was mounted, so anyone
+ * reading listings looked offline, and moving between pages made the status
+ * flicker. This connection is opened once per signed-in tab and kept for the
+ * whole session, independent of which screen is on show.
+ */
+let presenceSocket: Socket | null = null;
+let presenceToken: string | null = null;
+
+export const openPresenceConnection = (token: string): Socket | null => {
+  if (!token) return null;
+  if (presenceSocket && presenceToken === token) {
+    return presenceSocket;
+  }
+  // A different account signed in: drop the old connection first.
+  closePresenceConnection();
+  presenceToken = token;
+  presenceSocket = createSocketConnection({ auth: { token } });
+  return presenceSocket;
+};
+
+export const closePresenceConnection = () => {
+  if (presenceSocket) {
+    presenceSocket.removeAllListeners();
+    presenceSocket.disconnect();
+  }
+  presenceSocket = null;
+  presenceToken = null;
+};
+
+/**
  * Get the WebSocket URL
  */
 export const getWebSocketUrl = (): string => {

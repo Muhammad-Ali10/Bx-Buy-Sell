@@ -548,7 +548,7 @@ const AdminContentManagement = () => {
     <div className="min-h-screen bg-background flex">
       <AdminSidebar />
       
-      <main className="flex-1">
+      <main className="flex-1 min-w-0">
         <AdminHeader />
 
         <div className="p-8 space-y-6">
@@ -593,7 +593,7 @@ const AdminContentManagement = () => {
                       <div className="text-xs sm:text-sm text-muted-foreground mb-4">
                         Found {categories.length} categor{categories.length === 1 ? 'y' : 'ies'}
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
                         {categories
                           .filter((category: any) => 
                             !searchQuery || category.name?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -804,7 +804,7 @@ const AdminContentManagement = () => {
                       <p className="text-xs mt-2 text-muted-foreground">Check browser console for details.</p>
                     </div>
                   ) : tools && Array.isArray(tools) && tools.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
                       {tools
                         .filter((tool: any) => 
                           tool.name.toLowerCase().includes(searchQuery.toLowerCase())

@@ -28,7 +28,12 @@ import { FinancialAdminModule } from './financial-admin/financial-admin.module';
 import { QuestionAdminModule } from './question-admin/question-admin.module';
 import { AdminSocialAccountModule } from './admin-social-account/admin-social-account.module';
 import { NotificationModule } from './notification/notification.module';
+import { SmsModule } from './sms/sms.module';
+import { MailModule } from './mail/mail.module';
+import { IdentityModule } from './identity/identity.module';
 import { MonitoringAlertModule } from './monitoring-alert/monitoring-alert.module';
+import { AcquisitionCapacityModule } from './acquisition-capacity/acquisition-capacity.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -57,7 +62,12 @@ import { MonitoringAlertModule } from './monitoring-alert/monitoring-alert.modul
     QuestionAdminModule,
     AdminSocialAccountModule,
     NotificationModule,
+    SmsModule,
+    MailModule,
+    IdentityModule,
     MonitoringAlertModule,
+    AcquisitionCapacityModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthGuard, RolesGuard, ResponseInterceptor, LogInterceptor],

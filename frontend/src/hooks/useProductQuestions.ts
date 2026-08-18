@@ -7,6 +7,8 @@ export interface ProductQuestion {
   answer_type: string;
   answer_for: string;
   option?: string[];
+  dependsOnQuestionId?: string | null;
+  dependsOnValue?: string | null;
   created_at: string;
   updated_at: string;
 }

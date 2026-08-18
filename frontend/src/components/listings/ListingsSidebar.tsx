@@ -1,8 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { List, Heart, MessageSquare, User, ShieldCheck, Settings, LogOut, Menu } from "lucide-react";
+import { List, Heart, MessageSquare, User, ShieldCheck, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/hooks/useAuth";
-import { toast } from "sonner";
 import logo from "@/assets/_App Icon 1 (2).png";
 import rocketIcon from "@/assets/roccket.svg";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -20,7 +18,6 @@ interface ListingsSidebarProps {
 const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
   const [isPro, setIsPro] = useState(false);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
 
@@ -38,17 +35,6 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
       console.error("Error checking subscription:", error);
     } finally {
       setLoadingSubscription(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-      toast.success("Logged out successfully");
-      navigate("/");
-      onLinkClick?.();
-    } catch (error) {
-      toast.error("Error logging out");
     }
   };
 
@@ -184,59 +170,6 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
           </div>
         )}
       </div>
-
-      {/* Bottom Menu - Fixed */}
-      <div className="p-0 space-y-1.5 sm:space-y-2 border-t border-white/10 flex-shrink-0 mt-auto pt-3 sm:pt-4 pb-4 sm:pb-5 md:pb-6 w-full pr-2 sm:pr-3 md:pr-4">
-        <button
-          onClick={() => handleNavigation("/settings")}
-          className={`w-full flex items-center justify-between rounded-xl px-3 sm:px-3.5 md:px-4 lg:px-4 py-2 sm:py-2 md:py-2.5 lg:py-3 ${
-            location.pathname === "/settings" || location.pathname.startsWith("/settings/")
-              ? "bg-[rgba(174,243,31,1)]" 
-              : ""
-          }`}
-        >
-          <div className="flex items-center gap-2 sm:gap-2 md:gap-2.5 lg:gap-3">
-            <Settings 
-              className="flex-shrink-0 w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4 md:h-4 lg:w-5 lg:h-5" 
-              style={{
-                color: location.pathname === "/settings" || location.pathname.startsWith("/settings/") ? 'rgba(0, 0, 0, 1)' : 'rgba(255, 255, 255, 0.6)',
-                opacity: 1,
-              }}
-            />
-            <span 
-              className="font-medium font-['Lufga'] text-[10px] sm:text-[11px] md:text-xs lg:text-sm leading-[150%]"
-              style={{
-                color: location.pathname === "/settings" || location.pathname.startsWith("/settings/") ? 'rgba(0, 0, 0, 1)' : 'rgba(255, 255, 255, 0.6)',
-              }}
-            >
-              Settings
-            </span>
-          </div>
-        </button>
-        
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center justify-between rounded-xl px-3 sm:px-3.5 md:px-4 lg:px-4 py-2 sm:py-2 md:py-2.5 lg:py-3"
-        >
-          <div className="flex items-center gap-2 sm:gap-2 md:gap-2.5 lg:gap-3">
-            <LogOut 
-              className="flex-shrink-0 w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4 md:h-4 lg:w-5 lg:h-5" 
-              style={{
-                color: 'rgba(255, 255, 255, 0.6)',
-                opacity: 1,
-              }}
-            />
-            <span 
-              className="font-medium font-['Lufga'] text-[10px] sm:text-[11px] md:text-xs lg:text-sm leading-[150%]"
-              style={{
-                color: 'rgba(255, 255, 255, 0.6)',
-              }}
-            >
-              Log Out
-            </span>
-          </div>
-        </button>
-      </div>
     </div>
   );
 };
@@ -274,12 +207,17 @@ export const ListingsSidebar = ({ mobileOpen, onMobileClose, isMobile, open: con
     return (
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
+          {/* Given a surface of its own: as a ghost button it was a bare icon
+              floating on the page background, which read as a stray mark
+              rather than the menu it opens. */}
           <Button
             variant="ghost"
             size="icon"
+            aria-label="Open menu"
+            className="border border-black/10 bg-white shadow-sm hover:bg-black/[0.04]"
             style={{
               padding: '8px',
-              borderRadius: '8px',
+              borderRadius: '12px',
             }}
           >
             <Menu className="w-6 h-6" style={{ color: 'rgba(0, 0, 0, 1)' }} />

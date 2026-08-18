@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useCategories } from "@/hooks/useCategories";
 import { resolveImageUrl } from "@/lib/imageUtils";
+import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 
 interface CategoryStepProps {
   formData?: any;
   onNext: (data: { category: string }) => void;
+  onPersist?: (data: any) => void;
 }
 
 interface Category {
@@ -26,8 +28,9 @@ const iconMap: Record<string, any> = {
   "layout-grid": LayoutGrid,
 };
 
-export const CategoryStep = ({ formData, onNext }: CategoryStepProps) => {
+export const CategoryStep = ({ formData, onNext, onPersist }: CategoryStepProps) => {
   const [selectedCategory, setSelectedCategory] = useState<string>(formData?.category || "");
+  usePersistOnUnmount(onPersist, () => ({ category: selectedCategory }));
   
   // Use the same hook as admin dashboard for consistent category display
   const { data: categories = [], isLoading: loading } = useCategories({ nocache: true });

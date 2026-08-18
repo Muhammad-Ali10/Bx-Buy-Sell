@@ -2,16 +2,19 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useTools } from "@/hooks/useTools";
 import { resolveImageUrl } from "@/lib/imageUtils";
+import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 
 interface ToolsStepProps {
   formData?: any;
   onNext: (data: { tools: string[]; integrations?: string[] }) => void;
   onBack: () => void;
+  onPersist?: (data: any) => void;
 }
 
-export const ToolsStep = ({ formData: parentFormData, onNext, onBack }: ToolsStepProps) => {
+export const ToolsStep = ({ formData: parentFormData, onNext, onBack, onPersist }: ToolsStepProps) => {
   const [selectedTools, setSelectedTools] = useState<string[]>(parentFormData?.tools || []);
   const { data: tools, isLoading } = useTools();
+  usePersistOnUnmount(onPersist, () => ({ tools: selectedTools }));
 
   useEffect(() => {
     const raw = parentFormData?.tools;

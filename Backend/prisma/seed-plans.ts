@@ -9,10 +9,10 @@ async function seedPlans() {
   const freePlan = await prisma.plan.upsert({
     where: { slug: 'free' },
     create: {
-      name: 'Free',
+      name: 'Minimum',
       slug: 'free',
-      title: 'Get Started',
-      description: 'Perfect for trying out the platform',
+      title: 'Minimum',
+      description: 'Everything you need to get started — with no upfront costs.',
       monthlyPrice: '0',
       yearlyPrice: '0',
       feature: [
@@ -35,8 +35,8 @@ async function seedPlans() {
       sortOrder: 1,
     },
     update: {
-      title: 'Get Started',
-      description: 'Perfect for trying out the platform',
+      title: 'Minimum',
+      description: 'Everything you need to get started — with no upfront costs.',
       monthlyPrice: '0',
       yearlyPrice: '0',
       feature: [
@@ -54,16 +54,67 @@ async function seedPlans() {
   });
   console.log('✅ Free plan:', freePlan.name);
 
+  /**
+   * The middle tier the client's design adds between Minimum and Premium.
+   *
+   * Its buyer-facing perk is the advanced search filter — the client's own
+   * wording: "This advanced filter should only be available to paid members
+   * which have a (Starter or Premium) package". Early access stays with
+   * Premium alone, so the top tier keeps something of its own.
+   */
+  const starterPlan = await prisma.plan.upsert({
+    where: { slug: 'starter' },
+    create: {
+      name: 'Starter',
+      slug: 'starter',
+      title: 'Starter',
+      description: 'For a solid mid-tier solution, choose our Basic Plan.',
+      monthlyPrice: '49',
+      yearlyPrice: '490',
+      feature: [
+        'Everything in Minimum',
+        'Advanced search filters',
+        'Standard reach for your listing',
+        'Manually approve buyers',
+        'Success fee is paid after the business is sold',
+      ],
+      maxListings: 0,
+      maxPhotos: 0,
+      maxVideoDuration: 60,
+      canUseAnalytics: false,
+      prioritySupport: false,
+      featuredListing: false,
+      canBoostListing: false,
+      customBranding: false,
+      isActive: true,
+      isDefault: false,
+      sortOrder: 2,
+      stripeProductId: null,
+      stripeMonthlyPriceId: null,
+      stripeYearlyPriceId: null,
+    },
+    update: {
+      name: 'Starter',
+      title: 'Starter',
+      description: 'For a solid mid-tier solution, choose our Basic Plan.',
+      monthlyPrice: '49',
+      yearlyPrice: '490',
+      isActive: true,
+      sortOrder: 2,
+    },
+  });
+  console.log('✅ Starter plan:', starterPlan.name);
+
   // Create or update Pro plan
   const proPlan = await prisma.plan.upsert({
     where: { slug: 'pro' },
     create: {
-      name: 'Pro',
+      name: 'Premium',
       slug: 'pro',
-      title: 'Grow Your Sales',
-      description: 'Everything you need to sell successfully',
-      monthlyPrice: '45',
-      yearlyPrice: '450',
+      title: 'Premium',
+      description: 'Ready to sell seriously? Choose our premium package.',
+      monthlyPrice: '99',
+      yearlyPrice: '990',
       feature: [
         'Unlimited business listings',
         'Unlimited photos & videos',
@@ -85,17 +136,17 @@ async function seedPlans() {
       customBranding: true,
       isActive: true,
       isDefault: false,
-      sortOrder: 2,
+      sortOrder: 3,
       // Stripe IDs will be set later
       stripeProductId: null,
       stripeMonthlyPriceId: null,
       stripeYearlyPriceId: null,
     },
     update: {
-      title: 'Grow Your Sales',
-      description: 'Everything you need to sell successfully',
-      monthlyPrice: '45',
-      yearlyPrice: '450',
+      title: 'Premium',
+      description: 'Ready to sell seriously? Choose our premium package.',
+      monthlyPrice: '99',
+      yearlyPrice: '990',
       feature: [
         'Unlimited business listings',
         'Unlimited photos & videos',
@@ -112,7 +163,7 @@ async function seedPlans() {
       canUseAnalytics: true,
       prioritySupport: true,
       featuredListing: true,
-      sortOrder: 2,
+      sortOrder: 3,
     },
   });
   console.log('✅ Pro plan:', proPlan.name);

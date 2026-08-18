@@ -1,7 +1,26 @@
+import { countries } from "countries-list";
+
 /**
  * Utility to detect country from city/location name
  * Maps common cities to their countries for flag display
  */
+
+// Lowercase full country name -> ISO2 code (covers every country in the
+// countries-list dataset) so any selected country resolves to a flag.
+const fullCountryNameToCode: Record<string, string> = Object.entries(
+  countries,
+).reduce<Record<string, string>>((acc, [code, data]) => {
+  acc[(data as { name: string }).name.toLowerCase()] = code.toLowerCase();
+  return acc;
+}, {});
+
+/**
+ * Every country, alphabetical — the source for location dropdowns, so a filter
+ * can never drift out of step with what FlagIcon is able to resolve.
+ */
+export const ALL_COUNTRY_NAMES: string[] = Object.values(countries)
+  .map((entry) => (entry as { name: string }).name)
+  .sort((a, b) => a.localeCompare(b));
 
 // US States mapping
 export const usStatesToCountry: { [key: string]: string } = {
@@ -279,9 +298,7 @@ export const detectCountryFromLocation = (location: string): string | null => {
  */
 export const getCountryCodeFromLocation = (location: string): string => {
   const country = detectCountryFromLocation(location);
-  
-  if (!country) return 'un'; // Unknown
-  
+
   const countryCodeMap: { [key: string]: string } = {
     'Pakistan': 'pk',
     'India': 'in',
@@ -346,6 +363,17 @@ export const getCountryCodeFromLocation = (location: string): string => {
     'Hong Kong': 'hk',
   };
   
-  return countryCodeMap[country] || 'un';
+  if (country && countryCodeMap[country]) {
+    return countryCodeMap[country];
+  }
+
+  // Fallback to the full dataset so any dropdown-selected country gets a flag.
+  const candidates = [location, country].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    const code = fullCountryNameToCode[candidate.toLowerCase().trim()];
+    if (code) return code;
+  }
+
+  return 'un';
 };
 

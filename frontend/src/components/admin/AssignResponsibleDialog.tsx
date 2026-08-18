@@ -8,18 +8,25 @@ import { Input } from "@/components/ui/input";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { Loader2 } from "lucide-react";
 
+/**
+ * Picking a responsible team member.
+ *
+ * Used for listings and for monitoring alerts, so the thing being assigned is
+ * a `targetId` rather than a listing id — the dialog does not care what it is
+ * and only hands it back to the caller.
+ */
 interface AssignResponsibleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  listingId: string;
+  targetId: string;
   currentResponsibleId?: string | null;
-  onAssign: (listingId: string, teamMemberId: string | null) => Promise<void>;
+  onAssign: (targetId: string, teamMemberId: string | null) => Promise<void>;
 }
 
 export function AssignResponsibleDialog({
   open,
   onOpenChange,
-  listingId,
+  targetId,
   currentResponsibleId,
   onAssign,
 }: AssignResponsibleDialogProps) {
@@ -46,7 +53,7 @@ export function AssignResponsibleDialog({
   const handleAssign = async () => {
     setIsAssigning(true);
     try {
-      await onAssign(listingId, selectedMemberId);
+      await onAssign(targetId, selectedMemberId);
       onOpenChange(false);
       setSearchQuery("");
     } catch (error) {
@@ -59,7 +66,7 @@ export function AssignResponsibleDialog({
   const handleRemove = async () => {
     setIsAssigning(true);
     try {
-      await onAssign(listingId, null);
+      await onAssign(targetId, null);
       setSelectedMemberId(null);
       onOpenChange(false);
       setSearchQuery("");

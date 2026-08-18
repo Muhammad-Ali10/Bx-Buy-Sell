@@ -13,31 +13,17 @@ export const useUserDetails = (userId: string | undefined) => {
         // Get user profile from backend
         const userResponse = await apiClient.getUserById(userId);
         
-        if (!userResponse.success || !userResponse.data) {
+        // A missing user runs through the same mapping as a found one, with an
+        // empty record. Returning a differently shaped object here made every
+        // read of `profile` a union of two shapes, which is why the page was
+        // full of "property does not exist" errors.
+        const found = Boolean(userResponse.success && userResponse.data);
+        const userData: any = found
+          ? ((userResponse.data as any).data || userResponse.data)
+          : { id: userId };
+        if (!found) {
           console.log('No user found for:', userId);
-          // Return default empty profile if not found
-          return {
-            profile: {
-              id: userId,
-              full_name: null,
-              avatar_url: null,
-              bio: null,
-              company_name: null,
-              location: null,
-              phone: null,
-              website: null,
-              user_type: null,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-            listingsCount: 0,
-            favoritesCount: 0,
-            chatsCount: 0,
-          };
         }
-
-        const userData = (userResponse.data as any).data || userResponse.data;
-        console.log('User found:', userData);
 
         // Get favorites count for the target user
         let favoritesCount = 0;
@@ -112,14 +98,30 @@ export const useUserDetails = (userId: string | undefined) => {
           city: userData.city || null,
           country: userData.country || null,
           state: userData.state || null,
-          zip: userData.zip || null,
+          // The column is `zip_code`; reading only `zip` meant the postcode was
+          // always blank on the details page.
+          zip: userData.zip_code || userData.zip || null,
+          zip_code: userData.zip_code || userData.zip || null,
           user_type: userData.role || null,
+          // The page needs the raw role too: it decides who may block whom and
+          // who may change a user type. Mapping it only to `user_type` meant
+          // those checks read undefined and quietly refused everything.
+          role: userData.role || null,
           created_at: userData.created_at || new Date().toISOString(),
           updated_at: userData.updated_at || new Date().toISOString(),
           email_verified: Boolean(userData.is_email_verified),
           phone_verified: Boolean(userData.is_phone_verified),
-          funds_verified: Boolean(userData.funds_verified),
+          // Funds count as verified once a moderator has recorded an amount.
+          funds_verified:
+            typeof userData.acquisitionCapacity?.verifiedFunds === "number" &&
+            userData.acquisitionCapacity.verifiedFunds > 0,
+          verified_funds: userData.acquisitionCapacity?.verifiedFunds ?? null,
           id_verified: Boolean(userData.id_verified),
+          is_online: Boolean(userData.is_online),
+          last_seen: userData.last_seen || userData.last_offline || null,
+          blocked: userData.blocked === true,
+          blocked_reason: userData.blocked_reason || null,
+          subscription: userData.subscription || null,
           preferences: userData.preferences || null,
         };
 

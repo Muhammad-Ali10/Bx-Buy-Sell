@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAddBrandQuestion } from "@/hooks/useAddBrandQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 import { toast } from "sonner";
 
 interface AddBrandQuestionDialogProps {
@@ -26,6 +27,7 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange }: AddBrandQuestionD
   const [question, setQuestion] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState(""); // Options field - always visible
+  const [required, setRequired] = useState(true);
   const addQuestion = useAddBrandQuestion();
 
   const handleSave = () => {
@@ -62,6 +64,7 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange }: AddBrandQuestionD
         question: trimmedQuestion,
         answer_type: questionType,
         option: optionsArray.length > 0 ? optionsArray : [],
+        required,
       },
       {
         onSuccess: () => {
@@ -79,6 +82,7 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange }: AddBrandQuestionD
     setQuestion("");
     setQuestionType("TEXT");
     setOptions("");
+    setRequired(true);
     onOpenChange(false);
   };
 
@@ -133,6 +137,7 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange }: AddBrandQuestionD
               </SelectContent>
             </Select>
           </div>
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
 
         {/* Action Buttons */}

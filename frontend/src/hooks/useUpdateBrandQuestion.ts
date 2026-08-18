@@ -6,11 +6,12 @@ export const useUpdateBrandQuestion = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { 
-      id: string; 
-      question: string; 
+    mutationFn: async (data: {
+      id: string;
+      question: string;
       answer_type: string;
       option?: string[];
+      required?: boolean | null;
     }) => {
       console.log('🔄 Updating brand question:', data);
       
@@ -28,6 +29,7 @@ export const useUpdateBrandQuestion = () => {
         question: data.question,
         answer_type: mappedAnswerType,
         answer_for: "BRAND" as const,
+        required: data.required ?? null,
       };
       
       // Add options if provided

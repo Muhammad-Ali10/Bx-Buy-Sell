@@ -4,21 +4,21 @@ import { Area, AreaChart, XAxis, YAxis, CartesianGrid } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { TrendingUp } from "lucide-react";
 
-const data = [
-  { date: "01", revenue: 150000, profit: 120000 },
-  { date: "03", revenue: 180000, profit: 145000 },
-  { date: "06", revenue: 220000, profit: 175000 },
-  { date: "09", revenue: 195000, profit: 160000 },
-  { date: "12", revenue: 240000, profit: 190000 },
-  { date: "15", revenue: 210000, profit: 170000 },
-  { date: "18", revenue: 280000, profit: 225000 },
-  { date: "21", revenue: 250000, profit: 200000 },
-  { date: "24", revenue: 230000, profit: 185000 },
-  { date: "27", revenue: 260000, profit: 210000 },
-  { date: "30", revenue: 275000, profit: 220000 },
-];
+import { formatNumber } from "@/lib/formatNumber";
+interface RevenuePoint {
+  label: string;
+  revenue: number;
+}
 
-export const RevenueChart = () => {
+
+export const RevenueChart = ({
+  data = [],
+  changePercent = null,
+}: {
+  data?: RevenuePoint[];
+  /** Real change against the previous period; null when there is nothing to compare. */
+  changePercent?: number | null;
+}) => {
   const totalRevenue = data.reduce((sum, item) => sum + item.revenue, 0);
   
   return (
@@ -26,13 +26,24 @@ export const RevenueChart = () => {
       <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4">
         <div className="space-y-2">
           <h3 className="text-lg font-semibold text-foreground">Revenue</h3>
-          <p className="text-3xl sm:text-4xl font-bold text-foreground">{totalRevenue.toLocaleString()}</p>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-accent flex items-center gap-1 font-medium">
-              15% <TrendingUp className="w-3.5 h-3.5" />
-            </span>
-            <span className="text-muted-foreground">Over All Profit</span>
-          </div>
+          <p className="text-3xl sm:text-4xl font-bold text-foreground">{formatNumber(totalRevenue)}</p>
+          {/* This read a hardcoded "15%" next to a real revenue figure, which
+              is the kind of invented number that makes a dashboard untrustworthy.
+              Nothing is shown when there is no period to compare against. */}
+          {changePercent !== null && changePercent !== undefined && (
+            <div className="flex items-center gap-2 text-sm">
+              <span
+                className={`flex items-center gap-1 font-medium ${
+                  changePercent >= 0 ? "text-accent" : "text-destructive"
+                }`}
+              >
+                {changePercent > 0 ? "+" : changePercent < 0 ? "−" : ""}
+                {Math.abs(changePercent)}%
+                <TrendingUp className={`w-3.5 h-3.5 ${changePercent < 0 ? "rotate-180" : ""}`} />
+              </span>
+              <span className="text-muted-foreground">vs the previous 30 days</span>
+            </div>
+          )}
         </div>
         <Select defaultValue="monthly">
           <SelectTrigger className="w-28 h-9 border-border">
@@ -73,7 +84,7 @@ export const RevenueChart = () => {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
               <XAxis 
-                dataKey="date" 
+                dataKey="label" 
                 stroke="hsl(var(--muted-foreground))"
                 fontSize={11}
                 tickLine={false}
@@ -86,20 +97,16 @@ export const RevenueChart = () => {
                 tickLine={false}
                 axisLine={false}
                 width={50}
-                tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+                // Thousands only once the numbers are in the thousands. Dividing
+                // everything by 1000 turned a chart of ones and twos into five
+                // rows all reading "0k".
+                tickFormatter={(value) =>
+                  value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k` : String(value)
+                }
               />
               <ChartTooltip 
                 content={<ChartTooltipContent />}
                 cursor={{ stroke: "hsl(var(--accent))", strokeWidth: 1, strokeDasharray: "5 5" }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="profit" 
-                stroke="#FFD700" 
-                strokeDasharray="4 4" 
-                fill="url(#colorProfit)" 
-                strokeWidth={2} 
-                fillOpacity={0.6}
               />
               <Area 
                 type="monotone" 

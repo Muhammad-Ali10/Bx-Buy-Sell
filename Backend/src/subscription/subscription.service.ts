@@ -17,10 +17,14 @@ export class SubscriptionService {
    * Get user's current subscription
    */
   async getCurrentSubscription(userId: string) {
-    const subscription = await this.db.userSubscription.findUnique({
+    let subscription = await this.db.userSubscription.findUnique({
       where: { userId },
       include: { plan: true },
     });
+
+    // A downgrade whose date has arrived is already true — apply it before
+    // answering, so nobody keeps a plan they stopped paying for.
+    subscription = await this.applyDueChange(subscription);
 
     // If no subscription, user is on Free plan
     if (!subscription) {
@@ -39,6 +43,200 @@ export class SubscriptionService {
       ...subscription,
       isFree: subscription.plan.slug === 'free',
     };
+  }
+
+  /**
+   * The Stripe price a plan is sold at on a given cycle.
+   *
+   * Every cycle bills a different amount, so each has its own price in Stripe.
+   * Kept in one place because three separate copies of this mapping had already
+   * drifted — two of them treated anything that was not MONTHLY as yearly,
+   * which would have charged a three-month subscriber a full year.
+   */
+  private priceIdForCycle(
+    plan: {
+      stripeMonthlyPriceId: string | null;
+      stripeThreeMonthPriceId: string | null;
+      stripeSixMonthPriceId: string | null;
+      stripeYearlyPriceId: string | null;
+    },
+    cycle: BillingCycle,
+  ): string {
+    const priceId =
+      cycle === 'MONTHLY'
+        ? plan.stripeMonthlyPriceId
+        : cycle === 'THREE_MONTH'
+          ? plan.stripeThreeMonthPriceId
+          : cycle === 'SIX_MONTH'
+            ? plan.stripeSixMonthPriceId
+            : plan.stripeYearlyPriceId;
+
+    if (!priceId) {
+      throw new BadRequestException(
+        `Stripe price ID not configured for ${cycle} billing`,
+      );
+    }
+    return priceId;
+  }
+
+  /** How long a cycle runs, for working out when a scheduled change is due. */
+  private monthsInCycle(cycle: BillingCycle): number {
+    switch (cycle) {
+      case 'THREE_MONTH':
+        return 3;
+      case 'SIX_MONTH':
+        return 6;
+      case 'YEARLY':
+        return 12;
+      default:
+        return 1;
+    }
+  }
+
+  /**
+   * Queue a move to a cheaper plan for the end of the paid period.
+   *
+   * Downgrading and cancelling are the same act — cancelling is just a
+   * downgrade to Minimum — so both arrive here and take one path. Nothing is
+   * charged, nothing is taken away, and the member can still change their mind
+   * right up until the date.
+   */
+  async scheduleChange(userId: string, planSlug: string, billingCycle: BillingCycle) {
+    const target = await this.getPlanBySlug(planSlug);
+    const subscription = await this.db.userSubscription.findUnique({
+      where: { userId },
+      include: { plan: true },
+    });
+
+    if (!subscription || subscription.plan.slug === 'free') {
+      throw new BadRequestException('There is no paid subscription to change.');
+    }
+
+    const rank = (slug: string) => (slug === 'pro' ? 2 : slug === 'starter' ? 1 : 0);
+    if (rank(target.slug) > rank(subscription.plan.slug)) {
+      // An upgrade has to be paid for, so it goes through checkout and starts
+      // at once. Letting one be "scheduled" would hand out the higher plan
+      // without ever collecting for it.
+      throw new BadRequestException('Upgrades start immediately — use checkout.');
+    }
+
+    const samePlan = target.id === subscription.planId;
+    if (samePlan && billingCycle === subscription.billingCycle) {
+      throw new BadRequestException('That is already your plan.');
+    }
+
+    // When Stripe has told us the period end, trust it. Otherwise work it out
+    // from the cycle the member is on, so the date is never simply "today".
+    const fallbackEnd = new Date(subscription.startDate);
+    fallbackEnd.setMonth(
+      fallbackEnd.getMonth() + this.monthsInCycle(subscription.billingCycle),
+    );
+    const effectiveAt = subscription.stripeCurrentPeriodEnd ?? fallbackEnd;
+
+    if (subscription.stripeSubscriptionId) {
+      if (target.slug === 'free') {
+        // Nothing to bill for afterwards: let the subscription lapse.
+        await this.stripeService.cancelSubscription(
+          subscription.stripeSubscriptionId,
+          false,
+        );
+      } else {
+        await this.stripeService.scheduleSubscriptionPriceChange(
+          subscription.stripeSubscriptionId,
+          this.priceIdForCycle(target, billingCycle),
+        );
+      }
+    }
+
+    await this.db.userSubscription.update({
+      where: { userId },
+      data: {
+        pendingPlanId: target.id,
+        pendingBillingCycle: billingCycle,
+        pendingChangeAt: effectiveAt,
+        // A move to Minimum is a cancellation, and the account page reads
+        // `cancelledAt` to say so.
+        cancelledAt: target.slug === 'free' ? new Date() : null,
+      },
+    });
+
+    this.logger.log(
+      `Scheduled change to ${target.slug}/${billingCycle} for ${userId} at ${effectiveAt.toISOString()}`,
+    );
+
+    return {
+      success: true,
+      data: {
+        pendingPlanId: target.id,
+        pendingPlanSlug: target.slug,
+        pendingBillingCycle: billingCycle,
+        pendingChangeAt: effectiveAt,
+      },
+    };
+  }
+
+  /** Drop a queued change; the current plan carries on untouched. */
+  async cancelScheduledChange(userId: string) {
+    const subscription = await this.db.userSubscription.findUnique({
+      where: { userId },
+      include: { plan: true },
+    });
+
+    if (!subscription?.pendingPlanId) {
+      throw new BadRequestException('There is no scheduled change to cancel.');
+    }
+
+    if (subscription.stripeSubscriptionId) {
+      // Put Stripe back where it was: the current plan's price, still renewing.
+      await this.stripeService.scheduleSubscriptionPriceChange(
+        subscription.stripeSubscriptionId,
+        this.priceIdForCycle(subscription.plan, subscription.billingCycle),
+      );
+    }
+
+    await this.db.userSubscription.update({
+      where: { userId },
+      data: {
+        pendingPlanId: null,
+        pendingBillingCycle: null,
+        pendingChangeAt: null,
+        cancelledAt: null,
+        endDate: null,
+      },
+    });
+
+    this.logger.log(`Scheduled change cancelled for ${userId}`);
+    return { success: true };
+  }
+
+  /**
+   * Put a due change into effect.
+   *
+   * Applied on read rather than by a nightly job: a change that has come due
+   * must be true the moment the member looks, and a job that fails to run
+   * would quietly leave people on a plan they cancelled weeks ago.
+   */
+  private async applyDueChange(subscription: any) {
+    if (!subscription?.pendingPlanId || !subscription.pendingChangeAt) return subscription;
+    if (new Date(subscription.pendingChangeAt).getTime() > Date.now()) return subscription;
+
+    const updated = await this.db.userSubscription.update({
+      where: { userId: subscription.userId },
+      data: {
+        planId: subscription.pendingPlanId,
+        billingCycle: subscription.pendingBillingCycle ?? 'MONTHLY',
+        pendingPlanId: null,
+        pendingBillingCycle: null,
+        pendingChangeAt: null,
+        startDate: subscription.pendingChangeAt,
+      },
+      include: { plan: true },
+    });
+
+    this.logger.log(
+      `Applied scheduled change for ${subscription.userId}: now on ${updated.plan.slug}`,
+    );
+    return updated;
   }
 
   /**
@@ -93,17 +291,7 @@ export class SubscriptionService {
       throw new BadRequestException('Cannot checkout for free plan');
     }
 
-    // Get price ID based on billing cycle
-    const priceId =
-      billingCycle === 'MONTHLY'
-        ? plan.stripeMonthlyPriceId
-        : plan.stripeYearlyPriceId;
-
-    if (!priceId) {
-      throw new BadRequestException(
-        `Stripe price ID not configured for ${billingCycle} billing`,
-      );
-    }
+    const priceId = this.priceIdForCycle(plan, billingCycle);
 
     // Check if user already has subscription
     let subscription = await this.db.userSubscription.findUnique({
@@ -286,14 +474,7 @@ export class SubscriptionService {
       throw new NotFoundException('No active subscription found');
     }
 
-    const newPriceId =
-      newCycle === 'MONTHLY'
-        ? subscription.plan.stripeMonthlyPriceId
-        : subscription.plan.stripeYearlyPriceId;
-
-    if (!newPriceId) {
-      throw new BadRequestException(`Price not configured for ${newCycle}`);
-    }
+    const newPriceId = this.priceIdForCycle(subscription.plan, newCycle);
 
     // Update in Stripe
     await this.stripeService.updateSubscription(
@@ -371,10 +552,22 @@ export class SubscriptionService {
     const plan = subscription.plan;
     const isPro = plan?.slug === 'pro';
 
+    /**
+     * The three buyer tiers the client's subscription page works in. Slugs stay
+     * as they were — `pro` is the top tier — so nothing about existing
+     * subscribers or their Stripe records changes.
+     */
+    const tier: 'MINIMUM' | 'STARTER' | 'PREMIUM' = isPro
+      ? 'PREMIUM'
+      : plan?.slug === 'starter'
+        ? 'STARTER'
+        : 'MINIMUM';
+
     return {
       status: subscription.status,
       isFree: Boolean(subscription.isFree),
       isPro,
+      tier,
       plan: {
         id: plan?.id,
         slug: plan?.slug,
@@ -392,10 +585,15 @@ export class SubscriptionService {
         boostListing: Boolean(plan?.canBoostListing),
         customBranding: Boolean(plan?.customBranding),
         prioritySupport: Boolean(plan?.prioritySupport),
-        advancedFilters: isPro,
+        // The client put the advanced filter behind "Starter or Premium";
+        // early access stays with Premium alone, so the top tier keeps a perk
+        // of its own.
+        advancedFilters: tier !== 'MINIMUM',
         earlyAccessListings: isPro,
-        confidentialControl: isPro,
-        categoryPageFeature: isPro,
+        // Seller features are sold per listing now (Starter/Premium packages),
+        // so the subscription no longer grants them.
+        confidentialControl: false,
+        categoryPageFeature: false,
         startPageFeature: false, // Separate bookable add-on, not a Pro feature
       },
       actions: {
@@ -405,8 +603,8 @@ export class SubscriptionService {
         canFeatureListing: Boolean(plan?.featuredListing),
         canAccessEarlyListings: isPro,
         canUseAdvancedFilters: isPro,
-        canToggleConfidentialControl: isPro,
-        canFeatureOnCategoryPage: isPro,
+        canToggleConfidentialControl: false,
+        canFeatureOnCategoryPage: false,
         canFeatureOnStartPage: false,
       },
       listingAccess: {
@@ -471,8 +669,10 @@ export class SubscriptionService {
         prioritySupport: Boolean(plan?.prioritySupport),
         advancedFilters: isPro,
         earlyAccessListings: isPro,
-        confidentialControl: isPro,
-        categoryPageFeature: isPro,
+        // Seller features are sold per listing now (Starter/Premium packages),
+        // so the subscription no longer grants them.
+        confidentialControl: false,
+        categoryPageFeature: false,
         startPageFeature: false,
       },
       actions: {
@@ -482,8 +682,8 @@ export class SubscriptionService {
         canFeatureListing: Boolean(plan?.featuredListing),
         canAccessEarlyListings: isPro,
         canUseAdvancedFilters: isPro,
-        canToggleConfidentialControl: isPro,
-        canFeatureOnCategoryPage: isPro,
+        canToggleConfidentialControl: false,
+        canFeatureOnCategoryPage: false,
         canFeatureOnStartPage: false,
       },
       listingAccess: {

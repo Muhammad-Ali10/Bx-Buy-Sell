@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ListingsSidebar } from "@/components/listings/ListingsSidebar";
 import { ListingCardDashboard } from "@/components/listings/ListingCardDashboard";
-import { DashboardHeader } from "@/components/listings/DashboardHeader";
+import Header from "@/components/Header";
+import { parseMediaUrls } from "@/lib/mediaUtils";
+import { resolveListingTitle } from "@/lib/listingTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus } from "lucide-react";
@@ -86,31 +88,9 @@ const MyListings = () => {
 
       // Extract title from brand questions (same as admin listings)
       const mappedListings: Listing[] = userListings.map((listing: any) => {
-          // Get title from brand data
-          let title = 'Untitled Listing';
-          if (listing.brand && Array.isArray(listing.brand) && listing.brand.length > 0) {
-            const brandNameQuestion = listing.brand.find((b: any) => 
-              b.question?.toLowerCase().includes('brand name') ||
-              b.question?.toLowerCase().includes('business name') ||
-              b.question?.toLowerCase().includes('name') ||
-              b.question?.toLowerCase().includes('company')
-            );
-            if (brandNameQuestion?.answer) {
-              title = brandNameQuestion.answer;
-            } else if (listing.brand[0]?.answer) {
-              title = listing.brand[0].answer;
-            }
-          }
-          
-          // Check advertisement for title
-          if (listing.advertisement && Array.isArray(listing.advertisement) && listing.advertisement.length > 0) {
-            const titleQuestion = listing.advertisement.find((a: any) => 
-              a.question?.toLowerCase().includes('title')
-            );
-            if (titleQuestion?.answer && titleQuestion.answer.trim()) {
-              title = titleQuestion.answer;
-            }
-          }
+          // Title comes from Ad Information; never from an unrelated brand
+          // answer, which used to turn values like "EUR" into the title.
+          const title = resolveListingTitle(listing);
           
           // Normalize status
           let normalizedStatus = listing.status?.toLowerCase() || 'draft';
@@ -178,7 +158,7 @@ const MyListings = () => {
               a.answer_type === 'PHOTO'
             );
             if (photoQuestion?.answer) {
-              image_url = Array.isArray(photoQuestion.answer) ? photoQuestion.answer[0] : photoQuestion.answer;
+              image_url = parseMediaUrls(photoQuestion.answer)[0] || '';
             }
           }
           if (!image_url && listing.brand && Array.isArray(listing.brand)) {
@@ -206,6 +186,8 @@ const MyListings = () => {
             created_at: listing.created_at || listing.createdAt || new Date().toISOString(),
             requests_count: listing.requests_count || 0,
             unread_messages_count: listing.unread_messages_count || 0,
+            // Why the team took it off the marketplace, if they did.
+            blockedReason: listing.blockedReason || null,
           };
         });
 
@@ -254,7 +236,9 @@ const MyListings = () => {
 
       <div className="flex-1 w-full flex flex-col min-w-0 lg:ml-[240px] xl:ml-[280px]">
         {/* Header - Shared across all tabs */}
-        <DashboardHeader />
+        <Header sidebarOffset />
+        {/* Clears the fixed bar floating above. */}
+        <div className="h-20 sm:h-24" />
 
         {/* Search and Add Button Section - Only visible on My Listings tab */}
         <div className="w-full flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 px-4 sm:px-6 md:px-8 lg:px-10 pt-6 sm:pt-8 md:pt-10 pb-4 sm:pb-6 md:pb-8">
@@ -319,6 +303,9 @@ const MyListings = () => {
                   key={listing.id}
                   {...listing}
                   onUpdate={() => refetch()}
+                  // This is the seller's own manager: clicking a listing means
+                  // "work on this", not "look at what buyers see".
+                  primaryAction="edit"
                 />
               ))}
             </div>

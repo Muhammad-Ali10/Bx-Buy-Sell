@@ -36,8 +36,23 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   private activeConnections = new Map<string, Set<string>>();
   private userSockets = new Map<string, Set<string>>();
   private lastSeenByUser = new Map<string, number>();
-  private readonly HEARTBEAT_TIMEOUT_MS = 90_000;
+  /**
+   * Someone is offline after five minutes without a sign of life, not after
+   * ninety seconds — a person reading a listing is still on the platform.
+   */
+  private readonly HEARTBEAT_TIMEOUT_MS = 300_000;
   private readonly HEARTBEAT_CHECK_INTERVAL_MS = 30_000;
+  /**
+   * A dropped socket is not a departure. Moving between pages, reloading, or a
+   * moment of bad wifi all close the socket, and marking someone offline for
+   * that made the status flicker as they navigated. Wait a minute for them to
+   * come back before declaring them gone.
+   */
+  private readonly DISCONNECT_GRACE_MS = 60_000;
+  private pendingOffline = new Map<string, NodeJS.Timeout>();
+  /** Throttles writes of last_seen; the in-memory map is the live value. */
+  private lastSeenPersistedAt = new Map<string, number>();
+  private readonly LAST_SEEN_PERSIST_MS = 60_000;
   private heartbeatInterval?: NodeJS.Timeout;
 
   constructor(
@@ -135,14 +150,18 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
             });
             this.userSockets.delete(userId);
             this.lastSeenByUser.delete(userId);
+            this.cancelPendingOffline(userId);
+            // They stopped responding five minutes ago, so that is when they
+            // were last seen — not now.
+            const goneAt = new Date(lastSeen);
             this.db.user.update({
               where: { id: userId },
-              data: { is_online: false, last_offline: new Date() },
+              data: { is_online: false, last_offline: goneAt, last_seen: goneAt },
             }).then(() => {
               this.io.emit('user:status-changed', {
                 userId,
                 isOnline: false,
-                last_offline: new Date().toISOString(),
+                last_offline: goneAt.toISOString(),
               });
             }).catch((error) => {
               console.error('❌ Error updating user offline status (heartbeat):', error);
@@ -198,6 +217,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
       if (userId) {
         try {
+          // They are back (or never really left) — call off any pending offline.
+          this.cancelPendingOffline(userId);
+
           const sockets = this.userSockets.get(userId) || new Set();
           sockets.add(client.id);
           this.userSockets.set(userId, sockets);
@@ -205,7 +227,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
           await this.db.user.update({
             where: { id: userId },
-            data: { is_online: true },
+            data: { is_online: true, last_seen: new Date() },
           });
           console.log('✅ User marked as online:', userId);
 
@@ -234,38 +256,69 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   handleDisconnect(client: Socket) {
     const userId = (client as any).userId;
     console.log('👋 Client disconnected:', client.id, userId ? `(User: ${userId})` : '');
-    
-    // CRITICAL: Update user online status when they disconnect
+
     if (userId) {
       const sockets = this.userSockets.get(userId) || new Set();
       sockets.delete(client.id);
       if (sockets.size > 0) {
+        // Another tab is still open, so they never left.
         this.userSockets.set(userId, sockets);
         this.lastSeenByUser.set(userId, Date.now());
+        this.activeConnections.delete(client.id);
         return;
       }
       this.userSockets.delete(userId);
-      this.lastSeenByUser.delete(userId);
-      
-      // Only mark offline if no other connections exist
-      this.db.user.update({
-        where: { id: userId },
-        data: { is_online: false, last_offline: new Date() },
-      }).then(() => {
-        console.log('✅ User marked as offline:', userId);
-        
-        // Emit user offline status to all clients
-        this.io.emit('user:status-changed', {
-          userId: userId,
-          isOnline: false,
-          last_offline: new Date().toISOString(),
-        });
-      }).catch((error) => {
-        console.error('❌ Error updating user offline status:', error);
-      });
+      this.lastSeenByUser.set(userId, Date.now());
+
+      // Give them a minute to come back before calling them offline.
+      this.scheduleOffline(userId);
     }
-    
+
     this.activeConnections.delete(client.id);
+  }
+
+  /**
+   * Marks the user offline once the grace period passes without a reconnect.
+   * Reconnecting cancels it, which is what stops the status flickering as
+   * someone moves around the platform.
+   */
+  private scheduleOffline(userId: string) {
+    this.cancelPendingOffline(userId);
+    const timer = setTimeout(() => {
+      this.pendingOffline.delete(userId);
+      if ((this.userSockets.get(userId)?.size ?? 0) > 0) {
+        return; // came back in the meantime
+      }
+      const goneAt = new Date();
+      this.lastSeenByUser.delete(userId);
+      this.db.user
+        .update({
+          where: { id: userId },
+          data: { is_online: false, last_offline: goneAt, last_seen: goneAt },
+        })
+        .then(() => {
+          this.io.emit('user:status-changed', {
+            userId,
+            isOnline: false,
+            last_offline: goneAt.toISOString(),
+          });
+        })
+        .catch((error) => {
+          console.error('❌ Error updating user offline status:', error);
+        });
+    }, this.DISCONNECT_GRACE_MS);
+
+    // Do not hold the process open just for a presence timer.
+    timer.unref?.();
+    this.pendingOffline.set(userId, timer);
+  }
+
+  private cancelPendingOffline(userId: string) {
+    const existing = this.pendingOffline.get(userId);
+    if (existing) {
+      clearTimeout(existing);
+      this.pendingOffline.delete(userId);
+    }
   }
 
   @SubscribeMessage('user:heartbeat')
@@ -274,7 +327,20 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   ) {
     const userId = (client as any).userId;
     if (!userId) return;
-    this.lastSeenByUser.set(userId, Date.now());
+    const now = Date.now();
+    this.lastSeenByUser.set(userId, now);
+
+    // Persist at most once a minute per user: the admin overview reads
+    // last_seen to say "online 2 days ago", and that does not need
+    // second-level accuracy.
+    const persistedAt = this.lastSeenPersistedAt.get(userId) ?? 0;
+    if (now - persistedAt < this.LAST_SEEN_PERSIST_MS) return;
+    this.lastSeenPersistedAt.set(userId, now);
+    this.db.user
+      .update({ where: { id: userId }, data: { last_seen: new Date(now) } })
+      .catch((error) => {
+        console.error('❌ Error persisting last_seen:', error);
+      });
   }
 
   // Join Room - CRITICAL: Only allow joining ONE room at a time
@@ -474,36 +540,38 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         }
       });
 
-      if (isValid !== -1) {
-        message.type = 'ERROR';
-        message.content = "Don't use email or phone number";
-        // SINGLE EMIT: Error message broadcast to room only (no client.emit or this.io.emit)
-        this.io.to(message.chatId).emit('message', JSON.stringify(message));
-        return;
-      }
+      const sharesContactDetails = isValid !== -1;
 
       // Block prohibited words from being sent; show warning message in chat instead.
       const prohibitedMatches = await this.chatService.detectProhibitedWordsForMessage(
         message.senderId,
         message.content,
       );
-      if (prohibitedMatches.length > 0) {
-        await this.chatService.createProhibitedWordAlert(
+
+      /**
+       * Both ways of breaking the rule end here.
+       *
+       * An email address took one path with its own wording ("Don't use email
+       * or phone number") and a banned word took another; the member saw a
+       * different explanation depending on which tripwire they hit, and neither
+       * notice survived a refresh because neither was ever stored.
+       */
+      if (sharesContactDetails || prohibitedMatches.length > 0) {
+        if (prohibitedMatches.length > 0) {
+          await this.chatService.createProhibitedWordAlert(
+            message.chatId,
+            message.senderId,
+            prohibitedMatches,
+          );
+        }
+
+        const notice = await this.chatService.recordBlockedMessageNotice(
           message.chatId,
           message.senderId,
-          prohibitedMatches,
         );
-
-        const warningMessage = {
-          id: `warning-${Date.now()}`,
-          chatId: message.chatId,
-          senderId: 'system-monitor',
-          content: 'Your message was blocked because it violates community guidelines. Please edit and try again.',
-          type: 'MONITER',
-          createdAt: new Date().toISOString(),
-          read: true,
-        };
-        this.io.to(message.chatId).emit('message', JSON.stringify(warningMessage));
+        if (notice) {
+          this.io.to(message.chatId).emit('message', JSON.stringify(notice));
+        }
         return;
       }
 
@@ -538,8 +606,16 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
               distinct: ['senderId'],
             });
 
-            const participantIds = [...new Set(existingMessages.map(m => m.senderId))];
-            
+            // Platform-posted messages carry no sender, so they cannot tell us
+            // who the two parties are — leave them out of the guess.
+            const participantIds = [
+              ...new Set(
+                existingMessages
+                  .map((m) => m.senderId)
+                  .filter((id): id is string => Boolean(id)),
+              ),
+            ];
+
             if (participantIds.length >= 2) {
               // We have at least 2 participants, use them
               const userId = participantIds[0];
@@ -599,6 +675,20 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       // The sender is already in the room, so they receive it via this single room broadcast
       // NO additional emits - this is the ONLY emit for this message
       this.io.to(message.chatId).emit('message', messageString);
+
+      // Every twentieth message between the two of them, the platform repeats
+      // the reminder. Posted after the message it follows, so it reads as a
+      // response to the conversation rather than interrupting it.
+      void this.chatService
+        .maybePostGuidelineReminder(message.chatId)
+        .then((reminder) => {
+          if (reminder) {
+            this.io.to(message.chatId).emit('message', JSON.stringify(reminder));
+          }
+        })
+        .catch(() => {
+          /* the reminder is not worth failing a delivered message over */
+        });
 
       // Emit to monitor room for admin/monitor dashboard updates
       this.io.to('monitor-room').emit('monitor:chat_updated', {

@@ -64,6 +64,39 @@ export class ChatController {
     return this.chatService.getChatRoom(userId, sellerId, listingId);
   }
 
+  /**
+   * Hand a conversation to a team member, or clear the assignment by sending
+   * a null id. Staff only — this is who answers for the chat, not who read it.
+   */
+  @Roles(['ADMIN', 'MONITER'])
+  @Put('/responsible/:chatId')
+  @ApiParam({ name: 'chatId', description: 'Chat ID', type: String })
+  setChatResponsible(
+    @Param('chatId') chatId: string,
+    @Body() body: { responsibleId?: string | null },
+  ) {
+    return this.chatService.setChatResponsible(chatId, body?.responsibleId ?? null);
+  }
+
+  /**
+   * Opens the general conversation with a member — the one not tied to any
+   * listing. The caller is always one side of it, so there is no way to open
+   * someone else's private thread with this.
+   */
+  @Roles(['ADMIN', 'MONITER', 'USER', 'STAFF'])
+  @Get('/direct/:otherUserId')
+  @ApiParam({ name: 'otherUserId', description: 'The other participant', type: String })
+  getOrCreateDirectChat(
+    @Param('otherUserId') otherUserId: string,
+    @Req() req: any,
+  ) {
+    const currentUser = req?.user;
+    if (!currentUser?.id) {
+      throw new ForbiddenException('Unauthorized');
+    }
+    return this.chatService.getOrCreateDirectChat(currentUser.id, otherUserId);
+  }
+
   @Roles(['ADMIN', 'MONITER', 'USER', 'STAFF'])
   @Get('/create/:userId/:sellerId')
   @ApiParam({ name: 'userId', description: 'User ID', type: String })
@@ -266,6 +299,15 @@ export class ChatController {
   ) {
     this.ensureSelfOrStaff(userId, req);
     return this.chatService.unarchiveChat(chatId, userId);
+  }
+
+  // Begin the assisted deal process for this conversation.
+  @Roles(['ADMIN', 'MONITER', 'USER', 'STAFF'])
+  @Post('/start-deal/:chatId')
+  @ApiParam({ name: 'chatId', description: 'Chat ID', type: String })
+  async startDealProcess(@Param('chatId') chatId: string, @Req() req: any) {
+    // The service checks the requester is actually one of the two parties.
+    return this.chatService.startDealProcess(chatId, req?.user?.id);
   }
 
   // Block user

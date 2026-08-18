@@ -24,6 +24,8 @@ const AdminChats = () => {
   const [searchParams] = useSearchParams();
   const autoUserId = searchParams.get("userId");
   const autoChatId = searchParams.get("chatId");
+  // A team member's "Managed Chats" card links here with ?assigned=<id>.
+  const assignedTo = searchParams.get("assigned");
   const hideConversationList = Boolean(autoUserId || autoChatId);
   const { user: currentUser } = useAuth();
 
@@ -100,7 +102,7 @@ const AdminChats = () => {
           <div
             className={`
               ${hideConversationList ? 'hidden' : (selectedConversationId ? 'hidden md:flex' : 'flex')}
-              flex-col w-full md:w-[280px] lg:w-[300px] xl:w-[320px] flex-shrink-0
+              flex-col w-full md:w-[360px] lg:w-[400px] xl:w-[440px] flex-shrink-0
             `}
             style={{
               height: '100%',
@@ -111,10 +113,11 @@ const AdminChats = () => {
               overflow: 'hidden',
             }}
           >
-            <AdminConversationList 
+            <AdminConversationList
               selectedConversationId={selectedConversationId}
               onSelectConversation={setSelectedConversationId}
               autoSelectUserId={autoUserId}
+              assignedTo={assignedTo}
             />
           </div>
 

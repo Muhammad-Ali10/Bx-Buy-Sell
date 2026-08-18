@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useParams } from "react-router-dom";
+import { apiClient } from "@/lib/api";
+import { toast } from "sonner";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { ConversationList } from "@/components/chat/ConversationList";
@@ -9,11 +12,41 @@ import { ChatDetails } from "@/components/chat/ChatDetails";
 export default function AdminUserChats() {
   const { id } = useParams();
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  // The admin listings table links here with the listing it came from, so the
+  // right conversation opens instead of a list to hunt through.
+  const [searchParams] = useSearchParams();
+  const autoSelectListingId = searchParams.get("listingId");
   const [chatRoomData, setChatRoomData] = useState<{
     userId: string;
     sellerId: string;
     listingId?: string;
   } | null>(null);
+
+  // "Chat" in the users table lands here with ?direct=1, meaning: open my own
+  // conversation with this person. It must not be a listing thread — a support
+  // message about their account does not belong inside a thread about one of
+  // their businesses.
+  const wantsDirect = searchParams.get("direct") === "1";
+  const directOpened = useRef(false);
+  const [listRefreshKey, setListRefreshKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!wantsDirect || !id || directOpened.current) return;
+    directOpened.current = true;
+
+    (async () => {
+      const response = await apiClient.getOrCreateDirectChat(id);
+      const room = (response as any)?.data?.data ?? (response as any)?.data;
+      if (!response.success || !room?.id) {
+        toast.error((response as any).error || "Could not open the conversation");
+        return;
+      }
+      setSelectedConversation(room.id);
+      setChatRoomData({ userId: room.userId, sellerId: room.sellerId });
+      // A conversation opened just now is not in the list yet.
+      setListRefreshKey(room.id);
+    })();
+  }, [wantsDirect, id]);
 
   return (
     <div className="flex bg-background" style={{ height: "100vh", maxHeight: "100vh", overflow: "hidden" }}>
@@ -56,7 +89,8 @@ export default function AdminUserChats() {
                   setChatRoomData({ userId, sellerId });
                 }}
                 userId={id}
-                refreshTrigger={selectedConversation}
+                refreshTrigger={listRefreshKey ?? selectedConversation}
+                autoSelectListingId={autoSelectListingId}
               />
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground">

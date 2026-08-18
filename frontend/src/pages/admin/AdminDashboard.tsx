@@ -6,20 +6,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { StatCard } from "@/components/admin/StatCard";
-import { useAdminDashboardStats } from "@/hooks/useAdminDashboardStats";
+import { useAdminDashboardStats, formatChange } from "@/hooks/useAdminDashboardStats";
+import { formatNumber, formatMoney } from "@/lib/formatNumber";
 import { Sheet } from "@/components/ui/sheet";
 
-const VisitorsChart = lazy(() =>
-  import("@/components/admin/charts/VisitorsChart").then((m) => ({ default: m.VisitorsChart }))
-);
 const NewListingsChart = lazy(() =>
   import("@/components/admin/charts/NewListingsChart").then((m) => ({ default: m.NewListingsChart }))
 );
 const RevenueChart = lazy(() =>
   import("@/components/admin/charts/RevenueChart").then((m) => ({ default: m.RevenueChart }))
-);
-const ListingsOverviewChart = lazy(() =>
-  import("@/components/admin/charts/ListingsOverviewChart").then((m) => ({ default: m.ListingsOverviewChart }))
 );
 
 const ChartLoader = () => (
@@ -108,45 +103,46 @@ export default function AdminDashboard() {
               opacity: 1,
             }}
           >
-            <StatCard 
-              title="Total Users" 
-              value={statsLoading ? "..." : stats?.totalUsers || 0} 
-              change="15%" 
-              period="Monthly" 
+            <StatCard
+              title="Total Users"
+              value={statsLoading ? "..." : formatNumber(stats?.totals.users.value ?? 0)}
+              change={formatChange(stats?.totals.users.changePercent)}
+              period="Last 30 days"
             />
-            <StatCard 
-              title="Total Listings" 
-              value={statsLoading ? "..." : stats?.totalListings || 0} 
-              change="15%" 
-              period="Monthly" 
+            <StatCard
+              title="Total Listings"
+              value={statsLoading ? "..." : formatNumber(stats?.totals.listings.value ?? 0)}
+              change={formatChange(stats?.totals.listings.changePercent)}
+              period="Last 30 days"
             />
-            <StatCard 
-              title="Blocked Users" 
-              value={statsLoading ? "..." : stats?.blockedUsers || 0} 
-              change="15%" 
-              period="Monthly" 
+            {/* Was "Blocked Users", which counted anyone not online at that
+                moment — the platform has no way to block anyone. Revenue is a
+                real figure and the team was already asking for it. */}
+            <StatCard
+              title="Revenue"
+              value={statsLoading ? "..." : formatMoney(stats?.totals.revenue.value ?? 0)}
+              change={formatChange(stats?.totals.revenue.changePercent)}
+              period="Last 30 days"
             />
-            <StatCard 
-              title="Finalized Deals" 
-              value={statsLoading ? "..." : stats?.finalizedDeals || 0} 
-              change="15%" 
-              period="Monthly" 
+            <StatCard
+              title="Finalized Deals"
+              value={statsLoading ? "..." : formatNumber(stats?.totals.finalizedDeals.value ?? 0)}
+              change={formatChange(stats?.totals.finalizedDeals.changePercent)}
+              period="Last 30 days"
             />
           </div>
 
           <Suspense fallback={<ChartLoader />}>
             <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
-              <VisitorsChart />
-              <NewListingsChart />
+              <NewListingsChart data={stats?.newListingsSeries ?? []} />
             </div>
           </Suspense>
 
           <Suspense fallback={<ChartLoader />}>
-            <RevenueChart />
-          </Suspense>
-          
-          <Suspense fallback={<ChartLoader />}>
-            <ListingsOverviewChart />
+            <RevenueChart
+              data={stats?.revenueSeries ?? []}
+              changePercent={stats?.totals.revenue.changePercent ?? null}
+            />
           </Suspense>
         </div>
       </main>

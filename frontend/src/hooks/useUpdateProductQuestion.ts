@@ -6,11 +6,14 @@ export const useUpdateProductQuestion = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { 
-      id: string; 
-      question: string; 
+    mutationFn: async (data: {
+      id: string;
+      question: string;
       answer_type: string;
       options?: string[];
+      dependsOnQuestionId?: string | null;
+      dependsOnValue?: string | null;
+      required?: boolean | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -23,8 +26,11 @@ export const useUpdateProductQuestion = () => {
         question: data.question,
         answer_type: mappedAnswerType,
         answer_for: "PRODUCT",
+        dependsOnQuestionId: data.dependsOnQuestionId ?? null,
+        dependsOnValue: data.dependsOnValue ?? null,
+        required: data.required ?? null,
       };
-      
+
       // Add options if provided (even if empty array to clear options)
       if (data.options !== undefined) {
         payload.option = data.options;

@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState, useCallback } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListingsSidebar } from "@/components/listings/ListingsSidebar";
-import { DashboardHeader } from "@/components/listings/DashboardHeader";
+import Header from "@/components/Header";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { MessageSquare, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,9 +39,9 @@ const Chat = () => {
   const userId = user?.id;
 
   const handleSelectConversation = useCallback(
-    (id: string, userId: string, sellerId: string) => {
+    (id: string, userId: string, sellerId: string, listingId?: string | null) => {
       setSelectedConversation(id);
-      setChatRoomData({ userId, sellerId });
+      setChatRoomData({ userId, sellerId, listingId: listingId ?? undefined });
     },
     [],
   );
@@ -175,7 +175,7 @@ const Chat = () => {
   useEffect(() => {
     rooms.forEach((room: any) => {
       if (room?.id && room.userId && room.sellerId) {
-        seedChatRoomIfAbsent(room.userId, room.sellerId, room);
+        seedChatRoomIfAbsent(room.id, room);
         // Rooms now carry the listing (brand/ad/category), so warm the listing
         // cache too — the details panel then shows it on the first open.
         if (room.listing?.id) setCachedListing(room.listing.id, room.listing);
@@ -213,11 +213,17 @@ const Chat = () => {
   if (!roomsLoading && !hasConversations && !selectedConversation) {
     return (
       <div className="flex min-h-screen bg-background">
-        {/* Sidebar handled in DashboardHeader for Chat tab */}
+        {/* Sidebar is a drawer, opened from the trigger beside the bar. */}
 
         <div className="flex-1 flex flex-col w-full overflow-hidden">
           {/* Header - Shared across all tabs */}
-          <DashboardHeader sidebarOpen={sidebarOpen} onSidebarOpenChange={setSidebarOpen} />
+          <Header />
+        {/* Chat has no fixed sidebar — its drawer opened from the old bar, so the
+            trigger is kept here rather than lost with it. */}
+        <div className="fixed left-3 top-4 z-[60] sm:left-5 sm:top-6">
+          <ListingsSidebar isMobile open={sidebarOpen} onOpenChange={setSidebarOpen} />
+        </div>
+        <div className="h-20 sm:h-24 flex-shrink-0" />
 
           {/* Empty State Content */}
           <div className="flex-1 flex items-center justify-center p-4">
@@ -248,7 +254,13 @@ const Chat = () => {
 
         <div className="flex-1 flex flex-col w-full overflow-hidden" style={{ height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' }}>
         {/* Header - Shared across all tabs */}
-        <DashboardHeader sidebarOpen={sidebarOpen} onSidebarOpenChange={setSidebarOpen} />
+        <Header />
+        {/* Chat has no fixed sidebar — its drawer opened from the old bar, so the
+            trigger is kept here rather than lost with it. */}
+        <div className="fixed left-3 top-4 z-[60] sm:left-5 sm:top-6">
+          <ListingsSidebar isMobile open={sidebarOpen} onOpenChange={setSidebarOpen} />
+        </div>
+        <div className="h-20 sm:h-24 flex-shrink-0" />
 
         {/* Main Content Area — fills the space left after the (responsive-height)
             header via flexbox instead of a hardcoded calc, so it lines up on
@@ -310,6 +322,7 @@ const Chat = () => {
                     currentUserId={user.id}
                     userId={chatRoomData.userId}
                     sellerId={chatRoomData.sellerId}
+                    listingId={chatRoomData.listingId}
                     refreshConversations={checkConversations}
                   />
                 </Suspense>
@@ -336,11 +349,11 @@ const Chat = () => {
             </div>
           )}
 
-          {/* Third Div - Chat Details — always part of the layout on xl+ screens
-              so the three-column shell shows with the list. It renders a
-              placeholder until a conversation is picked, then the real details. */}
+          {/* Third Div - Chat Details. Only once a conversation is open: an
+              empty 383px column beside an empty message area gave the screen
+              two placeholders side by side and squeezed the one that matters. */}
           <div
-            className="hidden xl:flex flex-col flex-shrink-0 w-full xl:w-[320px] 2xl:w-[383px]"
+            className={`${selectedConversation ? 'hidden xl:flex' : 'hidden'} flex-col flex-shrink-0 w-full xl:w-[320px] 2xl:w-[383px]`}
             style={{
               height: '100%',
               maxHeight: '100%',

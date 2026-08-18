@@ -43,3 +43,11 @@ logs/
 coverage/
 .nyc_output/
 
+
+# Local dev binaries (Stripe CLI)
+tools/
+
+# Account backups written by scripts/resolve-duplicate-emails.mjs.
+# These hold password hashes and personal data; they belong on the machine
+# that made them, never in the repository.
+Backend/scripts/duplicate-accounts-backup-*.json

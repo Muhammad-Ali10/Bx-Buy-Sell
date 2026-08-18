@@ -60,16 +60,21 @@ const Register = () => {
 
     try {
       const result = await signup({
-        first_name: firstName.toLowerCase().trim(),
-        last_name: lastName.toLowerCase().trim(),
+        // Only the address is folded. A name is not lowercase — people were
+        // being registered as "john smith" — and a password is not either:
+        // folding it made every password case-insensitive and locked anyone
+        // with capitals out of the pages that send it as typed.
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
         email: email.toLowerCase().trim(),
-        password: password.toLowerCase().trim(),
-        confirm_password: confirmPassword.toLowerCase().trim(),
+        password,
+        confirm_password: confirmPassword,
       });
 
       if (result.success) {
         toast.success("Account created successfully!");
-        navigate("/");
+        // One step left: collect the phone number for our own records.
+        navigate("/phone-verification");
       } else {
         toast.error(result.error || "Failed to create account");
       }

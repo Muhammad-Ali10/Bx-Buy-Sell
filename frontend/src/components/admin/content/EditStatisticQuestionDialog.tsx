@@ -7,12 +7,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useUpdateStatisticQuestion } from "@/hooks/useUpdateStatisticQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 
 interface StatisticQuestion {
   id: string;
   question: string;
   answer_type: string;
   option?: string[];
+  required?: boolean | null;
 }
 
 interface EditStatisticQuestionDialogProps {
@@ -35,6 +37,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateStatisticQuestion();
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
       setQuestionText(question.question);
       setQuestionType(question.answer_type);
       setOptions(question.option && Array.isArray(question.option) ? question.option.join(", ") : "");
+      setRequired(question.required !== false);
     }
   }, [question]);
 
@@ -61,6 +65,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
         question: questionText.trim(),
         answer_type: questionType,
         options: optionsArray,
+        required,
       },
       {
         onSuccess: () => {
@@ -131,6 +136,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

@@ -8,7 +8,70 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Settings, MessageSquare, Trash2, Star, CheckCircle, Edit2, ChevronRight, Loader2, Ban } from "lucide-react";
+import { ArrowLeft, Settings, MessageSquare, Trash2, CheckCircle, Edit2, ChevronRight, Loader2, Ban, ShieldCheck, KeyRound } from "lucide-react";
+import { formatPresence } from "@/lib/lastSeen";
+import { formatMoney } from "@/lib/formatNumber";
+import { TeamMemberStatistics } from "@/components/admin/TeamMemberStatistics";
+import { UserSubscriptionsPanel } from "@/components/admin/UserSubscriptionsPanel";
+import { ChangePasswordDialog } from "@/components/admin/ChangePasswordDialog";
+import { UserInvoiceList } from "@/components/admin/UserInvoiceList";
+
+const ACCOUNT_TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "subscriptions", label: "Subscriptions" },
+  { key: "billing", label: "Billing" },
+] as const;
+
+type AccountTab = (typeof ACCOUNT_TABS)[number]["key"];
+
+/**
+ * A verification status. An admin can set it by hand when someone has proved
+ * themselves another way; for everyone else it is a read-out, which is what
+ * the client asked for — moderators see the status but cannot change it.
+ */
+const VerificationMark = ({
+  verified,
+  canEdit,
+  busy,
+  label,
+  onToggle,
+}: {
+  verified: boolean;
+  canEdit: boolean;
+  busy: boolean;
+  label: string;
+  onToggle: (next: boolean) => void;
+}) => {
+  const mark = verified ? (
+    <img src={verifiedTick} alt="Verified" style={{ width: "18px", height: "18px" }} />
+  ) : (
+    <span className="inline-flex h-[18px] w-[18px] rounded-full border border-[#D9D9D9] bg-[#F5F5F5]" />
+  );
+
+  if (!canEdit) {
+    return <span title={verified ? "Verified" : "Not verified"}>{mark}</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(!verified)}
+      disabled={busy}
+      title={verified ? `Mark ${label} as unverified` : `Mark ${label} as verified`}
+      className="rounded-full transition-opacity hover:opacity-70 disabled:opacity-40"
+    >
+      {busy ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : mark}
+    </button>
+  );
+};
+
+/** The database calls a moderator a "MONITER"; the interface should not. */
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Admin",
+  MONITER: "Moderator",
+  SELLER: "Seller",
+  USER: "User",
+};
 import proIcon from "@/assets/fi_5076417.svg";
 import simIcon from "@/assets/sim icon.svg";
 import verifiedTick from "@/assets/Tick.svg";
@@ -28,6 +91,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -69,6 +133,13 @@ export default function AdminUserDetails() {
   const [adminNote, setAdminNote] = useState("");
   const [isPro, setIsPro] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<any>(null);
+  // Every hook must run on every render, so these live above the loading and
+  // not-found returns below. Declared after them, they only ran once data had
+  // arrived, and React refused to render the page at all.
+  const [isChangingRole, setIsChangingRole] = useState(false);
+  const [activeTab, setActiveTab] = useState<AccountTab>("overview");
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
+  const [verificationSaving, setVerificationSaving] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -127,7 +198,10 @@ export default function AdminUserDetails() {
   const currentRole = currentUser?.role?.toUpperCase();
   const isModerator = currentRole === "MONITER" || currentRole === "MODERATOR";
   const targetRole = (profile as any)?.role?.toUpperCase() || "";
-  const canModerateTarget = !isModerator || targetRole === "USER";
+  // Sellers are ordinary members too; only the team is out of a moderator's
+  // reach. This mirrors what the server allows.
+  const canModerateTarget =
+    !isModerator || targetRole === "USER" || targetRole === "SELLER";
 
   const formatRange = (range?: { min?: string | null; max?: string | null }, suffix = "") => {
     if (!range) return "-";
@@ -245,9 +319,64 @@ export default function AdminUserDetails() {
       setIsSavingInfo(false);
     }
   };
+
+  /**
+   * Role changes take effect on the user's next request — the permission check
+   * reads the database rather than their token — so there is no need for them
+   * to sign out and back in.
+   */
+  const handleChangeUserType = async (nextRole: "USER" | "MONITER" | "ADMIN") => {
+    if (!id || nextRole === targetRole) return;
+    const label = ROLE_LABELS[nextRole] ?? nextRole;
+    if (!window.confirm(`Change this account's user type to ${label}?`)) return;
+
+    setIsChangingRole(true);
+    try {
+      const response = await apiClient.updateUserByAdmin(id, { role: nextRole });
+      if (!response.success) {
+        throw new Error(response.error || "Failed to change the user type");
+      }
+      toast.success(`User type changed to ${label}`);
+      await refetch();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to change the user type");
+    } finally {
+      setIsChangingRole(false);
+    }
+  };
+
+  /**
+   * Email and phone verification can be set by hand when someone has proved
+   * themselves another way. Admins only — a moderator sees the status but
+   * cannot change it, which is what the client asked for.
+   */
+  const handleToggleVerification = async (
+    field: "is_email_verified" | "is_phone_verified",
+    next: boolean,
+  ) => {
+    if (!id || currentRole !== "ADMIN") return;
+    setVerificationSaving(field);
+    try {
+      const response = await apiClient.updateUserByAdmin(id, { [field]: next } as any);
+      if (!response.success) {
+        throw new Error(response.error || "Failed to update the verification status");
+      }
+      toast.success(
+        `${field === "is_email_verified" ? "Email" : "Phone"} marked as ${next ? "verified" : "unverified"}`,
+      );
+      await refetch();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update the verification status");
+    } finally {
+      setVerificationSaving(null);
+    }
+  };
+
   const handleMessageUser = () => {
     if (!id) return;
-    navigate(`/admin/users/${id}/chats`);
+    // Straight into the conversation with this person, not the chat list — and
+    // deliberately the general thread, not one attached to a listing.
+    navigate(`/admin/users/${id}/chats?direct=1`);
   };
 
   const handleBlockUser = async () => {
@@ -256,17 +385,24 @@ export default function AdminUserDetails() {
       toast.error("You can only block normal users.");
       return;
     }
-    const confirmed = window.confirm("Block this user?");
+    const alreadyBlocked = (data as any)?.blocked === true;
+    const confirmed = window.confirm(
+      alreadyBlocked ? "Unblock this user?" : "Block this user?",
+    );
     if (!confirmed) return;
     try {
-      const response = await apiClient.updateUser(id, { verified: false });
+      // The real moderation action: refuses sign-in and ends their sessions.
+      // This used to flip `verified`, which stopped nothing.
+      const response = alreadyBlocked
+        ? await apiClient.unblockAccount(id)
+        : await apiClient.blockAccount(id);
       if (!response.success) {
-        throw new Error(response.error || "Failed to block user");
+        throw new Error(response.error || "Failed to update this user");
       }
-      toast.success("User blocked");
+      toast.success(alreadyBlocked ? "User unblocked" : "User blocked");
       await refetch();
     } catch (error: any) {
-      toast.error(error.message || "Failed to block user");
+      toast.error(error.message || "Failed to update this user");
     }
   };
 
@@ -290,13 +426,29 @@ export default function AdminUserDetails() {
     }
   };
   const isOnline = Boolean((profile as any)?.is_online);
-  const rating = (profile as any)?.rating ?? 4.8;
+  const lastSeen =
+    (profile as any)?.last_seen ?? (profile as any)?.last_offline ?? null;
+  const isBlocked = (profile as any)?.blocked === true;
+  const verifiedFunds =
+    typeof (profile as any)?.verified_funds === "number"
+      ? (profile as any).verified_funds
+      : null;
+  // "Moniter" is what the database calls it; nobody should have to read that.
+  const userType = ROLE_LABELS[targetRole] ?? null;
+  const isTeamMember = targetRole === "ADMIN" || targetRole === "MONITER";
+  // Only admins may change a user type, and the control is hidden rather than
+  // shown-and-refused so a moderator is not invited to try.
+  const canChangeUserType = currentRole === "ADMIN" && targetRole !== "";
+  // Admins and moderators may reset an ordinary member's password; a team
+  // member's password is an admin's business only. The server enforces the
+  // same rule, so this only decides whether the entry is worth showing.
+  const canChangePassword = currentRole === "ADMIN" || !isTeamMember;
 
   return (
     <div className="flex min-h-screen w-full bg-background">
       <AdminSidebar />
       
-      <main className="flex-1">
+      <main className="flex-1 min-w-0">
         <AdminHeader title="User Details" />
 
         <div className="p-8 space-y-6">
@@ -313,7 +465,29 @@ export default function AdminUserDetails() {
             </span>
           </Button>
 
-          {/* User Profile Header */}
+          {/* The account splits into three views rather than one long scroll:
+              who they are, what they pay for, and how they pay. */}
+          <div className="flex flex-col gap-1">
+            <h2 className="text-xl font-semibold">Your Account Details</h2>
+            <div className="flex items-center gap-6 border-b border-border">
+              {ACCOUNT_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`-mb-px border-b-2 px-1 pb-2 text-sm transition-colors ${
+                    activeTab === tab.key
+                      ? "border-accent font-medium text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {activeTab === "overview" && (
           <Card
             className="p-6 bg-card border-border"
             style={{
@@ -323,7 +497,10 @@ export default function AdminUserDetails() {
               height: 'auto',
             }}
           >
-            <div className="flex items-start justify-between gap-6 w-full">
+            {/* Wraps on narrow screens: the avatar, the two verification
+                columns, the notes box and the menu add up to roughly 1100px,
+                which pushed a phone's whole page sideways. */}
+            <div className="flex flex-wrap items-start justify-between gap-6 w-full">
               <div className="flex items-start gap-[20px]">
                 <div className="relative flex-shrink-0">
                   <Avatar
@@ -387,20 +564,37 @@ export default function AdminUserDetails() {
                     </h2>
                     <img src={verifiedTick} alt="Verified" style={{ width: '18px', height: '18px' }} />
                   </div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <div className="flex items-center gap-0.5 text-yellow-500">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <Star key={i} className="h-3.5 w-3.5 fill-yellow-500 stroke-yellow-500" />
-                      ))}
-                    </div>
-                    <span className="text-xs text-muted-foreground">({rating})</span>
+                  {/* The star rating was removed: the platform has no rating
+                      system behind it, so five filled stars said nothing. */}
+                  <div className="flex items-center gap-2 mt-3">
+                    {userType && (
+                      <Badge
+                        variant="accent"
+                        className="rounded-full px-3 py-0.5 text-xs bg-muted text-foreground border-border"
+                      >
+                        {userType}
+                      </Badge>
+                    )}
+                    <Badge
+                      variant="accent"
+                      className={`rounded-full px-3 py-0.5 text-xs whitespace-nowrap ${
+                        isOnline
+                          ? "bg-accent/20 text-accent border-accent/30"
+                          : "bg-muted text-muted-foreground border-border"
+                      }`}
+                    >
+                      {/* "Offline" alone is not useful; when they were last here is. */}
+                      {formatPresence(isOnline, lastSeen)}
+                    </Badge>
+                    {isBlocked && (
+                      <Badge
+                        variant="accent"
+                        className="rounded-full px-3 py-0.5 text-xs bg-red-500 text-white border-0"
+                      >
+                        Blocked
+                      </Badge>
+                    )}
                   </div>
-                  <Badge
-                    variant="accent"
-                    className={`mt-3 rounded-full px-3 py-0.5 text-xs ${isOnline ? "bg-accent/20 text-accent border-accent/30" : "bg-yellow-500/20 text-yellow-700 border-yellow-500/30"}`}
-                  >
-                    {isOnline ? "Online" : "Offline"}
-                  </Badge>
                 </div>
 
               </div>
@@ -408,18 +602,24 @@ export default function AdminUserDetails() {
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-4 min-w-[150px]">
                   <span style={{ fontFamily: 'ABeeZee', fontSize: '14px', lineHeight: '100%', color: '#000000' }}>Email Verified</span>
-                  {(profile as any)?.email_verified ? (
-                    <img src={verifiedTick} alt="Verified" style={{ width: '18px', height: '18px' }} />
-                  ) : (
-                    <span className="inline-flex h-[18px] w-[18px] rounded-full border border-[#D9D9D9] bg-[#F5F5F5]" />
-                  )}
+                  <VerificationMark
+                    verified={Boolean((profile as any)?.email_verified)}
+                    canEdit={currentRole === "ADMIN"}
+                    busy={verificationSaving === "is_email_verified"}
+                    label="email verification"
+                    onToggle={(next) => handleToggleVerification("is_email_verified", next)}
+                  />
                 </div>
                 <div className="flex items-center justify-between gap-4 min-w-[150px]">
                   <span style={{ fontFamily: 'ABeeZee', fontSize: '14px', lineHeight: '100%', color: '#000000' }}>Funds Verified</span>
-                  {(profile as any)?.funds_verified ? (
-                    <img src={verifiedTick} alt="Verified" style={{ width: '18px', height: '18px' }} />
+                  {/* The figure a moderator could actually verify, not a tick.
+                      "How much" is the useful part when judging a buyer. */}
+                  {verifiedFunds !== null ? (
+                    <span className="text-sm font-semibold text-foreground whitespace-nowrap">
+                      {formatMoney(verifiedFunds)}
+                    </span>
                   ) : (
-                    <span className="inline-flex h-[18px] w-[18px] rounded-full border border-[#D9D9D9] bg-[#F5F5F5]" />
+                    <span className="text-sm text-muted-foreground">Not verified</span>
                   )}
                 </div>
               </div>
@@ -427,11 +627,13 @@ export default function AdminUserDetails() {
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-4 min-w-[150px]">
                   <span style={{ fontFamily: 'ABeeZee', fontSize: '14px', lineHeight: '100%', color: '#000000' }}>Phone Verified</span>
-                  {(profile as any)?.phone_verified ? (
-                    <img src={verifiedTick} alt="Verified" style={{ width: '18px', height: '18px' }} />
-                  ) : (
-                    <span className="inline-flex h-[18px] w-[18px] rounded-full border border-[#D9D9D9] bg-[#F5F5F5]" />
-                  )}
+                  <VerificationMark
+                    verified={Boolean((profile as any)?.phone_verified)}
+                    canEdit={currentRole === "ADMIN"}
+                    busy={verificationSaving === "is_phone_verified"}
+                    label="phone verification"
+                    onToggle={(next) => handleToggleVerification("is_phone_verified", next)}
+                  />
                 </div>
                 <div className="flex items-center justify-between gap-4 min-w-[150px]">
                   <span style={{ fontFamily: 'ABeeZee', fontSize: '14px', lineHeight: '100%', color: '#000000' }}>ID Verified</span>
@@ -471,7 +673,10 @@ export default function AdminUserDetails() {
                 />
               </div>
 
-              {!isModerator && (
+              {/* Moderators see this menu too — they police ordinary members,
+                  including resetting a forgotten password. Which entries they
+                  get is decided per action below, and enforced server-side. */}
+              {(
                 <div className="flex items-center gap-3">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -483,12 +688,21 @@ export default function AdminUserDetails() {
                     <DropdownMenuContent align="end" className="rounded-2xl border-border p-2">
                       <DropdownMenuItem className="rounded-xl" onClick={handleMessageUser}>
                         <MessageSquare className="h-4 w-4 mr-2" />
-                        Message
+                        Chat
                       </DropdownMenuItem>
+                      {canChangePassword && (
+                        <DropdownMenuItem
+                          className="rounded-xl"
+                          onClick={() => setIsPasswordDialogOpen(true)}
+                        >
+                          <KeyRound className="h-4 w-4 mr-2" />
+                          Change password
+                        </DropdownMenuItem>
+                      )}
                       {canModerateTarget && (
                         <DropdownMenuItem className="rounded-xl" onClick={handleBlockUser}>
                           <Ban className="h-4 w-4 mr-2" />
-                          Block
+                          {isBlocked ? "Unblock" : "Block"}
                         </DropdownMenuItem>
                       )}
                       {canModerateTarget && (
@@ -496,6 +710,29 @@ export default function AdminUserDetails() {
                           <Trash2 className="h-4 w-4 mr-2" />
                           Delete
                         </DropdownMenuItem>
+                      )}
+                      {/* Promoting a member to the team, or returning a team
+                          member to an ordinary account, is an admin-only act —
+                          the backend refuses it for anyone else. */}
+                      {canChangeUserType && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <div className="px-2 py-1.5 text-xs text-muted-foreground">User type</div>
+                          {(["USER", "MONITER", "ADMIN"] as const).map((role) => (
+                            <DropdownMenuItem
+                              key={role}
+                              className="rounded-xl"
+                              disabled={targetRole === role || isChangingRole}
+                              onClick={() => handleChangeUserType(role)}
+                            >
+                              <ShieldCheck className="h-4 w-4 mr-2" />
+                              {ROLE_LABELS[role]}
+                              {targetRole === role && (
+                                <span className="ml-auto text-xs text-muted-foreground">current</span>
+                              )}
+                            </DropdownMenuItem>
+                          ))}
+                        </>
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -677,8 +914,14 @@ export default function AdminUserDetails() {
               </div>
             </div>
           </Card>
+          )}
 
-          {/* Payment Information */}
+          {activeTab === "subscriptions" && (
+            <UserSubscriptionsPanel subscription={(profile as any)?.subscription ?? null} />
+          )}
+
+          {/* How they pay lives under Billing, not on the overview. */}
+          {activeTab === "billing" && (
           <Card
             className="p-5 bg-card border-border"
             style={{
@@ -800,16 +1043,32 @@ export default function AdminUserDetails() {
                 </div>
               </div>
             </div>
+
+            {/* What they were actually charged, so a billing question can be
+                answered here instead of in the Stripe dashboard. */}
+            <div className="mt-8 border-t border-border pt-6">
+              {id && <UserInvoiceList userId={id} />}
+            </div>
           </Card>
+          )}
+
+          {activeTab === "overview" && (
+            <>
+          {/* Team members are managed on this page too, so their workload
+              appears here rather than on a screen of its own. */}
+          {isTeamMember && id && (
+            <TeamMemberStatistics memberId={id} memberName={profile.full_name} />
+          )}
 
           {/* User Stats */}
           <div>
             <h3 className="text-lg font-semibold mb-4">User Stats</h3>
-            <div className="grid grid-cols-3 gap-[24px]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-[24px]">
               <Card 
                 className="p-5 bg-card border-border cursor-pointer"
                 style={{
-                  width: '316px',
+                  width: '100%',
+                  maxWidth: '316px',
                   height: '148px',
                   borderRadius: '24px',
                   background: '#FFFFFF',
@@ -858,7 +1117,8 @@ export default function AdminUserDetails() {
               <Card 
                 className="p-5 bg-card border-border cursor-pointer"
                 style={{
-                  width: '316px',
+                  width: '100%',
+                  maxWidth: '316px',
                   height: '148px',
                   borderRadius: '24px',
                   background: '#FFFFFF',
@@ -907,7 +1167,8 @@ export default function AdminUserDetails() {
               <Card 
                 className="p-5 bg-card border-border cursor-pointer"
                 style={{
-                  width: '316px',
+                  width: '100%',
+                  maxWidth: '316px',
                   height: '148px',
                   borderRadius: '24px',
                   background: '#FFFFFF',
@@ -956,187 +1217,42 @@ export default function AdminUserDetails() {
             </div>
           </div>
 
-          {/* Buying Profiles */}
+          {/* The full buying profile was taken out at the client's request.
+              The card stays as a placeholder so the space is accounted for
+              rather than silently disappearing from the layout. */}
           <Card
             className="p-6 bg-card border-border"
             style={{
               borderRadius: '20px',
               background: '#FFFFFF',
               boxShadow: '0px 3px 33px 0px #00000017',
-              height: 'auto',
             }}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h3
-                className="font-lufga"
-                style={{
-                  fontWeight: 500,
-                  fontSize: '20px',
-                  lineHeight: '140%',
-                  letterSpacing: '0%',
-                  color: '#000000',
-                }}
-              >
-                Buying Profiles & Alerts of this User
-              </h3>
-              <Button variant="ghost" size="icon" onClick={openPreferencesEditor}>
-                <Edit2 className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="grid grid-cols-3 gap-[50px]">
-              <div className="space-y-[50px]">
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>What Is Your Background ?</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{backgroundValue}</p>
-                </div>
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>Select Business Categories</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{businessCategoriesValue}</p>
-                </div>
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>What Is Your Niches ?</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{nichesValue}</p>
-                </div>
-              </div>
-              <div className="space-y-[50px]">
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>Finance Data</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{listingPriceValue}</p>
-                </div>
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>Seller Location</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{sellerLocationValue}</p>
-                </div>
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>Target Location</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{targetLocationValue}</p>
-                </div>
-              </div>
-              <div className="space-y-[50px]">
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>Business Age</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{businessAgeValue}</p>
-                </div>
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>Yearly Profit</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{yearlyProfitValue}</p>
-                </div>
-                <div>
-                  <p style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', marginBottom: '30px' }}>X Profit Multiple</p>
-                  <p style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '14px', lineHeight: '100%', letterSpacing: '0px', color: '#000000' }}>{profitMultipleValue}</p>
-                </div>
-              </div>
-            </div>
+            <h3
+              className="font-lufga mb-2"
+              style={{ fontWeight: 500, fontSize: '20px', lineHeight: '140%', color: '#000000' }}
+            >
+              Buying Profile &amp; Alerts
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              We will notify this user when new listings match their search criteria.
+            </p>
+            <span className="inline-flex rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-black">
+              Coming Soon
+            </span>
           </Card>
+            </>
+          )}
 
-          <Dialog open={isPrefsOpen} onOpenChange={setIsPrefsOpen}>
-            <DialogContent className="max-w-3xl [&>button]:hidden" showClose={false}>
-              <DialogHeader>
-                <DialogTitle>Editing Buying Profile</DialogTitle>
-              </DialogHeader>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">Background</label>
-                  <Input
-                    value={prefsForm.background}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, background: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Business Categories (comma separated)</label>
-                  <Input
-                    value={prefsForm.businessCategories}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, businessCategories: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Niches (comma separated)</label>
-                  <Input
-                    value={prefsForm.niches}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, niches: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Listing Price Min</label>
-                  <Input
-                    value={prefsForm.listingPriceMin}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, listingPriceMin: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Listing Price Max</label>
-                  <Input
-                    value={prefsForm.listingPriceMax}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, listingPriceMax: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Seller Location</label>
-                  <Input
-                    value={prefsForm.sellerLocation}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, sellerLocation: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Target Location</label>
-                  <Input
-                    value={prefsForm.targetLocation}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, targetLocation: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Business Age Min</label>
-                  <Input
-                    value={prefsForm.businessAgeMin}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, businessAgeMin: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Business Age Max</label>
-                  <Input
-                    value={prefsForm.businessAgeMax}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, businessAgeMax: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Yearly Profit Min</label>
-                  <Input
-                    value={prefsForm.yearlyProfitMin}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, yearlyProfitMin: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Yearly Profit Max</label>
-                  <Input
-                    value={prefsForm.yearlyProfitMax}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, yearlyProfitMax: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Profit Multiple Min</label>
-                  <Input
-                    value={prefsForm.profitMultipleMin}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, profitMultipleMin: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Profit Multiple Max</label>
-                  <Input
-                    value={prefsForm.profitMultipleMax}
-                    onChange={(e) => setPrefsForm({ ...prefsForm, profitMultipleMax: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <Button variant="outline" onClick={() => setIsPrefsOpen(false)}>
-                  Cancel
-                </Button>
-                <Button className="bg-accent text-black hover:bg-accent/90" onClick={savePreferences}>
-                  Save
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+          {id && (
+            <ChangePasswordDialog
+              userId={id}
+              userName={profile.full_name}
+              open={isPasswordDialogOpen}
+              onOpenChange={setIsPasswordDialogOpen}
+            />
+          )}
+
         </div>
       </main>
     </div>

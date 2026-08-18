@@ -53,3 +53,29 @@ export const formatAdminMessageTime = (dateString: string | Date): string => {
   return `${day} ${month} ${year}, ${hours}:${minutesStr} ${ampm}`;
 };
 
+
+/**
+ * "Last online 2 hours ago" for the chat details panel.
+ *
+ * Deliberately vague past a week: the exact minute someone was last around is
+ * neither useful nor especially comfortable to publish, and the panel only
+ * needs to say whether they are likely to reply soon.
+ */
+export const formatLastSeen = (lastOffline?: string | Date | null): string => {
+  if (!lastOffline) return 'Offline';
+
+  const then = new Date(lastOffline).getTime();
+  if (!Number.isFinite(then)) return 'Offline';
+
+  const minutes = Math.floor((Date.now() - then) / 60_000);
+  if (minutes < 1) return 'Last online just now';
+  if (minutes < 60) return `Last online ${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Last online ${hours} hour${hours === 1 ? '' : 's'} ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `Last online ${days} day${days === 1 ? '' : 's'} ago`;
+
+  return 'Last online over a week ago';
+};

@@ -24,29 +24,31 @@ export const useAdminListings = () => {
       // Fetch user profiles for each listing (owners and responsible users)
       // Backend returns 'userId', not 'user_id'
       const ownerUserIds = [...new Set(listings.map((l: any) => l.userId || l.user_id).filter(Boolean))];
-      const responsibleUserIds = [...new Set(listings.map((l: any) => l.responsible_user_id || l.responsibleUserId).filter(Boolean))];
+      const responsibleUserIds = [...new Set(listings.map((l: any) => l.responsibleId || l.responsible_user_id || l.responsibleUserId).filter(Boolean))];
       const allUserIds = [...new Set([...ownerUserIds, ...responsibleUserIds])];
       const profilesMap = new Map();
-      
-      // Fetch user details for each unique user ID
-      for (const userId of allUserIds) {
-        try {
-          const userResponse = await apiClient.getUserById(userId);
-          if (userResponse.success && userResponse.data) {
-            const user = userResponse.data;
-            profilesMap.set(userId, {
-              id: user.id,
-              full_name: user.first_name && user.last_name 
-                ? `${user.first_name} ${user.last_name}`.trim()
-                : user.first_name || user.last_name || null,
-              avatar_url: user.profile_pic || null,
-              user_type: user.role?.toLowerCase() || null,
-              verified: user.verified ?? null,
-            });
-          }
-        } catch (error) {
-          console.error(`Error fetching user ${userId}:`, error);
+
+      // One request for everybody, rather than one per person queued behind the
+      // last. Fetching them in turn made this screen take about nine seconds to
+      // appear, and it got slower with every new seller.
+      try {
+        const usersResponse = await apiClient.getAllUsers();
+        const allUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
+        const wanted = new Set(allUserIds);
+        for (const user of allUsers as any[]) {
+          if (!wanted.has(user.id)) continue;
+          profilesMap.set(user.id, {
+            id: user.id,
+            full_name: user.first_name && user.last_name
+              ? `${user.first_name} ${user.last_name}`.trim()
+              : user.first_name || user.last_name || null,
+            avatar_url: user.profile_pic || null,
+            user_type: user.role?.toLowerCase() || null,
+            verified: user.verified ?? null,
+          });
         }
+      } catch (error) {
+        console.error('Error fetching user profiles for listings:', error);
       }
       
       // Combine listings with profile data and normalize structure
@@ -148,9 +150,15 @@ export const useAdminListings = () => {
         const categoryId = categoryInfo?.id || listing.category_id || null;
         const categoryName = categoryInfo?.name || null;
         
-        // Get responsible user if assigned
-        let responsibleUserId = listing.responsible_user_id || listing.responsibleUserId || null;
-        let responsibleUser = responsibleUserId ? profilesMap.get(responsibleUserId) : null;
+        // Get responsible user if assigned. The column is `responsibleId`;
+        // reading only the snake_case spellings meant a real assignment stored
+        // in the database never reached the table, so the Assigned filter had
+        // nothing to match and the column always looked empty.
+        let responsibleUserId =
+          listing.responsibleId || listing.responsible_user_id || listing.responsibleUserId || null;
+        let responsibleUser = responsibleUserId
+          ? (listing.responsible ?? profilesMap.get(responsibleUserId))
+          : null;
 
         // Fallback to local assignments if backend doesn't provide it
         const localAssignment = localAssignments[listing.id];
@@ -186,7 +194,10 @@ export const useAdminListings = () => {
           portfolioLink: listing.portfolioLink || null, // Include portfolio link from backend
           domainLink,
           managed_by_ex: managedByEx, // Normalized boolean value
-          responsible_user_id: responsibleUserId, // Include responsible user ID
+          // Both spellings: the table and its filters read `responsibleId`,
+          // while older call sites still expect the snake_case one.
+          responsibleId: responsibleUserId,
+          responsible_user_id: responsibleUserId,
           responsible_user: responsibleUser, // Include responsible user profile
           // Keep original brand data for reference
           brand: listing.brand || [],

@@ -53,24 +53,58 @@ export const useAuth = () => {
     };
   }, []);
 
+  /**
+   * Confirm the stored token is still good.
+   *
+   * Reading localStorage only tells us a session *was* started, not that it is
+   * still valid — a token that has expired or been revoked leaves the name sitting
+   * in the header long after the account is effectively logged out. Asking the
+   * server settles it. A 401 here also trips the api client's own `auth:logout`,
+   * so the two paths agree.
+   */
+  const verifyStoredSession = async (userId: string) => {
+    try {
+      // The result is deliberately ignored. A 401 is handled inside the api
+      // client, which clears the token and fires `auth:logout` — the listener
+      // above then empties the header. Deciding here instead would risk logging
+      // someone out over a 500 or a dropped connection.
+      await apiClient.getUserById(userId);
+    } catch {
+      // Same reasoning: a failed request is not proof the session is dead.
+    }
+  };
+
+  const clearSession = () => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_data');
+    setUser(null);
+  };
+
   const checkAuth = async (isInitial: boolean = false) => {
     try {
       const token = localStorage.getItem('auth_token');
       const userData = localStorage.getItem('user_data');
-      
+
       if (token && userData) {
         try {
           const parsedUser = JSON.parse(userData);
-          setUser(parsedUser);
+          // Only swap the object when the stored data actually changed. This
+          // runs every few seconds, and a fresh object each time would restart
+          // every effect that depends on `user` across the whole app.
+          setUser((current) =>
+            JSON.stringify(current) === JSON.stringify(parsedUser) ? current : parsedUser,
+          );
           // Ensure API client has the token
           apiClient.setToken(token);
           apiClient.setBearerToken(token);
+
+          if (isInitial) {
+            void verifyStoredSession(parsedUser.id);
+          }
         } catch (parseError) {
           console.error('Error parsing user data:', parseError);
           // Clear invalid data
-          localStorage.removeItem('auth_token');
-          localStorage.removeItem('user_data');
-          setUser(null);
+          clearSession();
         }
       } else {
         // No token or user data - ensure user is null

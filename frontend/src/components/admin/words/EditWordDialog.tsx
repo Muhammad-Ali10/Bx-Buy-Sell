@@ -33,14 +33,14 @@ export const EditWordDialog = ({
   onWordUpdated,
 }: EditWordDialogProps) => {
   const [editedWord, setEditedWord] = useState("");
-  const [category, setCategory] = useState("other");
+  const [category, setCategory] = useState("OTHER");
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     if (word) {
       setEditedWord(word.word);
-      setCategory(word.category || 'other');
+      setCategory(word.category || 'OTHER');
     }
   }, [word]);
 
@@ -109,10 +109,13 @@ export const EditWordDialog = ({
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="contact_info">Contact Info</SelectItem>
-                <SelectItem value="payment_methods">Payment Methods</SelectItem>
-                <SelectItem value="external_platforms">External Platforms</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                {/* The values the server stores. These were lowercase names
+                    the API never used, so the chosen category was dropped on
+                    the way in and the old one came back on reopen. */}
+                <SelectItem value="CONTACT_INFO">Contact Info</SelectItem>
+                <SelectItem value="PAYMENT_METHODS">Payment Methods</SelectItem>
+                <SelectItem value="EXTERNAL_PLATFORMS">External Platforms</SelectItem>
+                <SelectItem value="OTHER">Other</SelectItem>
               </SelectContent>
             </Select>
           </div>

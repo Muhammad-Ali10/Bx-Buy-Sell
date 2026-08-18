@@ -6,10 +6,11 @@ export const useAddManagementQuestion = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { 
-      question: string; 
+    mutationFn: async (data: {
+      question: string;
       answer_type: string;
       options?: string[];
+      required?: boolean | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -23,6 +24,7 @@ export const useAddManagementQuestion = () => {
         question: data.question,
         answer_type: mappedAnswerType,
         answer_for: "MANAGEMENT",
+        required: data.required,
       };
       
       // Only include options if provided and not empty

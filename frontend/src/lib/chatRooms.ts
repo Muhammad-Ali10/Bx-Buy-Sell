@@ -38,6 +38,16 @@ export interface EnrichedChatRoom {
   seller?: ChatParticipant;
   chatLabels?: Array<{ userId: string; label?: "GOOD" | "MEDIUM" | "BAD" | null }>;
   unreadCount?: number;
+  // A conversation belongs to one listing. The API has always sent this; the
+  // list used to discard it and merge every chat between the same two people.
+  listingId?: string | null;
+  listing?: {
+    id: string;
+    brand?: any[];
+    advertisement?: any[];
+    category?: any[];
+    [key: string]: any;
+  } | null;
 }
 
 export const chatRoomsQueryKey = (userId: string | undefined) => [

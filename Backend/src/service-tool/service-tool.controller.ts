@@ -5,6 +5,7 @@ import {
   Post,
   Body,
   Put,
+  Patch,
   Delete,
   UseInterceptors,
   UploadedFile,
@@ -79,6 +80,27 @@ export class ServiceToolController {
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
     @Body() data,
+  ) {
+    return this.applyUpdate(id, file, data);
+  }
+
+  // PATCH alias so clients using either PUT or PATCH can update a tool.
+  @UseInterceptors(FileInterceptor('image', multerConfig))
+  @ApiParam({ name: 'id', description: 'Service Tool ID', type: String })
+  @ApiBody({ type: () => UpdateServiceToolDto })
+  @Patch(':id')
+  async patch(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() data,
+  ) {
+    return this.applyUpdate(id, file, data);
+  }
+
+  private async applyUpdate(
+    id: string,
+    file: Express.Multer.File,
+    data: any,
   ) {
     if (file) {
       const relativePath = file.path.replaceAll('\\', '/').replace(/^\.\//, '');
