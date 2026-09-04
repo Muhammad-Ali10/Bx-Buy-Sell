@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Search } from "lucide-react";
+import { Search, Pin } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { apiClient } from "@/lib/api";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
@@ -86,17 +86,45 @@ interface AdminConversationListProps {
   autoSelectUserId?: string | null;
   /** Narrow the list to conversations this team member is responsible for. */
   assignedTo?: string | null;
+  /** Drop `?assigned=` from the address once the filter is changed by hand. */
+  onClearAssigned?: () => void;
 }
 
 export const AdminConversationList = ({
   selectedConversationId,
   onSelectConversation,
   autoSelectUserId,
-  assignedTo
+  assignedTo,
+  onClearAssigned,
 }: AdminConversationListProps) => {
-  const [filters, setFilters] = useState<ChatFilters>(DEFAULT_CHAT_FILTERS);
+  /**
+   * Arriving from a team member's "Managed Chats" card, the filter opens on
+   * that member.
+   *
+   * The list used to be narrowed by `assignedTo` on its own, a second filter
+   * running behind the panel's back: the chats were right, and the panel said
+   * "Anyone" — so the screen was filtered and denied it. The same value now
+   * goes into the filter everything else already reads, which is both the fix
+   * and one fewer way for the two to disagree.
+   */
+  const [filters, setFilters] = useState<ChatFilters>(() =>
+    assignedTo ? { ...DEFAULT_CHAT_FILTERS, responsible: assignedTo } : DEFAULT_CHAT_FILTERS,
+  );
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  /**
+   * Chats the server found for the current query, and a line of the message
+   * that matched.
+   *
+   * The filter below still runs on what is already loaded, so typing narrows the
+   * list at once; this arrives a moment later and *adds* the conversations whose
+   * match is buried in their history, which is the part the page could never
+   * see. Null means "nothing asked yet".
+   */
+  const [serverMatches, setServerMatches] = useState<{
+    ids: Set<string>;
+    snippets: Record<string, string>;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const socketRef = useRef<Socket | null>(null);
   const autoSelectedRef = useRef(false);
@@ -228,6 +256,62 @@ export const AdminConversationList = ({
     }
   }, [autoSelectUserId, conversations, onSelectConversation, selectedConversationId]);
 
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setServerMatches(null);
+      return;
+    }
+
+    let live = true;
+    // Waits for a pause in typing; without it every keystroke is a query.
+    const timer = setTimeout(async () => {
+      try {
+        const response = await apiClient.searchChats(query);
+        if (!live || !response.success) return;
+        const data = (response.data as any)?.data ?? response.data ?? {};
+        setServerMatches({
+          ids: new Set<string>(Array.isArray(data.chatIds) ? data.chatIds : []),
+          snippets: data.snippets || {},
+        });
+      } catch (error) {
+        // A failed lookup leaves the local filter in charge rather than
+        // emptying the list.
+        console.error('Chat search failed:', error);
+      }
+    }, 300);
+
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  /**
+   * A choice made in the panel outranks the link that opened the screen.
+   *
+   * `?assigned=` seeds the filter once. If it stayed in the address afterwards,
+   * clearing the filter and reloading would silently put it back — the screen
+   * would keep re-filtering itself against what the person had just asked for.
+   */
+  const handleFiltersChange = (next: ChatFilters) => {
+    setFilters(next);
+    if (assignedTo && next.responsible !== assignedTo) {
+      onClearAssigned?.();
+    }
+  };
+
+  /**
+   * Archiving or pinning happens in the chat window, but it is this list that
+   * shows the result — so it refreshes when the window says something changed.
+   */
+  useEffect(() => {
+    const refresh = () => fetchConversations(false);
+    window.addEventListener("chat:filing-changed", refresh);
+    return () => window.removeEventListener("chat:filing-changed", refresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fetchConversations = async (showLoading: boolean = false) => {
     try {
       if (showLoading) {
@@ -318,15 +402,27 @@ export const AdminConversationList = ({
           unread_count: unreadCount,
           is_assigned: isAssigned,
           status: chat.status,
+          // This moderator's own filing, sent per viewer by the API. Nothing
+          // here is shared with the buyer or the seller.
+          archived: chat.archived === true,
+          pinned: chat.pinned === true,
+          pinnedAt: chat.pinnedAt || null,
           updatedAt: chat.updatedAt,
           createdAt: chat.createdAt,
         };
       });
 
-      // Sort by last message time
-      transformedConversations.sort((a, b) => 
-        new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
-      );
+      // Pinned first — most recently pinned at the very top — then everything
+      // else by last message.
+      transformedConversations.sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        if (a.pinned && b.pinned) {
+          const at = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+          const bt = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+          if (at !== bt) return bt - at;
+        }
+        return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+      });
 
       setConversations(transformedConversations as any);
     } catch (error) {
@@ -340,14 +436,12 @@ export const AdminConversationList = ({
   };
 
   const filteredConversations = conversations.filter((conv: any) => {
-    // Arriving from a team member's "Managed Chats" card: show only what that
-    // card counted.
-    if (assignedTo && conv.responsibleId !== assignedTo) return false;
-
     // Archived conversations are hidden unless they are asked for, so the list
-    // shows live work by default.
-    if (filters.archived === 'unarchived' && conv.status === 'ARCHIVED') return false;
-    if (filters.archived === 'archived' && conv.status !== 'ARCHIVED') return false;
+    // shows live work by default. Read from this moderator's own flag — the
+    // shared `status` said "archived for everybody", which is what made one
+    // person's tidying disappear the conversation for the other two.
+    if (filters.archived === 'unarchived' && conv.archived) return false;
+    if (filters.archived === 'archived' && !conv.archived) return false;
 
     if (filters.responsible === 'mine' && conv.responsibleId !== currentUserId) return false;
     if (filters.responsible === 'unassigned' && conv.responsibleId) return false;
@@ -373,6 +467,8 @@ export const AdminConversationList = ({
     const sellerName = `${conv.seller?.first_name || ''} ${conv.seller?.last_name || ''}`.toLowerCase();
 
     return (
+      // Found in the conversation's own history, which only the server can see.
+      serverMatches?.ids.has(conv.id) ||
       buyerName.includes(searchLower) ||
       sellerName.includes(searchLower) ||
       conv.listingTitle?.toLowerCase().includes(searchLower) ||
@@ -383,11 +479,14 @@ export const AdminConversationList = ({
   });
 
   return (
-    <div 
-      className={`
-        ${selectedConversationId ? 'hidden lg:flex' : 'flex'} 
-        flex-col w-full md:w-[360px] lg:w-[400px] xl:w-[440px] flex-shrink-0
-      `}
+    /* Width and visibility belong to the column this sits in, not to the list.
+       It carried its own md/lg/xl widths as well, so when the page narrowed the
+       column to make room for the details panel the list kept asking for 440px
+       inside a 400px box — which is what pushed the filter button and the
+       Responsible header off the edge. It also hid itself at `lg` while the
+       column hid at `md`, leaving an empty panel in between. */
+    <div
+      className="flex flex-col w-full h-full min-w-0"
       style={{
         height: '100%',
         maxHeight: '100%',
@@ -417,7 +516,10 @@ export const AdminConversationList = ({
         >
           {/* Search Field */}
           <div
-            className="flex-1"
+            /* min-w-0: a flex child will not shrink below its content unless
+               told to, so without this the search box held its natural width
+               and pushed the filter button past the edge of the column. */
+            className="flex-1 min-w-0"
             style={{
               position: 'relative',
               height: '42px',
@@ -440,7 +542,7 @@ export const AdminConversationList = ({
               placeholder="Search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1 border-none outline-none bg-transparent text-base lg:text-[13px] xl:text-base text-black/50"
+              className="flex-1 min-w-0 border-none outline-none bg-transparent text-base lg:text-[13px] xl:text-base text-black/50"
               style={{
                 fontFamily: 'Lufga',
                 fontWeight: 400,
@@ -452,7 +554,7 @@ export const AdminConversationList = ({
 
           {/* The filters sit beside the search box, not inside it — there are
               four of them and the column is narrow. */}
-          <AdminChatFilters filters={filters} onChange={setFilters} />
+          <AdminChatFilters filters={filters} onChange={handleFiltersChange} />
         </div>
       </div>
 
@@ -552,8 +654,12 @@ export const AdminConversationList = ({
                     <span className="truncate text-[11px] text-black/60">
                       {buyerName} ←→ {sellerName}
                     </span>
+                    {/* While searching, show the line that actually matched
+                        rather than the last one — otherwise a chat appears in
+                        the results with a preview that has nothing to do with
+                        what was typed, and looks like a mistake. */}
                     <span className="truncate text-[11px] text-black/40">
-                      {getMessagePreview(conv.last_message)}
+                      {serverMatches?.snippets[conv.id] || getMessagePreview(conv.last_message)}
                     </span>
                   </div>
                   {isUnread && (
@@ -574,12 +680,21 @@ export const AdminConversationList = ({
                 </div>
 
                 {/* Responsible */}
-                <div onClick={(event) => event.stopPropagation()}>
+                <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
                   <ChatResponsiblePicker
                     chatId={conv.id}
                     responsible={conv.responsible}
                     onAssigned={() => fetchConversations(false)}
                   />
+                  {/* Why this row is sitting at the top. Without a mark, a
+                      pinned conversation just looks like the most recent one. */}
+                  {conv.pinned && (
+                    <Pin
+                      className="h-3.5 w-3.5 flex-shrink-0 rotate-45"
+                      style={{ color: 'rgba(0, 0, 0, 0.45)' }}
+                      aria-label="Pinned"
+                    />
+                  )}
                 </div>
               </div>
             );

@@ -45,11 +45,30 @@ export const useAuth = () => {
     const interval = setInterval(() => {
       checkAuth(false);
     }, 5000);
-    
+
+    /**
+     * Ask the server who this is, now and then.
+     *
+     * The five-second loop above only re-reads localStorage, so a tab left open
+     * would never learn that its role had changed. A minute is slow enough to
+     * cost nothing and quick enough that nobody keeps powers they no longer
+     * have for long; a reload settles it immediately either way.
+     */
+    const roleWatch = setInterval(() => {
+      try {
+        const raw = localStorage.getItem('user_data');
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (parsed?.id) void verifyStoredSession(parsed.id);
+      } catch {
+        // Unreadable storage is checkAuth's problem, not this one's.
+      }
+    }, 60000);
+
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('auth:logout', handleLogout);
       clearInterval(interval);
+      clearInterval(roleWatch);
     };
   }, []);
 
@@ -64,13 +83,63 @@ export const useAuth = () => {
    */
   const verifyStoredSession = async (userId: string) => {
     try {
-      // The result is deliberately ignored. A 401 is handled inside the api
-      // client, which clears the token and fires `auth:logout` — the listener
-      // above then empties the header. Deciding here instead would risk logging
-      // someone out over a 500 or a dropped connection.
-      await apiClient.getUserById(userId);
+      // A 401 or a blocked 403 is handled inside the api client, which clears
+      // the token and fires `auth:logout` — the listener above then empties the
+      // header. Deciding that here instead would risk logging someone out over
+      // a 500 or a dropped connection.
+      const response = await apiClient.getUserById(userId);
+      if (!response.success || !response.data) return;
+
+      const fresh: any = (response.data as any)?.data ?? response.data;
+      if (!fresh?.id) return;
+
+      /**
+       * The role the server holds now, not the one the session was minted with.
+       *
+       * The result of this call used to be thrown away, so the browser kept
+       * whatever role it was given at sign-in for as long as the session
+       * lasted. The guards on the server always read the database and so were
+       * right, but the screens read this — an administrator demoted an hour ago
+       * still saw an administrator's menu, and only a fresh login corrected it.
+       *
+       * Any change ends the session. Applying the new role in place would be
+       * kinder, but a page mid-render under one set of permissions is not a
+       * page you want to hand a different set to; signing back in is one click
+       * and leaves nothing half-applied.
+       */
+      const storedRaw = localStorage.getItem('user_data');
+      const stored = storedRaw ? JSON.parse(storedRaw) : null;
+      const before = String(stored?.role || '').toUpperCase();
+      const after = String(fresh.role || '').toUpperCase();
+
+      if (before && after && before !== after) {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_data');
+        localStorage.removeItem('bearer_token');
+        apiClient.clearToken();
+        window.dispatchEvent(
+          new CustomEvent('auth:logout', { detail: { reason: 'role-changed' } }),
+        );
+        const target = window.location.pathname.startsWith('/admin')
+          ? '/admin/login?role=1'
+          : '/login?role=1';
+        if (window.location.pathname !== target.split('?')[0]) {
+          window.location.href = target;
+        }
+        return;
+      }
+
+      // No role change: keep the rest of the record fresh, so `blocked` and the
+      // name in the header are the server's answer rather than sign-in's.
+      if (stored) {
+        const merged = { ...stored, ...fresh };
+        if (JSON.stringify(merged) !== JSON.stringify(stored)) {
+          localStorage.setItem('user_data', JSON.stringify(merged));
+          setUser(merged);
+        }
+      }
     } catch {
-      // Same reasoning: a failed request is not proof the session is dead.
+      // A failed request is not proof the session is dead.
     }
   };
 

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AuthLayout } from "@/components/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,37 @@ import { Mail, Lock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
 import { toast } from "sonner";
+
+/**
+ * Say why, when someone was put out rather than simply signed out.
+ *
+ * Two reasons reach here: a blocked account, and a role that changed under a
+ * live session. Both end the session from the api client or the auth hook,
+ * which reload the page — so the reason has to travel in the address, since the
+ * event that carried it does not survive a reload.
+ *
+ * The api client ends a blocked session and reloads to this page; the reason
+ * has to travel in the address because the event that carried it does not
+ * survive the reload. Without it the person sees an ordinary login form, tries
+ * again, is refused, and has no idea who to ask.
+ */
+const SignedOutNotice = () => {
+  const [params] = useSearchParams();
+  useEffect(() => {
+    if (params.get('blocked') === '1') {
+      toast.error('This account has been blocked. Please contact support.', {
+        duration: 8000,
+      });
+      return;
+    }
+    if (params.get('role') === '1') {
+      toast.info('Your role was changed. Please sign in again to continue.', {
+        duration: 8000,
+      });
+    }
+  }, [params]);
+  return null;
+};
 
 const getPostLoginRoute = (rawRole?: string) => {
   const role = rawRole?.toUpperCase();
@@ -61,6 +92,7 @@ const Login = () => {
 
   return (
     <AuthLayout>
+      <SignedOutNotice />
       <div className="space-y-6">
         <div className="space-y-2 text-center">
           <h1 className="text-5xl font-bold tracking-tight">Welcome Back</h1>

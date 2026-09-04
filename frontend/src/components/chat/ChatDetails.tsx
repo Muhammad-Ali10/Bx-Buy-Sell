@@ -1,3 +1,4 @@
+import { multipleOf, listingMultiples, profitMultipleLabel, revenueMultipleLabel } from "@/lib/financialTableUtils";
 import { useEffect, useRef, useState } from "react";
 import { apiClient } from "@/lib/api";
 import { getCachedChatRoom, getCachedListing, setCachedListing } from "@/lib/chatRoomCache";
@@ -105,6 +106,23 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
     };
   }, [isSellerViewing, userId]);
   const [listing, setListing] = useState<any>(() => seedInitialListing(conversationId));
+
+  /**
+   * Whether this conversation is about a listing at all.
+   *
+   * A moderator writing to a member has nothing attached: no business, no
+   * price, nothing to make an offer on. The panel showed the listing card
+   * regardless — falling back to the word "Listing" over an empty frame — and
+   * offered to start a deal process underneath it.
+   *
+   * The test is the listing rather than who the other person is. Staff are not
+   * only support here: an administrator on this platform also sells, and 18 of
+   * the conversations they are in are about a real listing of their own. Hiding
+   * the card whenever a moderator is present would take it off those too. It
+   * also catches the seven ordinary conversations that have no listing, which
+   * had the same empty card for the same reason.
+   */
+  const hasListing = Boolean(listing?.id);
   // Seed header data from the shared cache on the first render (mounts fresh per
   // conversation via key=), so the panel switches together with the chat window.
   const [participants, setParticipants] = useState<any[]>(() => seedInitialParticipants(conversationId));
@@ -514,23 +532,10 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
     listing?.average_revenue ||
     0;
 
-  let profitMultiple = "Multiple 1.5x Profit";
-  if (askingPrice && avgNetProfit > 0) {
-    const annualProfit = avgNetProfit * 12;
-    const multiple = Number(askingPrice) / annualProfit;
-    if (Number.isFinite(multiple)) {
-      profitMultiple = `Multiple ${multiple.toFixed(1)}x Profit`;
-    }
-  }
-
-  let revenueMultiple = "0.5x Revenue";
-  if (askingPrice && avgRevenue > 0) {
-    const annualRevenue = avgRevenue * 12;
-    const multiple = Number(askingPrice) / annualRevenue;
-    if (Number.isFinite(multiple)) {
-      revenueMultiple = `${multiple.toFixed(1)}x Revenue`;
-    }
-  }
+  // Worked out from the seller's grid, the same as the listing's own page.
+  const multiples = listingMultiples(listing, askingPrice);
+  const profitMultiple = profitMultipleLabel(multiples.profit);
+  const revenueMultiple = revenueMultipleLabel(multiples.revenue);
 
   return (
     <>
@@ -624,10 +629,80 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             : formatLastSeen(otherParticipant?.last_offline)}
         </p>
 
-        {/* Three Rows Section */}
+        {/* Directly above the button it belongs to: this is the reading a
+            seller takes before deciding whether to start a deal, and it used
+            to sit at the very bottom of the panel, below the listing card,
+            where the decision had already been made without it.
+
+            Tied to `hasListing` as well as to the seller, because the reading
+            is a share of an asking price — with no listing there is no price
+            to be a share of. */}
+        {isSellerViewing && hasListing && (
+          <div style={{ width: '100%', marginBottom: '16px' }}>
+            <AcquisitionCapacityCard
+              verifiedFunds={buyerVerifiedFunds}
+              listingPrice={Number(askingPrice) || null}
+            />
+          </div>
+        )}
+
+        {/* Start Deal Process — replaces "Make Offer", which had no click
+            handler at all and so did nothing when pressed. Shown only when
+            there is something to deal on. */}
+        {hasListing && (
+        <button
+          type="button"
+          onClick={() => setStartDealOpen(true)}
+          style={{
+            width: '100%',
+            height: '50px',
+            borderRadius: '62px',
+            gap: '10px',
+            padding: '10px',
+            background: 'rgba(197, 253, 31, 1)',
+            border: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
+        >
+          <img 
+            src={handshakeIcon} 
+            alt="Handshake" 
+            style={{ 
+              width: '32px', 
+              height: '32px',
+              flexShrink: 0,
+            }} 
+          />
+          <span
+            style={{
+              fontFamily: 'Lufga',
+              fontWeight: 500,
+              fontSize: '20px',
+              lineHeight: '140%',
+              letterSpacing: '0%',
+              color: 'rgba(0, 0, 0, 1)',
+            }}
+          >
+          Start Deal Process
+          </span>
+        </button>
+        )}
+
+        <StartDealProcessDialog
+          open={startDealOpen}
+          onOpenChange={setStartDealOpen}
+          onConfirm={handleStartDealProcess}
+        />
+
+        {/* Three Rows Section — below the button now, so the margin that
+            used to hold it off the button above has moved to the other side.
+            What follows brings its own 16px, hence none at the bottom. */}
         <div
           style={{
-            width: '343px',
+            width: '100%',
             minHeight: '192px',
             gap: '24px',
             padding: '12px',
@@ -635,7 +710,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             borderRadius: '12px',
             display: 'flex',
             flexDirection: 'column',
-            marginBottom: '16px',
+            marginTop: '16px',
           }}
         >
           {/* First Row: Docs, Link, Media */}
@@ -840,57 +915,13 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
           </div>
         </div>
 
-        {/* Start Deal Process — replaces "Make Offer", which had no click
-            handler at all and so did nothing when pressed. */}
-        <button
-          type="button"
-          onClick={() => setStartDealOpen(true)}
-          style={{
-            width: '343px',
-            height: '50px',
-            borderRadius: '62px',
-            gap: '10px',
-            padding: '10px',
-            background: 'rgba(197, 253, 31, 1)',
-            border: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-          }}
-        >
-          <img 
-            src={handshakeIcon} 
-            alt="Handshake" 
-            style={{ 
-              width: '32px', 
-              height: '32px',
-              flexShrink: 0,
-            }} 
-          />
-          <span
-            style={{
-              fontFamily: 'Lufga',
-              fontWeight: 500,
-              fontSize: '20px',
-              lineHeight: '140%',
-              letterSpacing: '0%',
-              color: 'rgba(0, 0, 0, 1)',
-            }}
-          >
-          Start Deal Process
-          </span>
-        </button>
-
-        <StartDealProcessDialog
-          open={startDealOpen}
-          onOpenChange={setStartDealOpen}
-          onConfirm={handleStartDealProcess}
-        />
-
+        {/* The listing this conversation is about — divider, heading and card
+            together, so nothing is left floating when there is none. */}
+        {hasListing && (
+        <>
         <div
           style={{
-            width: '343px',
+            width: '100%',
             height: '1px',
             backgroundColor: 'rgba(0, 0, 0, 0.1)',
             marginTop: '16px',
@@ -900,7 +931,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
 
         <h5
           style={{
-            width: '343px',
+            width: '100%',
             fontFamily: 'Lufga',
             fontWeight: 600,
             fontSize: '16px',
@@ -915,7 +946,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
           Listing information
         </h5>
 
-        <div style={{ width: '343px' }}>
+        <div style={{ width: '100%' }}>
           <ListingCard
             image={listingImage}
             category={categoryName}
@@ -935,17 +966,9 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             sellerId={listing?.userId || listing?.user_id}
           />
         </div>
-
-        {/* Shown to the seller: how much of the asking price this buyer has
-            actually had verified, so genuine interest is easy to spot. */}
-        {isSellerViewing && (
-          <div style={{ width: '343px', marginTop: '12px' }}>
-            <AcquisitionCapacityCard
-              verifiedFunds={buyerVerifiedFunds}
-              listingPrice={Number(askingPrice) || null}
-            />
-          </div>
+        </>
         )}
+
       </div>
 
       {/* Media Dialog */}

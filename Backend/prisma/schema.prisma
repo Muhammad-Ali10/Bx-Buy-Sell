@@ -100,54 +100,54 @@ enum PaymentStatus {
 }
 
 model User {
-  id                String          @id @default(uuid()) @map("_id")
-  first_name        String?
-  last_name         String?
+  id                   String          @id @default(uuid()) @map("_id")
+  first_name           String?
+  last_name            String?
   /// Enforced by the database, not only by the application. A duplicate
   /// address makes every account but the oldest unreachable at sign-in, which
   /// looks like "the password change did nothing".
-  email             String          @unique
-  business_name     String?
-  contact_name      String?
-  phone             String?
-  country_code      String?
-  address           String?
-  country           String?
-  permissions       String[]
-  role              Role
-  city              String?
-  state             String?
-  refresh_token     String?
-  password_hash     String
-  otp_code          String?
-  profile_pic       String?
-  is_online         Boolean?        @default(false)
-  last_offline      DateTime?
-  zip_code          String?
+  email                String          @unique
+  business_name        String?
+  contact_name         String?
+  phone                String?
+  country_code         String?
+  address              String?
+  country              String?
+  permissions          String[]
+  role                 Role
+  city                 String?
+  state                String?
+  refresh_token        String?
+  password_hash        String
+  otp_code             String?
+  profile_pic          String?
+  is_online            Boolean?        @default(false)
+  last_offline         DateTime?
+  zip_code             String?
   /// Plain `YYYY-MM-DD`, not a DateTime. A birthday has no time of day, and
   /// storing one lets a timezone shift move it to the day before.
-  birthday          String?
-  background        String?
-  is_email_verified Boolean         @default(false)
-  support_ticket    SupportTicket[]
-  is_phone_verified Boolean         @default(false)
+  birthday             String?
+  background           String?
+  is_email_verified    Boolean         @default(false)
+  support_ticket       SupportTicket[]
+  is_phone_verified    Boolean         @default(false)
   /// The number waiting to be confirmed. `phone` only changes once the code
   /// checks out, so a typo cannot leave someone with an unreachable number.
-  pending_phone      String?
-  phone_otp          String?
+  pending_phone        String?
+  phone_otp            String?
   /// Codes expire. Without this a code stays valid forever, which turns one
   /// intercepted SMS into a permanent key.
   phone_otp_expires_at DateTime?
   /// Guesses used on the current code. Six digits with unlimited tries is not
   /// a secret.
-  phone_otp_attempts Int            @default(0)
+  phone_otp_attempts   Int             @default(0)
   /// The address waiting to be confirmed. `email` — which is how someone signs
   /// in — only changes once a code sent to the new address comes back, so a
   /// typo cannot lock its owner out of their own account.
-  pending_email      String?
-  email_otp          String?
+  pending_email        String?
+  email_otp            String?
   email_otp_expires_at DateTime?
-  email_otp_attempts Int            @default(0)
+  email_otp_attempts   Int             @default(0)
   /// Identity check with didit.me. `verified` above is the platform's own
   /// answer; these record where the provider's session got to, so a webhook
   /// arriving out of order can be matched to the right attempt.
@@ -155,54 +155,54 @@ model User {
   /// unique index, so the constraint cannot be built while most accounts have
   /// no session. Nothing relies on it — the webhook looks the session up with
   /// findFirst, and the ids are provider-generated UUIDs.
-  identity_session_id String?
+  identity_session_id  String?
   /// The provider's own wording — "Approved", "Declined", "In Review"… kept
   /// verbatim rather than flattened, so support can see what they saw.
-  identity_status     String?
-  identity_checked_at DateTime?
-  verified          Boolean         @default(false)
+  identity_status      String?
+  identity_checked_at  DateTime?
+  verified             Boolean         @default(false)
 
   /// Moderation state. Kept separate from `verified`, which is a KYC flag:
   /// an unverified user is not a blocked one.
-  blocked           Boolean         @default(false)
-  blocked_at        DateTime?
-  blocked_reason    String?
+  blocked        Boolean   @default(false)
+  blocked_at     DateTime?
+  blocked_reason String?
   /// Who pulled the trigger, for the audit trail.
-  blocked_by        String?
+  blocked_by     String?
 
   /// Last sign of life. Presence is "socket connected OR active recently", so
   /// moving between tabs no longer drops a user to offline.
-  last_seen         DateTime?
+  last_seen DateTime?
 
-  favourite         Favourite[]
+  favourite Favourite[]
 
-  created_at     DateTime         @default(now())
-  updated_at     DateTime         @updatedAt
-  deleted_at     DateTime?
-  buyer          Chat[]           @relation("Buyer")
-  seller         Chat[]           @relation("Seller")
-  listing        Listing[]
+  created_at                 DateTime          @default(now())
+  updated_at                 DateTime          @updatedAt
+  deleted_at                 DateTime?
+  buyer                      Chat[]            @relation("Buyer")
+  seller                     Chat[]            @relation("Seller")
+  listing                    Listing[]
   // Listings this team member has been assigned to look after.
-  assignedListings Listing[] @relation("ListingResponsible")
+  assignedListings           Listing[]         @relation("ListingResponsible")
   // Conversations this team member has been assigned to look after.
-  assignedChats    Chat[]    @relation("ChatResponsible")
-  preferences    Preference?
-  chatRoomId     String?
-  chatlabels     ChatLabel[]
-  Message        Message[]        @relation("Sender")
-  ChatMonitor    ChatMonitor[]    @relation("ChatMonitor")
-  ActivityLog    ActivityLog[]
-  AdminFinancial AdminFinancial[]
-  Notification   Notification[]
-  MonitoringAlertReporter   MonitoringAlert[] @relation("AlertReporter")
+  assignedChats              Chat[]            @relation("ChatResponsible")
+  preferences                Preference?
+  chatRoomId                 String?
+  chatlabels                 ChatLabel[]
+  Message                    Message[]         @relation("Sender")
+  ChatMonitor                ChatMonitor[]     @relation("ChatMonitor")
+  ActivityLog                ActivityLog[]
+  AdminFinancial             AdminFinancial[]
+  Notification               Notification[]
+  MonitoringAlertReporter    MonitoringAlert[] @relation("AlertReporter")
   MonitoringAlertProblematic MonitoringAlert[] @relation("AlertProblematic")
   MonitoringAlertResponsible MonitoringAlert[] @relation("AlertResponsible")
 
-  acquisitionCapacity        AcquisitionCapacity?  @relation("CapacityBuyer")
-  reviewedCapacities         AcquisitionCapacity[] @relation("CapacityReviewer")
-  subscription   UserSubscription?
-  payments       Payment[]
-  confidentialListingAccesses ListingConfidentialAccess[] @relation("ConfidentialAccessBuyer")
+  acquisitionCapacity             AcquisitionCapacity?        @relation("CapacityBuyer")
+  reviewedCapacities              AcquisitionCapacity[]       @relation("CapacityReviewer")
+  subscription                    UserSubscription?
+  payments                        Payment[]
+  confidentialListingAccesses     ListingConfidentialAccess[] @relation("ConfidentialAccessBuyer")
   confidentialListingAccessGrants ListingConfidentialAccess[] @relation("ConfidentialAccessSeller")
 }
 
@@ -219,9 +219,9 @@ enum AcquisitionCapacityStatus {
 /// amount they could verify. Listings then compare that amount against their
 /// asking price to show how realistic the buyer is. One record per buyer.
 model AcquisitionCapacity {
-  id            String                    @id @default(uuid()) @map("_id")
-  buyerId       String                    @unique
-  buyer         User                      @relation("CapacityBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  id      String @id @default(uuid()) @map("_id")
+  buyerId String @unique
+  buyer   User   @relation("CapacityBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
 
   /// Uploaded proof-of-funds files, as bare URLs. Superseded by the
   /// `uploads` relation, which carries a name, a date and its own status —
@@ -235,12 +235,12 @@ model AcquisitionCapacity {
   /// Internal moderator notes; never shown to sellers or buyers.
   notes         String?
 
-  reviewerId    String?
-  reviewer      User?                     @relation("CapacityReviewer", fields: [reviewerId], references: [id])
-  reviewedAt    DateTime?
+  reviewerId String?
+  reviewer   User?     @relation("CapacityReviewer", fields: [reviewerId], references: [id])
+  reviewedAt DateTime?
 
-  created_at    DateTime                  @default(now())
-  updated_at    DateTime                  @updatedAt
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   @@index([status])
   @@index([reviewerId])
@@ -259,53 +259,53 @@ enum AcquisitionDocumentStatus {
 /// checks out and a screenshot that does not, and the account page shows each
 /// with its own outcome rather than one verdict over the pile.
 model AcquisitionDocument {
-  id         String                    @id @default(uuid()) @map("_id")
-  capacityId String
-  capacity   AcquisitionCapacity       @relation(fields: [capacityId], references: [id], onDelete: Cascade)
+  id              String                    @id @default(uuid()) @map("_id")
+  capacityId      String
+  capacity        AcquisitionCapacity       @relation(fields: [capacityId], references: [id], onDelete: Cascade)
   /// What the buyer's file was called, e.g. "IMG3483.png".
-  name       String
-  url        String
-  status     AcquisitionDocumentStatus @default(IN_REVIEW)
+  name            String
+  url             String
+  status          AcquisitionDocumentStatus @default(IN_REVIEW)
   /// Why it was declined, if it was. Shown to the buyer.
-  note       String?
+  note            String?
   /// What this one document actually proves, as judged by the moderator. The
   /// case total is the sum of these across verified documents — it is never
   /// typed by hand, so the figure and its evidence cannot drift apart.
   verifiedCapital Float?
-  reviewedAt DateTime?
-  created_at DateTime                  @default(now())
-  updated_at DateTime                  @updatedAt
+  reviewedAt      DateTime?
+  created_at      DateTime                  @default(now())
+  updated_at      DateTime                  @updatedAt
 
   @@index([capacityId])
   @@index([status])
 }
 
 model MonitoringAlert {
-  id                String   @id @default(uuid()) @map("_id")
-  problem_type      String
-  status            String   @default("unsolved")
-  notes             String?
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+  id           String   @id @default(uuid()) @map("_id")
+  problem_type String
+  status       String   @default("unsolved")
+  notes        String?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
 
-  reporterId        String?
-  reporter          User?    @relation("AlertReporter", fields: [reporterId], references: [id])
+  reporterId String?
+  reporter   User?   @relation("AlertReporter", fields: [reporterId], references: [id])
 
   problematicUserId String?
-  problematic_user  User?    @relation("AlertProblematic", fields: [problematicUserId], references: [id])
+  problematic_user  User?   @relation("AlertProblematic", fields: [problematicUserId], references: [id])
 
-  responsibleId     String?
-  responsible       User?    @relation("AlertResponsible", fields: [responsibleId], references: [id])
+  responsibleId String?
+  responsible   User?   @relation("AlertResponsible", fields: [responsibleId], references: [id])
 
   // Set when the alert is a report about a listing rather than about a user.
-  listingId         String?
-  listing           Listing? @relation("AlertListing", fields: [listingId], references: [id], onDelete: Cascade)
+  listingId String?
+  listing   Listing? @relation("AlertListing", fields: [listingId], references: [id], onDelete: Cascade)
 
   /// Set when the alert is about a conversation. Until now the chat id was
   /// scraped out of the `notes` text, which meant the link broke the moment
   /// anyone reworded a note — and a reported chat had nowhere to be recorded.
-  chatId            String?
-  chat              Chat?    @relation("AlertChat", fields: [chatId], references: [id], onDelete: Cascade)
+  chatId String?
+  chat   Chat?   @relation("AlertChat", fields: [chatId], references: [id], onDelete: Cascade)
 
   @@index([listingId])
   @@index([chatId])
@@ -385,62 +385,64 @@ model Range {
 }
 
 model Listing {
-  id                 String            @id @default(uuid()) @map("_id")
-  status             ListingStatus
-  user               User              @relation(fields: [userId], references: [id])
-  userId             String
+  id                          String                      @id @default(uuid()) @map("_id")
+  status                      ListingStatus
+  user                        User                        @relation(fields: [userId], references: [id])
+  userId                      String
   // Team member this listing is assigned to. The admin table was already
   // sending this, but there was nowhere to store it, so every assignment was
   // silently discarded.
-  responsible        User?             @relation("ListingResponsible", fields: [responsibleId], references: [id])
-  responsibleId      String?
+  responsible                 User?                       @relation("ListingResponsible", fields: [responsibleId], references: [id])
+  responsibleId               String?
   // Why the team blocked it, shown to the owner so a blocked listing does not
   // simply become a support ticket.
-  blockedReason      String?
-  brand              ListingQuestion[] @relation("BrandQuestion")
-  category           ListingCategory[]
-  tools              ListingTool[]
-  financials         Revenue[]
-  statistics         ListingQuestion[] @relation("StatisticQuestion")
-  productQuestion    ListingQuestion[] @relation("ProductQuestion")
-  managementQuestion ListingQuestion[] @relation("ManageQuestion")
-  social_account     ListingQuestion[] @relation("SocialQuestion")
-  advertisement      ListingQuestion[] @relation("AdvertisementQuestion")
-  handover           ListingQuestion[] @relation("HandoverQuestion")
-  portfolioLink      String?
-  managed_by_ex      Boolean           @default(false)
-  confidentialControl Boolean          @default(false)
-  featuredOnCategoryPage Boolean       @default(false)
-  featuredOnStartPage Boolean          @default(false)
+  blockedReason               String?
+  brand                       ListingQuestion[]           @relation("BrandQuestion")
+  category                    ListingCategory[]
+  tools                       ListingTool[]
+  financials                  Revenue[]
+  statistics                  ListingQuestion[]           @relation("StatisticQuestion")
+  productQuestion             ListingQuestion[]           @relation("ProductQuestion")
+  managementQuestion          ListingQuestion[]           @relation("ManageQuestion")
+  social_account              ListingQuestion[]           @relation("SocialQuestion")
+  advertisement               ListingQuestion[]           @relation("AdvertisementQuestion")
+  handover                    ListingQuestion[]           @relation("HandoverQuestion")
+  portfolioLink               String?
+  managed_by_ex               Boolean                     @default(false)
+  confidentialControl         Boolean                     @default(false)
+  featuredOnCategoryPage      Boolean                     @default(false)
+  featuredOnStartPage         Boolean                     @default(false)
   // Package the seller chose for this listing. These record the selection and
   // the success-fee rate quoted at that moment (so a later listing-price change
   // does not silently re-price the deal). The paid features themselves are
   // switched on once payment is wired up. Null = legacy listing / no package.
-  selectedPackage       String?
-  packageBillingCycle   String?
-  packageAddons         String[]       @default([])
-  successFeePercent     Float?
-  approveBuyersManually Boolean?
-  /** When the team marked this listing as sold. Null while it is still for sale. */
-  soldAt                DateTime?
+  selectedPackage             String?
+  packageBillingCycle         String?
+  packageAddons               String[]                    @default([])
+  successFeePercent           Float?
+  approveBuyersManually       Boolean?
+  /**
+   * When the team marked this listing as sold. Null while it is still for sale.
+   */
+  soldAt                      DateTime?
   // Paid state of the package. `selectedPackage` above is only what the seller
   // picked; these say whether it was actually paid for and until when. Premium
   // features are gated on packageActive, so an expired package silently loses
   // them while the listing itself stays public.
-  packageActive             Boolean?
-  packageExpiresAt          DateTime?
+  packageActive               Boolean?
+  packageExpiresAt            DateTime?
   packageStripeSubscriptionId String?
   addonStripeSubscriptionId   String?
   // A cancelled add-on keeps its placement until the month it was paid for
   // runs out. This is when that happens; null means no removal is pending.
   addonEndsAt                 DateTime?
-  confidentialAccesses ListingConfidentialAccess[]
-  Favourite          Favourite[]
-  chats              Chat[]            @relation // CRITICAL: Link to chats for this listing
-  reports            MonitoringAlert[] @relation("AlertListing")
-  created_at         DateTime          @default(now())
-  updated_at         DateTime          @updatedAt
-  deleted_at         DateTime?
+  confidentialAccesses        ListingConfidentialAccess[]
+  Favourite                   Favourite[]
+  chats                       Chat[]                      @relation // CRITICAL: Link to chats for this listing
+  reports                     MonitoringAlert[]           @relation("AlertListing")
+  created_at                  DateTime                    @default(now())
+  updated_at                  DateTime                    @updatedAt
+  deleted_at                  DateTime?
 
   // Feed queries filter by status + userId and order by created_at desc.
   @@index([status, created_at])
@@ -456,23 +458,23 @@ enum ConfidentialAccessStatus {
 }
 
 model ListingConfidentialAccess {
-  id               String   @id @default(uuid()) @map("_id")
-  listingId        String
-  buyerId          String
+  id                String                   @id @default(uuid()) @map("_id")
+  listingId         String
+  buyerId           String
   grantedBySellerId String
-  chatId           String?
+  chatId            String?
   /// Defaults to APPROVED because every row written before this existed was a
   /// grant — a stricter default would revoke access people already had.
-  status           ConfidentialAccessStatus @default(APPROVED)
+  status            ConfidentialAccessStatus @default(APPROVED)
   /// When the seller approved or declined. Null while still waiting.
-  decidedAt        DateTime?
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
+  decidedAt         DateTime?
+  created_at        DateTime                 @default(now())
+  updated_at        DateTime                 @updatedAt
 
-  listing          Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  buyer            User     @relation("ConfidentialAccessBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
-  grantedBySeller  User     @relation("ConfidentialAccessSeller", fields: [grantedBySellerId], references: [id], onDelete: Cascade)
-  chat             Chat?    @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  listing         Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer           User    @relation("ConfidentialAccessBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  grantedBySeller User    @relation("ConfidentialAccessSeller", fields: [grantedBySellerId], references: [id], onDelete: Cascade)
+  chat            Chat?   @relation(fields: [chatId], references: [id], onDelete: SetNull)
 
   @@unique([listingId, buyerId])
   @@index([listingId])
@@ -526,49 +528,49 @@ model NicheOption {
 }
 
 model Plan {
-  id            String   @id @default(uuid()) @map("_id")
-  name          String   @unique
-  slug          String   @unique
-  title         String
-  description   String
-  
+  id          String @id @default(uuid()) @map("_id")
+  name        String @unique
+  slug        String @unique
+  title       String
+  description String
+
   // Legacy fields (keep for backward compatibility)
   duration_type String?
   type          String?
   price         String?
-  feature       String[]  @default([])
-  
+  feature       String[] @default([])
+
   // New pricing fields
-  monthlyPrice          String  @default("0")
-  yearlyPrice           String  @default("0")
-  
+  monthlyPrice String @default("0")
+  yearlyPrice  String @default("0")
+
   // Stripe IDs
-  stripeMonthlyPriceId  String?
-  stripeYearlyPriceId   String?
+  stripeMonthlyPriceId    String?
+  stripeYearlyPriceId     String?
   // The client's discounted cycles bill a different amount, so each needs its
   // own Stripe price. Without these the 3- and 6-month options cannot be sold.
   stripeThreeMonthPriceId String?
   stripeSixMonthPriceId   String?
-  stripeProductId       String?
-  
+  stripeProductId         String?
+
   // Feature limits
-  maxListings       Int      @default(0)
-  maxPhotos         Int      @default(5)
-  maxVideoDuration  Int      @default(0)
-  canUseAnalytics   Boolean  @default(false)
-  prioritySupport   Boolean  @default(false)
-  featuredListing   Boolean  @default(false)
-  canBoostListing   Boolean  @default(false)
-  customBranding    Boolean  @default(false)
-  
+  maxListings      Int     @default(0)
+  maxPhotos        Int     @default(5)
+  maxVideoDuration Int     @default(0)
+  canUseAnalytics  Boolean @default(false)
+  prioritySupport  Boolean @default(false)
+  featuredListing  Boolean @default(false)
+  canBoostListing  Boolean @default(false)
+  customBranding   Boolean @default(false)
+
   // Metadata
-  isActive      Boolean  @default(true)
-  isDefault     Boolean  @default(false)
-  sortOrder     Int      @default(0)
-  
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-  
+  isActive  Boolean @default(true)
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   // Relations
   subscriptions UserSubscription[]
   payments      Payment[]
@@ -672,20 +674,20 @@ model ListingQuestion {
 }
 
 model AdminQuestion {
-  id          String     @id @default(uuid()) @map("_id")
-  question    String
-  answer_type AnswerType
-  answer_for  AnswerFor // brand, product, management
-  option      String[]   @default([])
+  id                  String     @id @default(uuid()) @map("_id")
+  question            String
+  answer_type         AnswerType
+  answer_for          AnswerFor // brand, product, management
+  option              String[]   @default([])
   // Optional conditional display: show this question only when another question's
   // answer equals dependsOnValue. Both null = always show (default, unchanged behavior).
   dependsOnQuestionId String?
   dependsOnValue      String?
   // Whether the seller must answer this question. Null = legacy behaviour
   // (each step keeps its current default), so existing questions are unchanged.
-  required    Boolean?
-  created_at  DateTime   @default(now())
-  updated_at  DateTime   @updatedAt
+  required            Boolean?
+  created_at          DateTime   @default(now())
+  updated_at          DateTime   @updatedAt
 }
 
 model AdminSocialAccount {
@@ -721,25 +723,25 @@ model Chat {
   userId String
   seller User   @relation("Seller", fields: [sellerId], references: [id])
 
-  sellerId      String
-  listingId     String? // CRITICAL: Links chat to specific listing
-  listing       Listing?        @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  messages      Message[]
-  monitorViews  ChatMonitor[]   @relation("MoniteredChat")
-  isOffered     Boolean         @default(false)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  offer         String? // Optional offer text/ID made by seller
-  status        ChatStatus      @default(ACTIVE)
-  chatLabels    ChatLabel[]
-  reports       MonitoringAlert[] @relation("AlertChat")
-  SupportTicket SupportTicket[]
+  sellerId             String
+  listingId            String? // CRITICAL: Links chat to specific listing
+  listing              Listing?                    @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  messages             Message[]
+  monitorViews         ChatMonitor[]               @relation("MoniteredChat")
+  isOffered            Boolean                     @default(false)
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  offer                String? // Optional offer text/ID made by seller
+  status               ChatStatus                  @default(ACTIVE)
+  chatLabels           ChatLabel[]
+  reports              MonitoringAlert[]           @relation("AlertChat")
+  SupportTicket        SupportTicket[]
   confidentialAccesses ListingConfidentialAccess[]
 
   /// Team member who looks after this conversation. Mirrors the same idea on
   /// Listing, so "chats managed by X" is a real filter and not a guess from
   /// who happened to open it (that is what ChatMonitor records).
-  responsible   User?           @relation("ChatResponsible", fields: [responsibleId], references: [id])
+  responsible   User?   @relation("ChatResponsible", fields: [responsibleId], references: [id])
   responsibleId String?
 
   // Conversation list filters by buyer (userId) or seller (sellerId).
@@ -748,18 +750,37 @@ model Chat {
   @@index([responsibleId])
 }
 
+/// One person's own view of one conversation.
+///
+/// Everything here belongs to `userId` alone. `Chat.status` is shared by the
+/// buyer, the seller and the team, so it can never say "I have filed this
+/// away" — when it was used for archiving, one side archiving a chat took it
+/// out of the other side's list as well, and an admin tidying their queue hid
+/// the conversation from both people trading in it.
+///
+/// The row already existed for the label, and it is already unique per
+/// (chat, user), so it is where the personal flags belong.
 model ChatLabel {
   id     String @id @default(uuid()) @map("_id")
   chatId String
   userId String
 
   label      ChatLabelType?
+  /// Filed away by this person. Their list hides it; nobody else is affected.
+  archived   Boolean        @default(false)
+  /// Held at the top of this person's list. A private bookmark, not a signal
+  /// to the team — `Chat.responsible` and the status label do that job.
+  pinned     Boolean        @default(false)
+  /// When it was pinned, so several pinned chats keep a sensible order.
+  pinned_at  DateTime?
   chat       Chat           @relation(fields: [chatId], references: [id])
   user       User           @relation(fields: [userId], references: [id])
   created_at DateTime       @default(now())
   updated_at DateTime       @updatedAt
 
   @@unique([chatId, userId])
+  /// The conversation list asks "my rows for these chats" on every load.
+  @@index([userId])
 }
 
 model Message {
@@ -793,19 +814,19 @@ enum ProhibitedWordCategory {
 }
 
 model ProhibitedWord {
-  id        String   @id @default(uuid()) @map("_id")
-  word      String
+  id         String                 @id @default(uuid()) @map("_id")
+  word       String
   /// The admin screen has always offered a category and a filter; there was no
   /// column behind either, so choosing one saved nothing and filtering by one
   /// matched nothing.
-  category  ProhibitedWordCategory @default(OTHER)
+  category   ProhibitedWordCategory @default(OTHER)
   /// How many messages this word has stopped. Counted once per blocked message,
   /// not once per occurrence: the number answers "is this rule earning its
   /// place", and three hits in one message would treble the same event.
-  usageCount Int     @default(0)
+  usageCount Int                    @default(0)
   lastUsedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
 
   @@index([category])
 }
@@ -874,7 +895,7 @@ model Notification {
   type      String   @default("info") // info, success, warning, error, message
   read      Boolean  @default(false)
   link      String?
-  chatId    String?  // Link to chat if it's a message notification
+  chatId    String? // Link to chat if it's a message notification
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -882,65 +903,65 @@ model Notification {
 }
 
 model UserSubscription {
-  id                     String              @id @default(uuid()) @map("_id")
-  userId                 String              @unique
-  user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  planId                 String
-  plan                   Plan                @relation(fields: [planId], references: [id])
-  
+  id     String @id @default(uuid()) @map("_id")
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id])
+
   // Stripe data
-  stripeCustomerId       String?             @unique
-  stripeSubscriptionId   String?             @unique
+  stripeCustomerId       String?   @unique
+  stripeSubscriptionId   String?   @unique
   stripePriceId          String?
   stripeCurrentPeriodEnd DateTime?
-  
+
   // Subscription status
-  status                 SubscriptionStatus  @default(ACTIVE)
-  billingCycle           BillingCycle        @default(MONTHLY)
-  
+  status       SubscriptionStatus @default(ACTIVE)
+  billingCycle BillingCycle       @default(MONTHLY)
+
   // Dates
-  startDate              DateTime            @default(now())
-  endDate                DateTime?
-  cancelledAt            DateTime?
-  trialEndsAt            DateTime?
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  cancelledAt DateTime?
+  trialEndsAt DateTime?
 
   // A downgrade takes effect at the end of the paid period, not on the click.
   // Until then the member keeps what they paid for, the page can say
   // "Downgrade starts in N days", and they can still change their mind —
   // none of which is possible without remembering the pending change.
-  pendingPlanId          String?
-  pendingBillingCycle    BillingCycle?
-  pendingChangeAt        DateTime?
-  created_at             DateTime            @default(now())
-  updated_at             DateTime            @updatedAt
+  pendingPlanId       String?
+  pendingBillingCycle BillingCycle?
+  pendingChangeAt     DateTime?
+  created_at          DateTime      @default(now())
+  updated_at          DateTime      @updatedAt
 }
 
 model Payment {
-  id                    String         @id @default(uuid()) @map("_id")
-  userId                String
-  user                  User           @relation(fields: [userId], references: [id])
-  
+  id     String @id @default(uuid()) @map("_id")
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
   // Stripe data
-  stripePaymentIntentId String?        @unique
+  stripePaymentIntentId String? @unique
   stripeInvoiceId       String?
   stripeChargeId        String?
-  
-  // Payment details
-  amount                String
-  currency              String         @default("usd")
-  status                PaymentStatus  @default(PENDING)
-  
-  // Related subscription
-  planId                String?
-  plan                  Plan?          @relation(fields: [planId], references: [id])
-  subscriptionId        String?
-  
-  billingCycle          BillingCycle?
-  description           String?
-  
-  // Metadata
-  metadata              Json?
 
-  created_at            DateTime       @default(now())
-  updated_at            DateTime       @updatedAt
+  // Payment details
+  amount   String
+  currency String        @default("usd")
+  status   PaymentStatus @default(PENDING)
+
+  // Related subscription
+  planId         String?
+  plan           Plan?   @relation(fields: [planId], references: [id])
+  subscriptionId String?
+
+  billingCycle BillingCycle?
+  description  String?
+
+  // Metadata
+  metadata Json?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 }

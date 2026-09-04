@@ -8,7 +8,19 @@ export const useAdminListings = () => {
     queryFn: async () => {
       console.log('Fetching listings from backend...');
       
-      const response = await apiClient.getSecureListings();
+      /**
+       * Every listing, not the first page of them.
+       *
+       * `findAll` caps a request at forty unless it is told otherwise, and this
+       * asked for nothing — so the admin table held forty rows, counted forty,
+       * and said "of 40" while the dashboard counted the database and said 43.
+       * Neither number was wrong about what it measured; they were measuring
+       * different things.
+       *
+       * The table paginates, filters and sorts in the browser, so it needs the
+       * whole set. The same explicit limit the other admin views already pass.
+       */
+      const response = await apiClient.getSecureListings({ limit: 1000 });
       
       console.log('Backend listings response:', response);
       console.log('Raw listings data:', response.data);

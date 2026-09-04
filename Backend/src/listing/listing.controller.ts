@@ -432,7 +432,11 @@ export class ListingController {
     description: 'Listing Id',
     required: true,
   })
-  async delete(@Param('id') id: string) {
+  async delete(@Param('id') id: string, @Req() req: Request) {
+    const currentUser = (req as any).user;
+    // Deleting cascades through the listing's chats and their messages, so who
+    // is asking is checked before anything is removed.
+    await this.listingService.assertMayDelete(id, currentUser?.id, currentUser?.role);
     const data = await this.listingService.delete(id);
     await this.clearListingCaches(id);
     return data;

@@ -141,6 +141,31 @@ export class ListingService {
     return selectedPackage === 'STARTER' || selectedPackage === 'PREMIUM';
   }
 
+  /**
+   * A listing goes public on a package, or it does not go public.
+   *
+   * The step that asks now refuses to move on without one, but the rule has to
+   * live here too: `selectedPackage` is nullish in the DTO, so anything talking
+   * to the API directly could publish without ever making the choice. Thirty of
+   * the listings already live have no package at all.
+   *
+   * Only on the way to PUBLISH. A draft is unfinished work by definition, and a
+   * seller who has not reached the packages step yet must still be able to save
+   * what they have — including the sellers of those thirty, who would otherwise
+   * find their own listings unsaveable.
+   */
+  private assertPackageChosenToPublish(
+    status?: string | null,
+    selectedPackage?: string | null,
+  ) {
+    if (status !== 'PUBLISH') return;
+    if (selectedPackage) return;
+
+    throw new BadRequestException(
+      'Choose a package (Minimum, Starter or Premium) before publishing this listing.',
+    );
+  }
+
   private async hasConfidentialAccess(
     listingId: string,
     viewerUserId?: string,
@@ -525,8 +550,18 @@ export class ListingService {
       where.userId = filters.userId;
     }
 
-    // Pro buyers can access listings earlier. Others see them after 7 days.
-    if (resolvedViewer.viewerType !== 'REGISTERED_PRO') {
+    /**
+     * Pro buyers can access listings earlier. Others see them after 7 days.
+     *
+     * The team is not a buyer waiting their turn. Every other rule here already
+     * says so — sold and blocked listings stay visible to staff — but this one
+     * did not, so a listing published this week was missing from the admin's own
+     * table while the dashboard, which counts the database, still included it.
+     */
+    if (
+      resolvedViewer.viewerType !== 'REGISTERED_PRO' &&
+      !this.isStaffRole(resolvedViewer.role)
+    ) {
       const earlyAccessCutoff = new Date(
         Date.now() - this.earlyAccessDays * 24 * 60 * 60 * 1000,
       );
@@ -569,6 +604,10 @@ export class ListingService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Whether the seller has been through the identity check. The
+            // listing page drew an "ID Verified" badge beside every seller
+            // because it had nothing to consult; this is what it consults.
+            verified: true,
           },
         },
         // Who on the team is looking after this listing, for the admin table.
@@ -671,6 +710,10 @@ export class ListingService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Whether the seller has been through the identity check. The
+            // listing page drew an "ID Verified" badge beside every seller
+            // because it had nothing to consult; this is what it consults.
+            verified: true,
           },
         },
         brand: true,
@@ -751,6 +794,10 @@ export class ListingService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Whether the seller has been through the identity check. The
+            // listing page drew an "ID Verified" badge beside every seller
+            // because it had nothing to consult; this is what it consults.
+            verified: true,
           },
         },
         brand: true,
@@ -813,6 +860,31 @@ export class ListingService {
    * switched on, nothing is granted here and the seller has to approve the
    * buyer first.
    */
+  /**
+   * The conversation this request belongs to.
+   *
+   * A request is written with `chatId: null`, so the seller's queue had nothing
+   * to open: the card listed the buyer and the listing and stopped there. The
+   * pair are already talking somewhere — the buyer reaches the agreement from
+   * the listing, and Contact Seller opens a room for exactly this listing and
+   * these two people. This is that room.
+   *
+   * Null when they have not spoken yet, which is allowed: the card then offers
+   * no chat rather than a broken one.
+   */
+  private async findRequestChatId(
+    listingId: string,
+    buyerId: string,
+    sellerId: string,
+  ): Promise<string | null> {
+    const chat = await this.db.chat.findFirst({
+      where: { listingId, userId: buyerId, sellerId },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
+    });
+    return chat?.id ?? null;
+  }
+
   async acceptConfidentialityAgreement(listingId: string, buyerId: string) {
     const listing = await this.db.listing.findUnique({
       where: { id: listingId },
@@ -856,29 +928,35 @@ export class ListingService {
         return { granted: false, pendingApproval: false, declined: true };
       }
 
+      const chatId = await this.findRequestChatId(listingId, buyerId, listing.userId);
+
       await this.db.listingConfidentialAccess.upsert({
         where: { listingId_buyerId: { listingId, buyerId } },
         create: {
           listingId,
           buyerId,
           grantedBySellerId: listing.userId,
-          chatId: null,
+          chatId,
           status: 'PENDING',
         },
-        update: { status: 'PENDING' },
+        // Kept up to date: a buyer who opens the conversation after asking
+        // should not leave the seller with a card that opens nothing.
+        update: { status: 'PENDING', ...(chatId ? { chatId } : {}) },
       });
 
       return { granted: false, pendingApproval: true };
     }
 
     // This listing does not vet buyers, so accepting the agreement is enough.
+    const autoChatId = await this.findRequestChatId(listingId, buyerId, listing.userId);
+
     await this.db.listingConfidentialAccess.upsert({
       where: { listingId_buyerId: { listingId, buyerId } },
       create: {
         listingId,
         buyerId,
         grantedBySellerId: listing.userId,
-        chatId: null,
+        chatId: autoChatId,
         status: 'APPROVED',
         decidedAt: new Date(),
       },
@@ -886,6 +964,7 @@ export class ListingService {
         grantedBySellerId: listing.userId,
         status: 'APPROVED',
         decidedAt: new Date(),
+        ...(autoChatId ? { chatId: autoChatId } : {}),
       },
     });
 
@@ -911,6 +990,25 @@ export class ListingService {
         listing: {
           include: { brand: true, advertisement: true },
         },
+        /**
+         * The conversation behind the request, as the card shows it.
+         *
+         * The design puts the seller's own label for this buyer beside their
+         * name, and the last thing that was said underneath — so the queue can
+         * be worked through on what is already known about each person, rather
+         * than on a name and a listing alone.
+         */
+        chat: {
+          select: {
+            id: true,
+            chatLabels: { select: { userId: true, label: true } },
+            messages: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { content: true, createdAt: true },
+            },
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
     });
@@ -922,6 +1020,10 @@ export class ListingService {
       buyer: row.buyer,
       chatId: row.chatId,
       requestedAt: row.created_at,
+      // The seller's own label, not whatever the other side wrote.
+      label:
+        row.chat?.chatLabels?.find((entry) => entry.userId === sellerId)?.label ?? null,
+      lastMessage: row.chat?.messages?.[0]?.content ?? null,
     }));
   }
 
@@ -1023,7 +1125,18 @@ export class ListingService {
       }
     }
 
-    return this.db.listingConfidentialAccess.upsert({
+    /**
+     * The conversation this decision belongs to.
+     *
+     * The queue approves without passing one — it has a list of requests, not
+     * of chats — so it is looked up here. Without it the row was written with
+     * `chatId: null` and the seller's card had nothing to open, which is the
+     * state every existing request was in.
+     */
+    const noticeChat =
+      chatId ?? (await this.findRequestChatId(listingId, buyerId, sellerId)) ?? '';
+
+    const granted = await this.db.listingConfidentialAccess.upsert({
       where: {
         listingId_buyerId: {
           listingId,
@@ -1034,18 +1147,60 @@ export class ListingService {
         listingId,
         buyerId,
         grantedBySellerId: sellerId,
-        chatId: chatId || null,
+        chatId: noticeChat || null,
         status: 'APPROVED',
         decidedAt: new Date(),
       },
       update: {
         grantedBySellerId: sellerId,
-        chatId: chatId || null,
+        // Only when we have one. `chatId || null` wiped the conversation the
+        // request was already attached to whenever a seller approved from their
+        // queue, which does not send one — losing the very link the card needs.
+        ...(noticeChat ? { chatId: noticeChat } : {}),
         // Approving clears a pending request and reverses a past refusal.
         status: 'APPROVED',
         decidedAt: new Date(),
       },
     });
+
+    /**
+     * Tell them, in the conversation.
+     *
+     * Approving changed what the buyer could see and said nothing about it: the
+     * listing opened up with no way to know whether a decision had been made or
+     * the page had simply refreshed. Both sides read it, and it stays in the
+     * record.
+     *
+     * Written here rather than through the chat service because that module
+     * already imports this one — asking for it back would close a circle. The
+     * message is two fields; the wording lives in the browser, keyed on `kind`.
+     */
+    if (noticeChat) {
+      try {
+        const meta = { kind: 'CONFIDENTIAL_ACCESS_APPROVED', buyerId };
+        const already = await this.db.message.findFirst({
+          where: { chatId: noticeChat, type: 'SYSTEM', metadata: { equals: meta } },
+          select: { id: true },
+        });
+        if (!already) {
+          await this.db.message.create({
+            data: {
+              chatId: noticeChat,
+              senderId: null,
+              type: 'SYSTEM',
+              content: null,
+              read: false,
+              metadata: meta,
+            },
+          });
+        }
+      } catch (error) {
+        // A notice is not worth failing the approval it describes.
+        console.error('Failed to post confidential-access notice:', error);
+      }
+    }
+
+    return granted;
   }
 
   async revokeConfidentialAccess(
@@ -1116,6 +1271,8 @@ export class ListingService {
   }
 
   async create(userId: string, body: ListingSchemaT) {
+    this.assertPackageChosenToPublish(body.status, body.selectedPackage);
+
     const rules = await this.subscriptionService.getUserSubscriptionRules(userId);
 
     // Seller features now come from the listing's own package, not a Pro
@@ -1380,6 +1537,26 @@ export class ListingService {
       );
     }
 
+    /*
+     * Read the package off the listing when the request does not carry one.
+     *
+     * An edit is a partial thing: switching a draft to PUBLISH usually sends
+     * the status and little else. Judging only what arrived would refuse a
+     * listing that has had a package all along.
+     */
+    if (body.status === 'PUBLISH') {
+      const chosen =
+        body.selectedPackage ??
+        (
+          await this.db.listing.findUnique({
+            where: { id },
+            select: { selectedPackage: true },
+          })
+        )?.selectedPackage;
+
+      this.assertPackageChosenToPublish('PUBLISH', chosen);
+    }
+
     if (body.status === 'BLOCKED' && !this.isStaffRole(actorRole)) {
       throw new ForbiddenException(
         'Only the platform team can block a listing.',
@@ -1571,10 +1748,21 @@ export class ListingService {
       console.log(`📝 Updating listing ${id}: managed_by_ex = ${updateData.managed_by_ex}`);
     }
 
-    // Assignment and block reason. The admin table was already sending
-    // responsibleId; there was simply nothing here to write it with.
+    /**
+     * Who on the team looks after this listing.
+     *
+     * Written through the relation, not as a bare `responsibleId`. Every update
+     * already carries `user: { connect: … }`, and once a relation is addressed
+     * that way Prisma validates the whole payload as a checked input — where a
+     * foreign key written as a plain scalar is not a field at all. The call
+     * threw, the request came back 500, and nothing in it was saved: not the
+     * assignment, and not whatever else the same save was carrying. Which is
+     * why no listing has ever had anyone assigned to it.
+     */
     if (body.responsibleId !== undefined) {
-      updateData.responsibleId = body.responsibleId || null;
+      updateData.responsible = body.responsibleId
+        ? { connect: { id: body.responsibleId } }
+        : { disconnect: true };
     }
 
     if (body.status === 'BLOCKED') {
@@ -1729,6 +1917,36 @@ export class ListingService {
       console.error('Update data that caused error:', JSON.stringify(updateData, null, 2));
       throw error;
     }
+  }
+
+  /**
+   * May this person destroy this listing?
+   *
+   * The delete route carried no `@Roles`, and the roles guard lets anything
+   * through that does not ask for a role — so being signed in as anybody was
+   * enough to remove somebody else's listing by its id. Nothing downstream
+   * checked either: `delete(id)` deleted whatever id it was handed.
+   *
+   * That matters more here than almost anywhere else, because the deletion
+   * cascades: the listing takes its conversations, their messages, its
+   * monitoring alerts and every confidential-access grant with it.
+   */
+  async assertMayDelete(id: string, viewerId?: string, viewerRole?: string | null) {
+    const listing = await this.db.listing.findUnique({
+      where: { id },
+      select: { id: true, userId: true },
+    });
+    if (!listing) {
+      throw new NotFoundException('Listing not found');
+    }
+
+    const role = String(viewerRole || '').toUpperCase();
+    const isStaff = role === 'ADMIN' || role === 'MONITER' || role === 'MODERATOR';
+    if (isStaff || (viewerId && listing.userId === viewerId)) {
+      return listing;
+    }
+
+    throw new ForbiddenException('You can only delete your own listing');
   }
 
   async delete(id: string) {

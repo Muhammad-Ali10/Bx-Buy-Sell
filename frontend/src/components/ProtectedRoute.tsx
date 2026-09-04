@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
  * Shows loading state until auth check completes, then redirects if not authenticated
  */
 export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
 
   // Wait for auth check to complete
   if (loading) {
@@ -27,6 +27,17 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  /**
+   * A blocked account is not a signed-in one.
+   *
+   * The api client ends the session as soon as the server answers, but that
+   * answer only comes with the next request. Reading the flag here closes the
+   * gap on a page that has not asked the server for anything yet.
+   */
+  if ((user as any)?.blocked === true) {
+    return <Navigate to="/login?blocked=1" replace />;
   }
 
   // Render children if authenticated

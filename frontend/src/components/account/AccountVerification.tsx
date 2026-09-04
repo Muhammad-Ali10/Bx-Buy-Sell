@@ -1,11 +1,11 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquare, Mail, ScanFace, Wallet } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { VerificationDialog } from "@/components/account/VerificationDialog";
 import { IdentityVerificationDialog } from "@/components/account/IdentityVerificationDialog";
-import AcquisitionCapacityUpload from "@/components/AcquisitionCapacityUpload";
 import { toast } from "sonner";
 
 /**
@@ -60,11 +60,11 @@ const ROWS: { id: RowId; icon: React.ReactNode; title: string; description: stri
 export const AccountVerification = () => {
   const { user, refreshUser } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const [smsOpen, setSmsOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [identityOpen, setIdentityOpen] = useState(false);
-  const [fundsOpen, setFundsOpen] = useState(false);
 
   const { data } = useQuery<VerificationState | null>({
     queryKey: ["verification-overview", user?.id],
@@ -93,7 +93,15 @@ export const AccountVerification = () => {
     if (id === "sms") setSmsOpen(true);
     if (id === "email") setEmailOpen(true);
     if (id === "identity") setIdentityOpen(true);
-    if (id === "funds") setFundsOpen((current) => !current);
+    /*
+     * Funds has a page of its own.
+     *
+     * It used to expand in place behind `!verified`, so the moment a moderator
+     * finished the review the panel stopped rendering and there was no way back
+     * to it — a buyer with a newer bank statement could not add one. Evidence
+     * ages; the door has to stay open.
+     */
+    if (id === "funds") navigate("/verify-funds");
   };
 
   return (
@@ -159,13 +167,6 @@ export const AccountVerification = () => {
                 </span>
               </button>
 
-              {/* Funds is the one that cannot be settled in a dialog: documents
-                  are uploaded, then a moderator decides. So it opens in place. */}
-              {row.id === "funds" && fundsOpen && !verified && (
-                <div className="mt-3 rounded-xl border border-[#E9EBF2] p-4">
-                  <AcquisitionCapacityUpload />
-                </div>
-              )}
             </div>
           );
         })}

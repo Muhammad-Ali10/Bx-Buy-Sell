@@ -38,6 +38,16 @@ export interface EnrichedChatRoom {
   seller?: ChatParticipant;
   chatLabels?: Array<{ userId: string; label?: "GOOD" | "MEDIUM" | "BAD" | null }>;
   unreadCount?: number;
+  /**
+   * This viewer's own filing of the conversation, resolved server-side.
+   *
+   * `status` above is shared by the buyer, the seller and the team, so it can
+   * never carry a personal decision — when archiving wrote to it, one side
+   * filing a conversation away removed it from the other side's list too.
+   */
+  archived?: boolean;
+  pinned?: boolean;
+  pinnedAt?: string | null;
   // A conversation belongs to one listing. The API has always sent this; the
   // list used to discard it and merge every chat between the same two people.
   listingId?: string | null;

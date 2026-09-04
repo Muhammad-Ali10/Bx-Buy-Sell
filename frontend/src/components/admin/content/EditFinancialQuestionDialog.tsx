@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useUpdateFinancialQuestion } from "@/hooks/useUpdateFinancialQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 
 interface FinancialQuestion {
   id: string;
   question: string;
   answer_type: string;
   option?: string[];
+  required?: boolean;
 }
 
 interface EditFinancialQuestionDialogProps {
@@ -35,6 +37,9 @@ export const EditFinancialQuestionDialog = ({ open, onOpenChange, question }: Ed
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  /* Every other question dialog offers this; this section was the one
+     place an administrator could not say whether a field must be filled. */
+  const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateFinancialQuestion();
 
   useEffect(() => {
@@ -49,6 +54,9 @@ export const EditFinancialQuestionDialog = ({ open, onOpenChange, question }: Ed
       } else {
         setOptions("");
       }
+      // Anything saved before this dialog offered the choice has no value
+      // stored; those read as required, which is the safer of the two.
+      setRequired(question.required !== false);
     }
   }, [question]);
 
@@ -68,6 +76,7 @@ export const EditFinancialQuestionDialog = ({ open, onOpenChange, question }: Ed
         question: questionText.trim(),
         answer_type: questionType,
         options: optionsArray,
+        required,
       },
       {
         onSuccess: () => {
@@ -145,6 +154,7 @@ export const EditFinancialQuestionDialog = ({ open, onOpenChange, question }: Ed
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

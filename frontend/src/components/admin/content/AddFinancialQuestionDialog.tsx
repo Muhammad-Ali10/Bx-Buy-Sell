@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useAddFinancialQuestion } from "@/hooks/useAddFinancialQuestion";
+import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 
 interface AddFinancialQuestionDialogProps {
   open: boolean;
@@ -28,6 +29,9 @@ export const AddFinancialQuestionDialog = ({ open, onOpenChange }: AddFinancialQ
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  /* Every other question dialog offers this; this section was the one
+     place an administrator could not say whether a field must be filled. */
+  const [required, setRequired] = useState(true);
   const addQuestion = useAddFinancialQuestion();
 
   const handleSave = () => {
@@ -45,6 +49,7 @@ export const AddFinancialQuestionDialog = ({ open, onOpenChange }: AddFinancialQ
         question: question.trim(),
         answer_type: questionType,
         options: optionsArray,
+        required,
       },
       {
         onSuccess: () => {
@@ -117,6 +122,7 @@ export const AddFinancialQuestionDialog = ({ open, onOpenChange }: AddFinancialQ
               />
             </div>
           )}
+          <QuestionRequiredToggle required={required} onChange={setRequired} />
         </div>
         <div className="flex justify-center gap-3 pt-4">
           <Button 

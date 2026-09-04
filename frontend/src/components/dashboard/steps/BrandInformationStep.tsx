@@ -18,6 +18,7 @@ import {
   normalizeDomain,
 } from "@/lib/domainUtils";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
+import { sanitizeNumberInput } from "@/lib/numberInput";
 
 interface BrandInformationStepProps {
   formData?: any;
@@ -158,9 +159,12 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
       case "NUMBER":
         return (
           <Input
-            type="number"
+            type="text"
+            inputMode="decimal"
             value={value}
-            onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
+            onChange={(e) =>
+              setFormData({ ...formData, [question.id]: sanitizeNumberInput(e.target.value) })
+            }
             placeholder="Enter a number"
             className="bg-muted/50"
           />
@@ -305,7 +309,24 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
         )}
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 sm:mt-8">
+      {/*
+        * Clickable even while a dropdown is open.
+        *
+        * Radix sets `pointer-events: none` on the document body for as long as
+        * a Select is open, so the click that closes the menu never reaches
+        * anything else — Continue took two presses whenever a dropdown had
+        * just been used, and the first one looked like a dead button.
+        *
+        * `auto` here is Radix's own way out: the body's `none` is inherited,
+        * and an element that sets its own value keeps taking clicks. Applied
+        * to these two buttons rather than to the Select itself, because
+        * unblocking the whole page would let a stray click land anywhere while
+        * a menu is open.
+        */}
+      <div
+        className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 sm:mt-8"
+        style={{ pointerEvents: "auto" }}
+      >
         <Button variant="outline" onClick={onBack} className="w-full sm:w-auto">
           Back
         </Button>

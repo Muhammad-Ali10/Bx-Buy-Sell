@@ -49,12 +49,55 @@ export const HandoverStep = ({ formData: parentFormData, onNext, onPersist }: Ha
   };
 
   const handleYesNoChange = (questionId: string, value: string) => {
-    setFormData(prev => ({ ...prev, [questionId]: value }));
+    setFormData(prev => {
+      const next: Record<string, any> = { ...prev, [questionId]: value };
+
+      /**
+       * Withdrawing support takes its duration with it.
+       *
+       * The months field only appears once support is promised, but hiding it
+       * does not empty it: answer "Yes", type six, change to "No", and the six
+       * is still in the form and still saved — the listing then advertises a
+       * support period nobody offers.
+       */
+      const answered = (questions ?? []).find((q: any) => q.id === questionId);
+      if (answered && isSupportOfferedQuestion(String(answered.question || '')) && !isYes(value)) {
+        for (const other of questions ?? []) {
+          if (isSupportMonthsQuestion(String(other.question || ''))) {
+            next[other.id] = '';
+          }
+        }
+      }
+
+      return next;
+    });
   };
+
+/**
+ * "How long in months" only makes sense once support has been promised.
+ *
+ * The two are recognised by their wording. Questions are rows an administrator
+ * writes, and nothing in that row can point at another one — `answer_for` names
+ * the section (HANDOVER, SOCIAL, …), never a parent question. So matching the
+ * text is the only join available, and if the wording is ever edited the pair
+ * simply comes apart and the field shows unconditionally: the safe direction to
+ * fail, since a visible field can be answered and a hidden one cannot.
+ *
+ * Two spellings are in the database — "How long in months" and an older "How
+ * long is month" — so the test is loose enough to catch both.
+ */
+const isSupportOfferedQuestion = (question: string) =>
+  /post\s*[- ]?\s*sale/i.test(question) && /support/i.test(question);
+
+const isSupportMonthsQuestion = (question: string) =>
+  /how\s+long/i.test(question) && /month/i.test(question);
+
+const isYes = (value: unknown) => String(value ?? '').trim().toLowerCase() === 'yes';
 
   const handleInputChange = (questionId: string, value: string) => {
     setFormData(prev => ({ ...prev, [questionId]: value }));
   };
+
 
   const validateForm = (): { isValid: boolean; errors: string[] } => {
     const errors: string[] = [];
@@ -155,6 +198,18 @@ export const HandoverStep = ({ formData: parentFormData, onNext, onPersist }: Ha
             const options: string[] =
               question.option && question.option.length > 0 ? question.option : FALLBACK_ASSETS;
 
+            /**
+             * How long support lasts is only a question once support is offered.
+             * Asked unconditionally, it invited a seller to promise six months
+             * of something they had just said they do not provide.
+             */
+            if (isSupportMonthsQuestion(String(question.question || ''))) {
+              const offered = (questions ?? []).find((q: any) =>
+                isSupportOfferedQuestion(String(q.question || '')),
+              );
+              if (offered && !isYes(formData[offered.id])) return null;
+            }
+
             return (
               <div key={question.id} className="space-y-3 ">
                 <Label className="text-base md:text-lg font-semibold text-foreground block">
@@ -215,11 +270,20 @@ export const HandoverStep = ({ formData: parentFormData, onNext, onPersist }: Ha
                 )}
 
                 {isNumber && (
+                  /* Digits and nothing else.
+                     `type="number"` sounds like it does this and does not: a
+                     browser accepts "e" (1e5 is a number), a leading minus, a
+                     decimal point, and whatever is pasted in. Stripping on the
+                     way in is the only version that holds. `inputMode` still
+                     brings up the number keypad on a phone. */
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
                     placeholder="0"
                     value={formData[question.id] || ""}
-                    onChange={(e) => handleInputChange(question.id, e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange(question.id, e.target.value.replace(/\D/g, ""))
+                    }
                     className="w-full h-14 rounded-xl bg-background"
                   />
                 )}

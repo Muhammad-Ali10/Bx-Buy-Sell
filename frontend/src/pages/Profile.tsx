@@ -10,9 +10,10 @@ import { AccountSection, AccountField } from "@/components/account/AccountSectio
 import { DangerZone } from "@/components/account/DangerZone";
 import { AccountSubscriptions } from "@/components/account/AccountSubscriptions";
 import { AccountBilling } from "@/components/account/AccountBilling";
-import { AccountVerification } from "@/components/account/AccountVerification";
 import { useSubscriptionTier } from "@/hooks/useSubscriptionTier";
 import { VerificationDialog } from "@/components/account/VerificationDialog";
+import { AccountVerification } from "@/components/account/AccountVerification";
+import { ChangePasswordDialog } from "@/components/account/ChangePasswordDialog";
 import { IdentityVerificationDialog } from "@/components/account/IdentityVerificationDialog";
 
 /**
@@ -53,8 +54,12 @@ const EMPTY: ProfileState = {
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Overview" },
-  // The client asked for the verification screen to live here rather than on a
-  // page of its own.
+  /*
+   * Verification lives here, and only here.
+   *
+   * The left sidebar used to carry a "Verify Your Account" entry as well; this
+   * is the address the client refers to, so it is the one that stays.
+   */
   { id: "verification", label: "Verification" },
   { id: "subscriptions", label: "Subscriptions" },
   { id: "billing", label: "Billing" },
@@ -74,6 +79,7 @@ const Profile = () => {
   const [editingSection, setEditingSection] = useState<"personal" | "address" | null>(null);
   const [phoneDialogOpen, setPhoneDialogOpen] = useState(false);
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [identityDialogOpen, setIdentityDialogOpen] = useState(false);
 
   /**
@@ -267,7 +273,13 @@ const Profile = () => {
                       label={user.email || "—"}
                       action={{ text: "Change", onClick: () => setEmailDialogOpen(true) }}
                     />
-                    <StatusRow icon={<Lock className="h-4 w-4" />} label="Password: ••••••" />
+                    {/* The one row in this column with nothing to press. The
+                        rest all offer the thing they describe. */}
+                    <StatusRow
+                      icon={<Lock className="h-4 w-4" />}
+                      label="Password: ••••••"
+                      action={{ text: "Edit", onClick: () => setPasswordDialogOpen(true) }}
+                    />
                     <StatusRow
                       icon={<Phone className="h-4 w-4" />}
                       label={profile.phone || "No phone number"}
@@ -291,7 +303,7 @@ const Profile = () => {
                     <StatusRow
                       icon={<ShieldCheck className="h-4 w-4" />}
                       label="Acquisition Capacity"
-                      action={{ text: "Verify Now", onClick: () => navigate("/verify-account") }}
+                      action={{ text: "Verify Now", onClick: () => navigate("/verify-funds") }}
                     />
                   </ul>
                 </section>
@@ -415,6 +427,11 @@ const Profile = () => {
 
           {/* Same flow, different channel — the client asked for the email
               change to walk the path already built for SMS. */}
+          <ChangePasswordDialog
+            open={passwordDialogOpen}
+            onOpenChange={setPasswordDialogOpen}
+          />
+
           <VerificationDialog
             open={emailDialogOpen}
             onOpenChange={setEmailDialogOpen}

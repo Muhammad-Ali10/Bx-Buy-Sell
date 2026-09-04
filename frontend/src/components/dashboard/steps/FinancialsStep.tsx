@@ -18,6 +18,10 @@ import {
   syncFinancialGrid,
   type AdminFinancialsTemplate,
   type FinancialColumn,
+  resolveFinancialColumns,
+  financialsReminder,
+  coversFullYear,
+  coverageLabel,
 } from "@/lib/financialTableUtils";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 
@@ -102,12 +106,14 @@ const padOverallCostsData = (
   return { ...data, [OVERALL_COSTS_ROW]: row };
 };
 
-const defaultColumnLabels = (): FinancialColumn[] => [
-  { key: "2023", label: "2023" },
-  { key: "2024", label: "2024" },
-  { key: "today", label: getTodayDate(), isToday: true },
-  { key: "Forecast 2025", label: "Forecast 2025" },
-];
+/**
+ * The four columns, worked out rather than written down.
+ *
+ * These used to be the literals "2023", "2024", today and "Forecast 2025", so
+ * a listing created in 2026 still opened on 2023 and 2024. They now come from
+ * whatever year the table is still being filled in for.
+ */
+const defaultColumnLabels = (): FinancialColumn[] => resolveFinancialColumns(null, {});
 
 const defaultRowLabels = [
   REVENUE_ROW,
@@ -156,7 +162,13 @@ const buildInitialTableState = (isEditListing: boolean) => {
     const rows = normalizeRowLabels(adminTemplate.rowLabels);
     return {
       rowLabels: rows,
-      columnLabels: adminTemplate.columnLabels,
+      // Re-resolved on open: a table saved before the seller closed off last
+      // year should now be showing the next window, and one saved in an older
+      // build has no year or date on its columns at all.
+      columnLabels: resolveFinancialColumns(
+        adminTemplate.columnLabels,
+        adminTemplate.financialData,
+      ),
       financialData: adminTemplate.financialData,
       fromAdmin: true,
     };
@@ -187,7 +199,9 @@ export const FinancialsStep = ({
   // currency code is persisted (inside the financials JSON) so it is remembered.
   const [currency, setCurrency] = useState<string>(parentFormData?.currency || "USD");
   // Inline editing state for the "as-of" date column (#4) and custom rows (#6).
-  const [editingDate, setEditingDate] = useState(false);
+  // Which column's date is open for editing. Was a single boolean, so only the
+  // year-to-date column could ever be changed.
+  const [editingDateKey, setEditingDateKey] = useState<string | null>(null);
   const [customRows, setCustomRows] = useState<string[]>([]);
   const [addingRow, setAddingRow] = useState(false);
   const [newRowName, setNewRowName] = useState("");
@@ -227,6 +241,19 @@ export const FinancialsStep = ({
       setCurrency(parentFormData.currency);
     }
   }, [parentFormData?.currency]);
+
+  /**
+   * Records how far a column's figures run.
+   *
+   * Kept apart from the label: the label names the year, the date says how
+   * much of it is covered. Storing the date *as* the label is what made a
+   * column's meaning depend on its position.
+   */
+  const setColumnDataThrough = (key: string, dmy: string) => {
+    setColumnLabels((prev) =>
+      prev.map((col) => (col.key === key ? { ...col, dataThrough: dmy } : col)),
+    );
+  };
 
   const setColumnLabel = (key: string, label: string) => {
     setColumnLabels((prev) =>
@@ -638,6 +665,28 @@ export const FinancialsStep = ({
         </p>
       )}
 
+      {/* Only while a year is still open, and only for the seller — a buyer
+          can see the date in the header and cannot do anything about it. */}
+      {financialsReminder(columnLabels) && (
+        <div
+          style={{
+            width: '100%',
+            borderRadius: '12px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            background: 'rgba(254, 243, 199, 1)',
+            border: '1px solid rgba(251, 211, 141, 1)',
+            fontFamily: 'Lufga',
+            fontWeight: 500,
+            fontSize: '13px',
+            lineHeight: '150%',
+            color: 'rgba(120, 53, 15, 1)',
+          }}
+        >
+          {financialsReminder(columnLabels)}
+        </div>
+      )}
+
       {/* Profit & Loss Table Container */}
       <div
         style={{
@@ -730,19 +779,24 @@ export const FinancialsStep = ({
                 border: '1px solid rgba(255, 255, 255, 1)',
               }}
             >
-              {editingDate && col.isToday ? (
+              {editingDateKey === col.key ? (
                 <input
                   type="date"
                   autoFocus
-                  defaultValue={dmyToIso(col.label)}
+                  defaultValue={dmyToIso(col.dataThrough || col.label)}
+                  // Nothing beyond the column's own year: a date in the future
+                  // would let a part year be passed off as a whole one, which
+                  // is the exact thing these dates exist to prevent.
+                  max={col.year ? `${col.year}-12-31` : undefined}
+                  min={col.year ? `${col.year}-01-01` : undefined}
                   onBlur={(e) => {
                     const dmy = isoToDmy(e.target.value);
-                    if (dmy) setColumnLabel(col.key, dmy);
-                    setEditingDate(false);
+                    if (dmy) setColumnDataThrough(col.key, dmy);
+                    setEditingDateKey(null);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                    if (e.key === "Escape") setEditingDate(false);
+                    if (e.key === "Escape") setEditingDateKey(null);
                   }}
                   style={{
                     width: '90%',
@@ -755,19 +809,38 @@ export const FinancialsStep = ({
                 />
               ) : (
                 <span
-                  className="font-lufga text-black text-center px-1 inline-flex items-center gap-1"
+                  className="font-lufga text-black text-center px-1 inline-flex flex-col items-center"
                   style={{ fontFamily: 'Lufga', fontWeight: 700, fontSize: '14px', color: 'rgba(0, 0, 0, 1)' }}
                 >
-                  {displayColumnLabel(col)}
-                  {col.isToday && (
-                    <button
-                      type="button"
-                      onClick={() => setEditingDate(true)}
-                      title="Edit date"
-                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, display: 'inline-flex' }}
-                    >
-                      <Pencil style={{ width: 12, height: 12 }} />
-                    </button>
+                  <span className="inline-flex items-center gap-1">
+                    {displayColumnLabel(col)}
+                    {/* The pencil belongs on any column still open — the year
+                        to date, and any year the seller has not closed off. A
+                        column that already runs to 31 December has nothing
+                        left to correct. */}
+                    {/* Any open column, and always the year to date.
+                        The client's rule alone — a pencil only where the date
+                        is not 31 December — would take the pencil away the
+                        moment it was used, so a seller who set the date by
+                        mistake could never put it back. */}
+                    {col.kind !== 'forecast' &&
+                      (col.kind === 'ytd' || !coversFullYear(col.dataThrough)) && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingDateKey(col.key)}
+                          title="Edit the date these figures run to"
+                          style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, display: 'inline-flex' }}
+                        >
+                          <Pencil style={{ width: 12, height: 12 }} />
+                        </button>
+                      )}
+                  </span>
+                  {/* Shown only while the year is unfinished; on a whole year
+                      the date says nothing the heading does not. */}
+                  {col.kind !== 'forecast' && coverageLabel(col) && (
+                    <span style={{ fontWeight: 500, fontSize: '11px', opacity: 0.75 }}>
+                      {coverageLabel(col)}
+                    </span>
                   )}
                 </span>
               )}

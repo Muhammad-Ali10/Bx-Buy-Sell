@@ -1,11 +1,40 @@
-import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { AuthLayout } from "@/components/AuthLayout";
+
+/**
+ * Say why, when someone was put out rather than simply signed out.
+ *
+ * Two reasons reach here: a blocked account, and a role that changed under a
+ * live session. Both end the session from the api client or the auth hook,
+ * which reload the page — so the reason has to travel in the address, since the
+ * event that carried it does not survive a reload.
+ *
+ * The reason travels in the address because the api client reloads this page
+ * on its way out, and the event that carried it does not survive a reload.
+ */
+const SignedOutNotice = () => {
+  const [params] = useSearchParams();
+  useEffect(() => {
+    if (params.get('blocked') === '1') {
+      toast.error('This account has been blocked. Please contact support.', {
+        duration: 8000,
+      });
+      return;
+    }
+    if (params.get('role') === '1') {
+      toast.info('Your role was changed. Please sign in again to continue.', {
+        duration: 8000,
+      });
+    }
+  }, [params]);
+  return null;
+};
 
 export default function AdminLogin() {
   const navigate = useNavigate();
@@ -56,6 +85,7 @@ export default function AdminLogin() {
 
   return (
     <AuthLayout variant="admin">
+      <SignedOutNotice />
       <div className="w-full max-w-[528px] mx-auto space-y-8">
         <div className="space-y-3">
           {/* Admin Area */}

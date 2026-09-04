@@ -4,6 +4,8 @@ import { apiClient } from "@/lib/api";
 import { getChatListingImage, getChatListingTitle } from "@/lib/chatListing";
 import { toast } from "sonner";
 import { useState } from "react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ChatLabelChip } from "./ChatLabelChip";
 
 /**
  * Buyers waiting on a seller who vets by hand.
@@ -21,6 +23,10 @@ interface AccessRequest {
   listing: any;
   chatId: string | null;
   requestedAt: string;
+  /** The seller's own label for this buyer, shown beside their name. */
+  label?: "GOOD" | "MEDIUM" | "BAD" | null;
+  /** The last thing said in the conversation, as the design previews it. */
+  lastMessage?: string | null;
   buyer: {
     id: string;
     first_name?: string | null;
@@ -32,7 +38,19 @@ interface AccessRequest {
 const buyerName = (buyer: AccessRequest["buyer"]) =>
   `${buyer?.first_name || ""} ${buyer?.last_name || ""}`.trim() || "A buyer";
 
-export const ConfidentialAccessRequests = () => {
+export const ConfidentialAccessRequests = ({
+  onOpenChat,
+}: {
+  /**
+   * Open the conversation this request came out of.
+   *
+   * The card listed the buyer and the listing and offered only Approve and
+   * Decline — so a seller deciding whether to hand over confidential details
+   * could not read what the buyer had actually said. The conversation is right
+   * there; it just had no way in.
+   */
+  onOpenChat?: (request: AccessRequest) => void;
+}) => {
   const queryClient = useQueryClient();
   const [deciding, setDeciding] = useState<string | null>(null);
 
@@ -107,7 +125,7 @@ export const ConfidentialAccessRequests = () => {
               >
                 <div
                   className="shrink-0 overflow-hidden rounded-md bg-black/5"
-                  style={{ width: '44px', height: '38px' }}
+                  style={{ width: '50px', height: '44px' }}
                 >
                   {image && (
                     <img
@@ -119,20 +137,54 @@ export const ConfidentialAccessRequests = () => {
                   )}
                 </div>
 
-                <div className="min-w-0 flex-1">
+                {/* The whole middle of the card, so the target is the row and
+                    not a small link inside it. Only when there is a
+                    conversation to open — a request can arrive before the two
+                    have spoken. */}
+                {/* Three lines, as the design has them: which listing, who is
+                    asking and how they have been marked, and the last thing
+                    they said. A seller works the queue on those, not on a name
+                    alone. The whole block opens the conversation, so the target
+                    is the row rather than a small link inside it. */}
+                <button
+                  type="button"
+                  disabled={!request.chatId || !onOpenChat}
+                  onClick={() => request.chatId && onOpenChat?.(request)}
+                  className="min-w-0 flex-1 text-left disabled:cursor-default"
+                  title={request.chatId ? 'Open this conversation' : 'No conversation yet'}
+                >
                   <p
-                    className="m-0 truncate text-[13px] font-semibold text-[#0F172A]"
+                    className={`m-0 truncate text-[13px] font-semibold text-[#0F172A] ${
+                      request.chatId && onOpenChat ? 'hover:underline' : ''
+                    }`}
                     style={{ fontFamily: 'Lufga' }}
                   >
                     {getChatListingTitle(request.listing) || 'Your listing'}
                   </p>
+
+                  <span className="mt-0.5 flex items-center gap-1.5">
+                    <Avatar className="h-4 w-4 flex-shrink-0">
+                      <AvatarImage src={request.buyer?.profile_pic || undefined} />
+                      <AvatarFallback className="text-[8px]">
+                        {buyerName(request.buyer).charAt(0)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span
+                      className="truncate text-[11px] font-medium text-[#0F172A]"
+                      style={{ fontFamily: 'Lufga' }}
+                    >
+                      {buyerName(request.buyer)}
+                    </span>
+                    <ChatLabelChip label={request.label} />
+                  </span>
+
                   <p
-                    className="m-0 truncate text-[11px] text-[#64748B]"
+                    className="m-0 mt-0.5 truncate text-[11px] text-[#64748B]"
                     style={{ fontFamily: 'Lufga' }}
                   >
-                    {buyerName(request.buyer)} wants the confidential details
+                    {request.lastMessage || 'Wants the confidential details'}
                   </p>
-                </div>
+                </button>
 
                 <div className="flex shrink-0 items-center gap-1.5">
                   <button

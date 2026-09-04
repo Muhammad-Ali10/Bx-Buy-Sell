@@ -6,8 +6,25 @@ import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
 import { normalizeDomainAnswer } from "@/lib/domainUtils";
 import { serializeMediaUrls } from "@/lib/mediaUtils";
+import { isQuestionRequired } from "@/lib/questionRequired";
 import { usePlans } from "@/hooks/usePlans";
-import { Check, Crown, Info, Lock, UserRoundCheck, Ban, CircleCheck } from "lucide-react";
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  CircleCheck,
+  Crown,
+  Info,
+  Lock,
+  UserRoundCheck,
+} from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   ADDON_LABELS,
@@ -84,6 +101,8 @@ export const PackagesStep = ({
     formData.approveBuyersManually === true,
   );
   const [agreementAccepted, setAgreementAccepted] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(true);
+  const [termsOpen, setTermsOpen] = useState(false);
 
   const { data: plans, isLoading: plansLoading } = usePlans();
   const { data: brandQuestions } = useBrandQuestions();
@@ -132,7 +151,8 @@ export const PackagesStep = ({
 
     const checkSet = (questions: any[] | undefined, answers: Record<string, any>) => {
       (questions || []).forEach((q: any) => {
-        if (q?.required !== true) return;
+        // One shared rule, so this cannot disagree with the step that asked.
+        if (!isQuestionRequired(q)) return;
         const type = String(q?.answer_type || "").toUpperCase();
         if (["PHOTO", "PHOTO_UPLOAD", "FILE", "FILE_UPLOAD"].includes(type)) return;
         if (isHidden(q)) return;
@@ -155,6 +175,19 @@ export const PackagesStep = ({
   const isPaidPackage = selection.packageId === "STARTER" || selection.packageId === "PREMIUM";
 
   const handleNextStep = () => {
+    /*
+     * A package is a choice, not a default.
+     *
+     * Nothing asked for one, so a seller could walk past these cards and
+     * publish with `selectedPackage` still null — and because `isPaidPackage`
+     * reads null as "not paid", they were quietly sent down the free route.
+     * Thirty of the listings now live were published that way.
+     */
+    if (!selection.packageId) {
+      toast.error("Please choose a package before continuing.");
+      return;
+    }
+
     const missing = getMissingMandatoryFields();
     if (missing.length > 0) {
       // Naming the fields turns a dead end into something the seller can act on.
@@ -656,19 +689,32 @@ export const PackagesStep = ({
           </p>
         </div>
 
+        {/* The design names the two packages this offer belongs to rather than
+            the one in hand — this screen is only reached on Starter or
+            Premium, so it reads as the rule it is. */}
         <div className="mt-8 rounded-2xl bg-muted/40 p-4 text-sm">
           Because you have selected a{" "}
-          <span className="font-semibold">
-            {selection.packageId ? PACKAGE_LABELS[selection.packageId] : "package"}
-          </span>
-          , you can additionally choose to manually approve buyers.
+          <span className="font-semibold">Starter or Premium package</span>, you can
+          additionally choose to manually approve buyers.
         </div>
 
         <div className="mt-6 rounded-2xl border border-border p-5">
           <div className="flex items-center justify-between gap-4">
-            <Label htmlFor="approve-buyers" className="text-base font-semibold">
+            {/* The chevron in the design does something: it folds the two
+                explanations away once they have been read. */}
+            <button
+              type="button"
+              onClick={() => setApproveOpen((shown) => !shown)}
+              aria-expanded={approveOpen}
+              className="flex items-center gap-2 text-base font-semibold"
+            >
               Approve Buyers Manually
-            </Label>
+              {approveOpen ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </button>
             <Switch
               id="approve-buyers"
               checked={approveBuyersManually}
@@ -676,6 +722,7 @@ export const PackagesStep = ({
             />
           </div>
 
+          {approveOpen && (
           <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="rounded-xl bg-muted/40 p-4">
               <div className="flex items-center gap-2 font-semibold text-sm mb-2">
@@ -700,19 +747,16 @@ export const PackagesStep = ({
               </p>
             </div>
           </div>
+          )}
         </div>
 
-        <div className="mt-8 flex items-center gap-4">
-          <Button
-            variant="outline"
-            onClick={() => setScreen("packages")}
-            className="rounded-full h-12 px-8"
-          >
-            Back
-          </Button>
+        {/* One button, as the design has it. Going back is the sidebar's job —
+            its step list is clickable, and picking Packages there brings this
+            component back to its first screen. */}
+        <div className="mt-8">
           <Button
             onClick={() => setScreen("agreement")}
-            className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 flex-1 font-semibold"
+            className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 w-full font-semibold"
           >
             Next Step
           </Button>
@@ -743,6 +787,18 @@ export const PackagesStep = ({
             <li>→ Not contact buyers outside the platform</li>
             <li>→ Conduct all communication through the EX Platform</li>
           </ul>
+
+          {/* In the design and missing here. There is no terms page on the
+              platform to link to — the footer's own "Terms Conditions" points
+              at "#" — so it opens what the seller is agreeing to rather than
+              pointing at a page that does not exist. */}
+          <button
+            type="button"
+            onClick={() => setTermsOpen(true)}
+            className="mt-4 text-sm font-medium underline underline-offset-2"
+          >
+            View Full Terms
+          </button>
         </div>
 
         <label className="mt-6 flex items-start gap-3 cursor-pointer">
@@ -758,21 +814,42 @@ export const PackagesStep = ({
           other remedies available under our Terms and Conditions.
         </p>
 
-        <div className="mt-8 flex items-center gap-4">
-          <Button
-            variant="outline"
-            onClick={() => setScreen(isPaidPackage ? "confidentiality" : "packages")}
-            className="rounded-full h-12 px-8"
-            disabled={isSubmitting}
-          >
-            Back
-          </Button>
+        <Dialog open={termsOpen} onOpenChange={setTermsOpen}>
+          <DialogContent className="max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle>Seller Agreement — Full Terms</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm text-muted-foreground">
+              <p className="m-0">By publishing a listing on this platform, you agree to:</p>
+              <ul className="m-0 list-disc space-y-1.5 pl-5">
+                <li>Keep all communication with buyers confidential.</li>
+                <li>Not contact buyers outside the platform.</li>
+                <li>Conduct all communication through the EX Platform.</li>
+              </ul>
+              <p className="m-0">
+                Breaching these terms may result in listing removal, account suspension,
+                legal action, and other remedies available under our Terms and Conditions.
+              </p>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <div className="mt-8">
           <Button
             onClick={handleAcceptAndCheckout}
             disabled={!agreementAccepted || isSubmitting}
-            className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 flex-1 font-semibold"
+            className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 w-full font-semibold"
           >
-            {isSubmitting ? "Please wait..." : "Accept & Go to Checkout"}
+            {/*
+              * Minimum costs nothing, so there is no checkout to go to — the
+              * listing is activated the moment it is chosen. Promising a
+              * checkout and then publishing is a small lie the seller notices.
+              */}
+            {isSubmitting
+              ? "Please wait..."
+              : isPaidPackage
+                ? "Accept & Go to Checkout"
+                : "Accept & Publish Listing"}
           </Button>
         </div>
       </div>
@@ -984,9 +1061,12 @@ export const PackagesStep = ({
         >
           {isSubmitting ? "Saving..." : "Save as Draft"}
         </Button>
+        {/* Held closed until a package is picked, so the requirement is visible
+            before the press rather than explained after it. */}
         <Button
           onClick={handleNextStep}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !selection.packageId}
+          title={selection.packageId ? undefined : "Choose a package to continue"}
           className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 flex-1 w-full font-semibold"
         >
           Next Step

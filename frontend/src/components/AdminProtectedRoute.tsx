@@ -30,6 +30,18 @@ export const AdminProtectedRoute = ({ children, allowedRoles }: AdminProtectedRo
     return <Navigate to="/admin/login" replace />;
   }
 
+  /**
+   * Blocked, so not a team member either.
+   *
+   * This checked the role and nothing else, so a blocked moderator still got
+   * the whole team area drawn around them — sidebar, header, every screen —
+   * and only the data inside it failed, one 403 at a time. The area itself is
+   * the thing they should not be seeing.
+   */
+  if ((user as any).blocked === true) {
+    return <Navigate to="/admin/login?blocked=1" replace />;
+  }
+
   // Check if user has required role
   const userRole = user.role?.toUpperCase();
   const roleAllowlist = (allowedRoles?.length

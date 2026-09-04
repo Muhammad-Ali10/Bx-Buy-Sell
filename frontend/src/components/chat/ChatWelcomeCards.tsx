@@ -7,11 +7,20 @@
  * conversation gets them too, without writing a row into anyone's history.
  */
 
+import DealProcessCard from "./DealProcessCard";
+
 interface ChatWelcomeCardsProps {
   onStartDeal: () => void;
+  /**
+   * True once someone has pressed the button and the deal is under way.
+   *
+   * The invitation goes when it does. Asking a pair who have already started
+   * whether they are ready to start reads as the platform not having noticed.
+   */
+  dealStarted?: boolean;
 }
 
-const ChatWelcomeCards = ({ onStartDeal }: ChatWelcomeCardsProps) => (
+const ChatWelcomeCards = ({ onStartDeal, dealStarted }: ChatWelcomeCardsProps) => (
   <div className="flex flex-col gap-3 mb-4">
     <div
       className="rounded-xl px-4 py-3.5"
@@ -40,33 +49,7 @@ const ChatWelcomeCards = ({ onStartDeal }: ChatWelcomeCardsProps) => (
       </div>
     </div>
 
-    <div
-      className="rounded-xl px-4 py-3.5"
-      style={{ background: 'rgba(240, 253, 244, 1)', border: '1px solid rgba(187, 240, 200, 1)' }}
-    >
-      <h4
-        className="m-0 text-[14px] font-semibold text-[#0F172A]"
-        style={{ fontFamily: 'Lufga' }}
-      >
-        Ready to start the deal process?
-      </h4>
-      <p
-        className="mt-1 mb-0 text-[12.5px] leading-relaxed text-[#3F6B4B]"
-        style={{ fontFamily: 'Lufga' }}
-      >
-        Once both parties are ready to move forward, simply click{' '}
-        <strong>&ldquo;Start Deal Process&rdquo;</strong>. We will assist with negotiations,
-        contracts and closing.
-      </p>
-      <button
-        type="button"
-        onClick={onStartDeal}
-        className="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-[13px] font-medium text-black transition-colors hover:brightness-95"
-        style={{ background: 'rgba(174, 243, 31, 1)', fontFamily: 'Lufga' }}
-      >
-        <span aria-hidden>🤝</span> Start Deal Process
-      </button>
-    </div>
+    {!dealStarted && <DealProcessCard onStartDeal={onStartDeal} />}
   </div>
 );
 

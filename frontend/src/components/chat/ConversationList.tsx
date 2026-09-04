@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { chatRoomsQueryKey, fetchChatRooms, type EnrichedChatRoom } from "@/lib/chatRooms";
 import { getChatListingImage, getChatListingTitle } from "@/lib/chatListing";
 import ConfidentialAccessRequests from "@/components/chat/ConfidentialAccessRequests";
-import { formatChatTime } from "@/lib/timeFormatter";
+import { ChatLabelChip } from "./ChatLabelChip";
 import { cn } from "@/lib/utils";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import { Socket } from "socket.io-client";
@@ -35,6 +35,8 @@ interface Conversation {
   unreadCount: number;
   isOnline?: boolean;
   isPinned?: boolean;
+  /** When it was pinned, so several pins keep a sensible order. */
+  pinnedAt?: string | null;
   isArchived: boolean;
   label?: 'GOOD' | 'MEDIUM' | 'BAD' | null;
 }
@@ -64,7 +66,6 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
   const [showArchived, setShowArchived] = useState(false);
   // Bumped when pinned chats change (cross-tab storage event) so the ordering
   // re-derives locally without a network refetch.
-  const [pinnedVersion, setPinnedVersion] = useState(0);
   const socketRef = useRef<Socket | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
 
@@ -85,15 +86,6 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
     refetchInterval: 30_000,
     refetchOnWindowFocus: false,
   });
-  const readPinnedChatIds = () => {
-    try {
-      const rawPinned = localStorage.getItem("pinned_chat_ids");
-      return rawPinned ? (JSON.parse(rawPinned) as string[]) : [];
-    } catch (error) {
-      console.error("Error reading pinned chats:", error);
-      return [];
-    }
-  };
 
   useEffect(() => {
     // Set up WebSocket connection for real-time updates
@@ -153,12 +145,6 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
     // NOTE: the 30s fallback poll now lives on the shared query
     // (refetchInterval) instead of a manual interval here.
 
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === "pinned_chat_ids") {
-        // Pin order is derived locally from localStorage — no refetch needed.
-        setPinnedVersion((v) => v + 1);
-      }
-    };
     const handleChatUnarchived = (event: Event) => {
       const customEvent = event as CustomEvent<{
         chatId?: string;
@@ -172,7 +158,6 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
       }
       scheduleFetch(0);
     };
-    window.addEventListener("storage", handleStorage);
     window.addEventListener("chat:unarchived", handleChatUnarchived);
 
     return () => {
@@ -184,7 +169,6 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
         socketRef.current.disconnect();
         socketRef.current = null;
       }
-      window.removeEventListener("storage", handleStorage);
       window.removeEventListener("chat:unarchived", handleChatUnarchived);
     };
   }, [userId, onSelectConversation]);
@@ -208,11 +192,10 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
   };
 
   // Derive the display list from the shared rooms data — pure computation, no
-  // network. Recomputes when rooms refresh, the selection changes (its unread
-  // resets to 0), or pins change.
+  // network. Recomputes when rooms refresh (which is what carries a new pin or
+  // archive) or the selection changes (its unread resets to 0).
   const conversations = useMemo<Conversation[]>(() => {
     if (!rooms.length) return [];
-    const pinnedChatIds = readPinnedChatIds();
 
     /**
      * One card per conversation, and a conversation is one listing.
@@ -262,22 +245,30 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
         lastMessageAt,
         unreadCount,
         label,
-        isArchived: room.status === 'ARCHIVED',
-        isPinned: pinnedChatIds.includes(room.id),
+        // Both are this person's own, sent per viewer with the room. They used
+        // to come from `Chat.status` (shared with the other party) and from a
+        // list in localStorage (shared with nobody, not even the same person on
+        // another device).
+        isArchived: room.archived === true,
+        isPinned: room.pinned === true,
+        pinnedAt: room.pinnedAt || null,
       };
     });
 
-    // Sort pinned chats first, then by last message time
+    // Pinned first — the newest pin at the very top — then by last message.
     conversationsWithDetails.sort((a, b) => {
-      if (a.isPinned && !b.isPinned) return -1;
-      if (!a.isPinned && b.isPinned) return 1;
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      if (a.isPinned && b.isPinned) {
+        const at = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+        const bt = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+        if (at !== bt) return bt - at;
+      }
       return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
     });
 
     return conversationsWithDetails;
-    // pinnedVersion re-derives pin order after cross-tab changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rooms, selectedConversation, userId, pinnedVersion]);
+  }, [rooms, selectedConversation, userId]);
 
   /**
    * Arriving from the admin listings table, we know the listing but not the
@@ -431,7 +422,19 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
 
       {/* Sellers who vet buyers by hand decide here, above the conversations.
           Renders nothing when there is no one waiting. */}
-      <ConfidentialAccessRequests />
+      <ConfidentialAccessRequests
+        onOpenChat={(request) => {
+          // The request already knows which conversation it came out of, and
+          // the list is the thing that can open one.
+          if (!request.chatId) return;
+          onSelectConversation(
+            request.chatId,
+            request.buyer.id,
+            userId,
+            request.listingId,
+          );
+        }}
+      />
 
       {/* Conversations List */}
       <div 
@@ -503,8 +506,12 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                 style={{
                   position: 'relative',
                   flexShrink: 0,
-                  width: '52px',
-                  height: '44px',
+                  // Sized to the three lines of text beside it rather than to
+                  // a round number: the row is 82px with 10px of padding, so
+                  // 50px sits level with the text and still clears the 74px
+                  // the row shrinks to at lg.
+                  width: '60px',
+                  height: '50px',
                   borderRadius: '8px',
                   overflow: 'hidden',
                   background: 'rgba(0, 0, 0, 0.06)',
@@ -537,56 +544,20 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                   gap: '4px',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <h4
-                    className="text-base lg:text-xs xl:text-base text-black m-0 overflow-hidden text-ellipsis whitespace-nowrap"
-                    style={{
-                      fontFamily: 'Lufga',
-                      fontWeight: 600,
-                      lineHeight: '100%',
-                      letterSpacing: '0%',
-                    }}
-                  >
-                    {convo.listingTitle || convo.otherUserName}
-                  </h4>
-                  {convo.label && (
-                    <div
-                      style={{
-                        paddingTop: '2px',
-                        paddingRight: '10px',
-                        paddingBottom: '2px',
-                        paddingLeft: '10px',
-                        borderRadius: '40px',
-                        backgroundColor: 
-                          convo.label === 'GOOD' ? 'rgba(34, 191, 21, 0.1)' :
-                          convo.label === 'MEDIUM' ? 'rgba(0, 103, 255, 0.05)' :
-                          'rgba(255, 0, 0, 0.05)',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        height: '18px',
-                        width: convo.label === 'GOOD' ? '48px' : convo.label === 'MEDIUM' ? '62px' : '40px',
-                      }}
-                    >
-                      <span
-                        className="text-xs lg:text-[10px] xl:text-xs text-center"
-                        style={{
-                          fontFamily: 'Lufga',
-                          fontWeight: 500,
-                          lineHeight: '100%',
-                          letterSpacing: '0%',
-                          color: 
-                            convo.label === 'GOOD' ? 'rgba(34, 191, 21, 1)' :
-                            convo.label === 'MEDIUM' ? 'rgba(0, 103, 255, 1)' :
-                            'rgba(255, 0, 0, 1)',
-                        }}
-                      >
-                        {convo.label === 'GOOD' ? 'Good' : convo.label === 'MEDIUM' ? 'Medium' : 'Bad'}
-                      </span>
-                    </div>
-                  )}
-                </div>
+                {/* The listing, on a line of its own. It shared this line
+                    with the label until the label moved down to the name, and
+                    the flex row it needed for that went with it. */}
+                <h4
+                  className="text-base lg:text-xs xl:text-base text-black m-0 overflow-hidden text-ellipsis whitespace-nowrap"
+                  style={{
+                    fontFamily: 'Lufga',
+                    fontWeight: 600,
+                    lineHeight: '100%',
+                    letterSpacing: '0%',
+                  }}
+                >
+                  {convo.listingTitle || convo.otherUserName}
+                </h4>
                 {/* Who you are talking to, under the business you are talking
                     about — the same seller can appear on several cards. */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
@@ -607,6 +578,10 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                   >
                     {convo.otherUserName}
                   </span>
+                  {/* Beside the name, not above it: the label is a judgement
+                      about the person, and on the title line it read as
+                      something about the listing. */}
+                  <ChatLabelChip label={convo.label} />
                 </div>
                 <p
                   className="text-xs lg:text-[10px] xl:text-xs m-0 overflow-hidden text-ellipsis whitespace-nowrap"
@@ -622,27 +597,22 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                 </p>
               </div>
 
-              {/* Third Section: Time, Notification Badge, and Pin Icon */}
+              {/* Third Section: Notification Badge and Pin Icon.
+                  The time the last message arrived used to sit above these.
+                  Without it there is one thing left in this column, so it
+                  centres rather than hanging from the top. The list is still
+                  ordered newest first, which is what the time was mostly
+                  being read for. */}
               <div
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'flex-end',
+                  justifyContent: 'center',
                   gap: '4px',
                   flexShrink: 0,
                 }}
               >
-                <span
-                  className="text-xs lg:text-[9px] xl:text-xs text-black/60 whitespace-nowrap"
-                  style={{
-                    fontFamily: 'Lufga',
-                    fontWeight: 500,
-                    lineHeight: '100%',
-                    letterSpacing: '0%',
-                  }}
-                >
-                  {formatChatTime(convo.lastMessageAt)}
-                </span>
                 <div
                   style={{
                     display: 'flex',

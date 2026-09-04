@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { toast } from "sonner";
 import { isValidListingDateAnswer } from "@/lib/dateUtils";
+import { sanitizeNumberInput } from "@/lib/numberInput";
 
 interface ProductsStepProps {
   onNext: (data: any) => void;
@@ -88,10 +89,15 @@ export const ProductsStep = ({ onNext, onBack }: ProductsStepProps) => {
       
       case "NUMBER":
         return (
+          /* Text, filtered on the way in — see `sanitizeNumberInput`.
+             `type="number"` let "e", a leading minus and pasted words through. */
           <Input
-            type="number"
+            type="text"
+            inputMode="decimal"
             value={value}
-            onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
+            onChange={(e) =>
+              setFormData({ ...formData, [question.id]: sanitizeNumberInput(e.target.value) })
+            }
             placeholder="Enter a number"
             className="bg-muted/50"
           />

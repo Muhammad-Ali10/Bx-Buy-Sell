@@ -50,18 +50,50 @@ export class ChatService {
      * counting each would make a word look three times as busy as it is.
      */
     if (matchedIds.length > 0) {
-      void this.db.prohibitedWord
-        .updateMany({
-          where: { id: { in: matchedIds } },
-          data: { usageCount: { increment: 1 }, lastUsedAt: new Date() },
-        })
-        .catch((error) => {
-          // A counter is not worth failing a moderation decision over.
-          console.error('Failed to record prohibited-word usage:', error);
-        });
+      void this.recordProhibitedWordUsage(matchedIds).catch((error) => {
+        // A counter is not worth failing a moderation decision over.
+        console.error('Failed to record prohibited-word usage:', error);
+      });
     }
 
     return matches;
+  }
+
+  /**
+   * Add one to each word's counter.
+   *
+   * `increment` is not safe to use blind here. On a document where the field
+   * has never been written, Prisma's MongoDB connector leaves `usageCount`
+   * null rather than setting it to one — and null cannot be incremented
+   * either, so from that moment the counter is stuck for good. Every word
+   * added before the column existed was in exactly that state: the screen
+   * showed nothing but zeroes while the rules were firing all day.
+   *
+   * So the arithmetic is done in the database, where a missing counter can be
+   * read as zero before one is added to it.
+   */
+  private async recordProhibitedWordUsage(ids: string[]) {
+    await this.db.$runCommandRaw({
+      update: 'ProhibitedWord',
+      updates: [
+        {
+          q: { _id: { $in: ids } },
+          // An update pipeline rather than $inc, so a missing or null counter
+          // starts from zero instead of staying unset. Prisma's own filters
+          // cannot express "null or absent" on a required Int, and its
+          // `increment` is what leaves the field null in the first place.
+          u: [
+            {
+              $set: {
+                usageCount: { $add: [{ $ifNull: ['$usageCount', 0] }, 1] },
+                lastUsedAt: '$$NOW',
+              },
+            },
+          ],
+          multi: true,
+        },
+      ],
+    });
   }
 
   async detectProhibitedWordsForMessage(
@@ -96,9 +128,18 @@ export class ChatService {
         data: {
           problem_type: 'word',
           status: 'unsolved',
-          notes: `Detected prohibited word(s): ${matches.join(', ')}. Chat ID: ${chatId}`,
+          notes: `Detected prohibited word(s): ${matches.join(', ')}`,
           reporterId: null,
           problematicUserId: senderId,
+          // The conversation the word was said in.
+          //
+          // This used to go into the note as text — "Chat ID: <uuid>" — which
+          // reads as an id nobody can click and leaves the field itself null.
+          // The alerts table opens whatever the alert points at, so with
+          // nothing here every one of these fell through to the sender's
+          // profile: a moderator looking into a flagged message was shown the
+          // person instead of the message.
+          chatId,
         },
       });
     } catch (alertError) {
@@ -150,7 +191,7 @@ export class ChatService {
    * turn the duplicate guards off. One builder, one order.
    */
   private static reminderMeta(atMessage: number) {
-    return { kind: 'GUIDELINE_REMINDER', atMessage };
+    return { kind: 'DEAL_PROMPT', atMessage };
   }
 
   private static dealStartedMeta(requesterId: string) {
@@ -208,17 +249,32 @@ export class ChatService {
     return notice;
   }
 
-  /** How often the platform repeats the keep-it-on-the-platform reminder. */
+  /** How often the platform repeats its standing prompt. */
   private static readonly REMINDER_EVERY = 20;
 
   /**
-   * Post the periodic reminder once a conversation crosses another 20 messages.
+   * Offer to begin the deal process once a conversation crosses another 20
+   * messages.
+   *
+   * This slot used to repeat the keep-it-on-the-platform policy. The warning
+   * card at the head of every conversation already says that permanently, and
+   * anyone who actually posts a phone number gets the blocked-message notice,
+   * so the reminder was the third telling of the same thing. Two people twenty
+   * messages deep are past being warned and into wanting to move — so this is
+   * what the slot says now.
    *
    * Counts only what the two parties said — counting the platform's own posts
-   * would make the reminder trigger itself, and the gap would shrink each time.
+   * would make the prompt trigger itself, and the gap would shrink each time.
    */
   async maybePostGuidelineReminder(chatId: string) {
     try {
+      // Nothing to invite them to once they have accepted the invitation.
+      const chat = await this.db.chat.findUnique({
+        where: { id: chatId },
+        select: { isOffered: true },
+      });
+      if (chat?.isOffered) return null;
+
       const humanMessages = await this.db.message.count({
         where: { chatId, senderId: { not: null } },
       });
@@ -231,7 +287,7 @@ export class ChatService {
       }
 
       // Stripe-style double-fire protection: if this milestone already has a
-      // reminder, do not post a second one.
+      // prompt, do not post a second one.
       const already = await this.db.message.findFirst({
         where: {
           chatId,
@@ -422,7 +478,7 @@ export class ChatService {
       include: this.conversationRoomInclude,
       orderBy: { updatedAt: 'desc' },
     });
-    return this.attachUnreadCounts(chats, sellerId);
+    return this.attachViewerState(chats, sellerId);
   }
 
   async getChatRoomsByUserId(userId: string) {
@@ -431,35 +487,65 @@ export class ChatService {
       include: this.conversationRoomInclude,
       orderBy: { updatedAt: 'desc' },
     });
-    return this.attachUnreadCounts(chats, userId);
+    return this.attachViewerState(chats, userId);
   }
 
   /**
-   * Attach an `unreadCount` (messages from the other party this viewer has not
-   * read) to each chat using a single query instead of one request per room.
+   * Attach the parts of a conversation that belong to whoever is looking:
+   * `unreadCount` (messages from the other party they have not read), and
+   * their own `archived` / `pinned` flags.
+   *
+   * Two queries for the whole list rather than two per room, and both room
+   * endpoints — buyer's and seller's — go through here, so neither can drift
+   * from the other.
    */
-  private async attachUnreadCounts<T extends { id: string }>(
+  private async attachViewerState<T extends { id: string }>(
     chats: T[],
     viewerId: string,
-  ): Promise<Array<T & { unreadCount: number }>> {
+  ): Promise<
+    Array<
+      T & {
+        unreadCount: number;
+        archived: boolean;
+        pinned: boolean;
+        pinnedAt: Date | null;
+      }
+    >
+  > {
     if (chats.length === 0) return [];
     const chatIds = chats.map((c) => c.id);
-    const unreadMessages = await this.db.message.findMany({
-      where: {
-        chatId: { in: chatIds },
-        read: false,
-        senderId: { not: viewerId },
-      },
-      select: { chatId: true },
-    });
+
+    const [unreadMessages, myLabels] = await Promise.all([
+      this.db.message.findMany({
+        where: {
+          chatId: { in: chatIds },
+          read: false,
+          senderId: { not: viewerId },
+        },
+        select: { chatId: true },
+      }),
+      this.db.chatLabel.findMany({
+        where: { chatId: { in: chatIds }, userId: viewerId },
+        select: { chatId: true, archived: true, pinned: true, pinned_at: true },
+      }),
+    ]);
+
     const unreadByChat = new Map<string, number>();
     for (const message of unreadMessages) {
       unreadByChat.set(message.chatId, (unreadByChat.get(message.chatId) ?? 0) + 1);
     }
-    return chats.map((chat) => ({
-      ...chat,
-      unreadCount: unreadByChat.get(chat.id) ?? 0,
-    }));
+    const stateByChat = new Map(myLabels.map((l) => [l.chatId, l] as const));
+
+    return chats.map((chat) => {
+      const mine = stateByChat.get(chat.id);
+      return {
+        ...chat,
+        unreadCount: unreadByChat.get(chat.id) ?? 0,
+        archived: Boolean(mine?.archived),
+        pinned: Boolean(mine?.pinned),
+        pinnedAt: mine?.pinned_at ?? null,
+      };
+    });
   }
 
   async createMessage(data: {
@@ -507,6 +593,10 @@ export class ChatService {
       },
     });
 
+    // Someone who filed this conversation away needs it back now that it has
+    // moved again — otherwise an archived chat is one nobody ever answers.
+    await this.unarchiveOnNewMessage(chatId, senderId);
+
     // Create monitoring alert if prohibited word found (exclude admin/moniter senders)
     try {
       if (saved.content) {
@@ -522,9 +612,12 @@ export class ChatService {
               data: {
                 problem_type: 'word',
                 status: 'unsolved',
-                notes: `Detected prohibited word(s): ${matches.join(', ')}. Chat ID: ${chatId}`,
+                notes: `Detected prohibited word(s): ${matches.join(', ')}`,
                 reporterId: null,
                 problematicUserId: senderId,
+                // Same reasoning as createProhibitedWordAlert above: the alert
+                // has to point at the conversation, not describe it.
+                chatId,
               },
             });
           }
@@ -831,6 +924,9 @@ export class ChatService {
                   chatId: true,
                   label: true,
                   userId: true,
+                  archived: true,
+                  pinned: true,
+                  pinned_at: true,
                 },
                 orderBy: { updated_at: 'desc' },
               })
@@ -859,11 +955,28 @@ export class ChatService {
         monitorViewsMap.set(view.chatId, existing);
       }
       const chatLabelMap = new Map<string, { label: any; userId: string }>();
+      /**
+       * Archive and pin belong to one person, so the viewer's own row is the
+       * only one that may answer "is this filed away for me?". The label above
+       * is a shared judgement on the conversation and keeps its old behaviour
+       * of taking whichever row was written last.
+       */
+      const myStateMap = new Map<
+        string,
+        { archived: boolean; pinned: boolean; pinnedAt: Date | null }
+      >();
       for (const label of chatLabels) {
         if (!chatLabelMap.has(label.chatId)) {
           chatLabelMap.set(label.chatId, {
             label: label.label,
             userId: label.userId,
+          });
+        }
+        if (monitorId && label.userId === monitorId) {
+          myStateMap.set(label.chatId, {
+            archived: Boolean(label.archived),
+            pinned: Boolean(label.pinned),
+            pinnedAt: label.pinned_at ?? null,
           });
         }
       }
@@ -917,6 +1030,8 @@ export class ChatService {
             // Fetch chat label if exists (use findFirst since chatId alone is not unique)
             const chatLabel = chatLabelMap.get(chat.id) || null;
 
+            const myState = myStateMap.get(chat.id);
+
             return {
               ...chat,
               user,
@@ -930,6 +1045,10 @@ export class ChatService {
               messages,
               unreadCount,
               chatLabel,
+              // This viewer's own filing. Absent row means neither.
+              archived: myState?.archived ?? false,
+              pinned: myState?.pinned ?? false,
+              pinnedAt: myState?.pinnedAt ?? null,
               monitorViews,
             };
           } catch (error) {
@@ -940,6 +1059,9 @@ export class ChatService {
               listing: null,
               messages: [],
               chatLabel: null,
+              archived: false,
+              pinned: false,
+              pinnedAt: null,
               monitorViews: [],
             };
           }
@@ -1083,6 +1205,113 @@ export class ChatService {
   }
 
   // Get chat by ID with full details
+  /**
+   * Find conversations by anything the person can remember about them.
+   *
+   * The list already filtered on what it happened to be holding — the two
+   * names, the two emails, the listing title and the *last* message — so a word
+   * said anywhere earlier in a conversation could not be found at all. That is
+   * the one thing someone searching a chat archive is actually looking for.
+   *
+   * Four questions, asked of the database rather than of the loaded page:
+   * what was said, what the listing is called, and who was talking.
+   *
+   * Scope is not negotiable: staff search every conversation, everyone else
+   * searches only the ones they are in.
+   */
+  async searchChats(rawQuery: string, viewerId: string, viewerRole?: string) {
+    const query = String(rawQuery || '').trim();
+    // One or two letters match most of the archive; the caller gets nothing
+    // rather than everything.
+    if (query.length < 2) {
+      return { query, chatIds: [], snippets: {} as Record<string, string> };
+    }
+
+    const isStaff = viewerRole === 'ADMIN' || viewerRole === 'MONITER' || viewerRole === 'STAFF';
+    const visible = isStaff
+      ? {}
+      : { OR: [{ userId: viewerId }, { sellerId: viewerId }] };
+
+    const like = { contains: query, mode: 'insensitive' as const };
+
+    const [byMessage, byParticipant, titleRows] = await Promise.all([
+      // What was said. Newest first, so the snippet a chat is shown with is the
+      // most recent time the word came up rather than the first.
+      this.db.message.findMany({
+        where: { content: like, chat: visible },
+        select: { chatId: true, content: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
+      // Who was talking — either side of the conversation.
+      this.db.chat.findMany({
+        where: {
+          ...visible,
+          OR: [
+            { user: { OR: [{ first_name: like }, { last_name: like }, { email: like }] } },
+            { seller: { OR: [{ first_name: like }, { last_name: like }, { email: like }] } },
+          ],
+        },
+        select: { id: true },
+        take: 500,
+      }),
+      // What the listing is called. The name is an answer to a question, not a
+      // column, so the questions are searched and their listings resolved.
+      this.db.listingQuestion.findMany({
+        where: {
+          answer: like,
+          OR: [{ advertisementId: { not: null } }, { brandQuestionId: { not: null } }],
+        },
+        select: { answer: true, advertisementId: true, brandQuestionId: true, question: true },
+        take: 500,
+      }),
+    ]);
+
+    const chatIds = new Set<string>();
+    const snippets: Record<string, string> = {};
+
+    for (const row of byMessage) {
+      chatIds.add(row.chatId);
+      if (!snippets[row.chatId] && row.content) {
+        snippets[row.chatId] = ChatService.snippetAround(row.content, query);
+      }
+    }
+    for (const row of byParticipant) chatIds.add(row.id);
+
+    // Only answers that actually name the listing count — "title" on the advert,
+    // or the brand/business name. Matching every answer would return a chat
+    // because the word appeared in some unrelated paragraph of its listing.
+    const listingIds = titleRows
+      .filter((row) => {
+        const question = String(row.question || '').toLowerCase();
+        if (row.advertisementId) return question.includes('title');
+        return /brand name|business name|company name|^name$/.test(question);
+      })
+      .map((row) => row.advertisementId || row.brandQuestionId)
+      .filter((id): id is string => Boolean(id));
+
+    if (listingIds.length) {
+      const listingChats = await this.db.chat.findMany({
+        where: { ...visible, listingId: { in: [...new Set(listingIds)] } },
+        select: { id: true },
+        take: 500,
+      });
+      for (const row of listingChats) chatIds.add(row.id);
+    }
+
+    return { query, chatIds: [...chatIds], snippets };
+  }
+
+  /** A short piece of the message with the match in it, for the result row. */
+  private static snippetAround(content: string, query: string): string {
+    const text = String(content).replace(/\s+/g, ' ').trim();
+    const at = text.toLowerCase().indexOf(query.toLowerCase());
+    if (at < 0) return text.slice(0, 120);
+    const from = Math.max(0, at - 40);
+    const to = Math.min(text.length, at + query.length + 60);
+    return `${from > 0 ? '…' : ''}${text.slice(from, to)}${to < text.length ? '…' : ''}`;
+  }
+
   async getChatById(chatId: string) {
     return await this.db.chat.findUnique({
       where: {
@@ -1119,6 +1348,9 @@ export class ChatService {
             brand: true,
             advertisement: true,
             category: true,
+            // The details panel prints the listing's revenue and net profit
+            // beside its price, and those live in the financial rows.
+            financials: true,
           },
         },
         messages: {
@@ -1132,14 +1364,21 @@ export class ChatService {
                 first_name: true,
                 last_name: true,
                 profile_pic: true,
+                // Who is speaking as staff. Without it the window cannot mark a
+                // moderator's message when it reloads the conversation.
+                role: true,
               },
             },
           },
         },
+        // Carries each person's own row, so the window can tell whoever is
+        // looking whether *they* have filed or pinned this conversation.
         chatLabels: {
           select: {
             label: true,
             userId: true,
+            archived: true,
+            pinned: true,
           },
         },
         monitorViews: {
@@ -1412,44 +1651,103 @@ export class ChatService {
     return { success: true, message: 'Chat deleted successfully' };
   }
 
-  async archiveChat(chatId: string, userId: string) {
-    // Verify user is part of this chat
+  /**
+   * May this person file this conversation away, or hold it at the top?
+   *
+   * The two people trading, and the team who oversee them. A moderator needs
+   * their own copy of the list as much as a buyer does — that is the whole
+   * reason these flags are per person.
+   */
+  private async assertCanFile(chatId: string, userId: string) {
     const chat = await this.db.chat.findUnique({
       where: { id: chatId },
+      select: { id: true, userId: true, sellerId: true },
     });
-
     if (!chat) {
       throw new HttpException('Chat not found', 404);
     }
 
-    if (chat.userId !== userId && chat.sellerId !== userId) {
-      throw new HttpException('Unauthorized to archive this chat', 403);
+    if (chat.userId === userId || chat.sellerId === userId) return chat;
+
+    const viewer = await this.db.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    if (viewer && (viewer.role === 'ADMIN' || viewer.role === 'MONITER')) {
+      return chat;
     }
 
-    return await this.db.chat.update({
-      where: { id: chatId },
-      data: { status: 'ARCHIVED' },
+    throw new HttpException('Unauthorized for this chat', 403);
+  }
+
+  /** Set one person's own flags on one conversation, creating the row if new. */
+  private async setChatFlags(
+    chatId: string,
+    userId: string,
+    flags: { archived?: boolean; pinned?: boolean; pinned_at?: Date | null },
+  ) {
+    await this.assertCanFile(chatId, userId);
+    return await this.db.chatLabel.upsert({
+      where: { chatId_userId: { chatId, userId } },
+      create: { chatId, userId, ...flags },
+      update: flags,
     });
   }
 
+  /**
+   * File a conversation away — for this person only.
+   *
+   * This used to write `Chat.status = 'ARCHIVED'`, a single field shared by the
+   * buyer, the seller and the team. One side archiving took the conversation
+   * out of the other side's list too, and an admin clearing their own queue hid
+   * it from both people trading in it. Nothing about a personal filing decision
+   * belongs in shared state.
+   */
+  async archiveChat(chatId: string, userId: string) {
+    return await this.setChatFlags(chatId, userId, { archived: true });
+  }
+
+  /**
+   * Bring it back into this person's list.
+   *
+   * The old version wrote `status = 'ACTIVE'` unconditionally, so unarchiving a
+   * conversation that had been CLOSED or FLAGGED quietly promoted it back to
+   * active and lost the moderation record. Shared status is no longer touched
+   * here at all.
+   */
   async unarchiveChat(chatId: string, userId: string) {
-    // Verify user is part of this chat
-    const chat = await this.db.chat.findUnique({
-      where: { id: chatId },
+    return await this.setChatFlags(chatId, userId, { archived: false });
+  }
+
+  /** Hold a conversation at the top of this person's own list, or let it go. */
+  async setChatPinned(chatId: string, userId: string, pinned: boolean) {
+    return await this.setChatFlags(chatId, userId, {
+      pinned,
+      pinned_at: pinned ? new Date() : null,
     });
+  }
 
-    if (!chat) {
-      throw new HttpException('Chat not found', 404);
+  /**
+   * A new message pulls a conversation back out of the archive.
+   *
+   * Without this, archiving quietly becomes "silence this for ever": a seller
+   * files a chat away, the buyer sends an offer, and it lands in a list the
+   * seller no longer looks at. The same reasoning holds for the team — a
+   * conversation marked handled that starts moving again needs attention.
+   *
+   * Only the people who are not speaking are restored; sending a message is not
+   * a reason to un-file your own copy.
+   */
+  private async unarchiveOnNewMessage(chatId: string, senderId: string) {
+    try {
+      await this.db.chatLabel.updateMany({
+        where: { chatId, archived: true, userId: { not: senderId } },
+        data: { archived: false },
+      });
+    } catch (error) {
+      // Never let list housekeeping stop a message from being delivered.
+      console.error('Failed to unarchive on new message:', error);
     }
-
-    if (chat.userId !== userId && chat.sellerId !== userId) {
-      throw new HttpException('Unauthorized to unarchive this chat', 403);
-    }
-
-    return await this.db.chat.update({
-      where: { id: chatId },
-      data: { status: 'ACTIVE' },
-    });
   }
 
   async blockUser(blockerId: string, blockedUserId: string) {

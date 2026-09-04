@@ -1,3 +1,9 @@
+import {
+  multipleOf,
+  listingMultiples,
+  profitMultipleLabel,
+  revenueMultipleLabel,
+} from "@/lib/financialTableUtils";
 import { Button } from "./ui/button";
 import ListingCard from "./ListingCard";
 import { useState, useEffect } from "react";
@@ -54,9 +60,24 @@ const Listings = ({ searchQuery }: ListingsProps) => {
 
       // Fetch ALL listings (same as admin) to ensure we get the same data
       // Then filter to PUBLISH client-side to match admin behavior
+      /*
+       * Ask for all of them, and only the published ones.
+       *
+       * Neither argument used to be passed, so the server applied its own
+       * default of 40 rows and sent whatever the first page happened to hold.
+       * The count under the heading was therefore the page size, not a total —
+       * and it changed with who was looking: staff are shown drafts, so an
+       * admin's 40 rows included two that the client-side filter then dropped,
+       * leaving 38 where a member saw 40 and the database held 41. Three
+       * numbers for one figure.
+       *
+       * Filtering by status here also stops unpublished listings being sent to
+       * a browser at all, rather than being fetched and hidden.
+       */
+      const feedParams = { status: 'PUBLISH', limit: 1000 };
       const response = isAuthenticated
-        ? await apiClient.getSecureListings()
-        : await apiClient.getListings(); // Cached public feed (TTL ~10s, purged on create/update/delete)
+        ? await apiClient.getSecureListings(feedParams)
+        : await apiClient.getListings(feedParams); // Cached public feed (TTL ~10s, purged on create/update/delete)
       console.log("📦 API Response (ALL):", response);
 
       if (response.success) {
@@ -441,21 +462,19 @@ const Listings = ({ searchQuery }: ListingsProps) => {
                     }
                   }
 
-                  // Calculate profit multiple (using average monthly profit * 12 for annual)
-                  let profitMultiple = "Multiple 1.5x Profit"; // Default
-                  if (askingPrice && avgNetProfit > 0) {
-                    const annualProfit = avgNetProfit * 12;
-                    const multiple = parseFloat(askingPrice) / annualProfit;
-                    profitMultiple = `Multiple ${multiple.toFixed(1)}x Profit`;
-                  }
-
-                  // Calculate revenue multiple (using average monthly revenue * 12 for annual)
-                  let revenueMultiple = "0.5x Revenue"; // Default
-                  if (askingPrice && avgRevenue > 0) {
-                    const annualRevenue = avgRevenue * 12;
-                    const multiple = parseFloat(askingPrice) / annualRevenue;
-                    revenueMultiple = `${multiple.toFixed(1)}x Revenue`;
-                  }
+                  /**
+                   * Two decimals, and no stand-in number.
+                   *
+                   * These defaulted to "Multiple 1.5x Profit" and "0.5x
+                   * Revenue" — figures nobody worked out, printed as though
+                   * they had been, and the same on every listing that had no
+                   * financials. That is what made the whole feed look like it
+                   * was showing one listing's numbers.
+                   */
+                  // Worked out from the seller's grid, the same as the listing's own page.
+                  const multiples = listingMultiples(listing, askingPrice);
+                  const profitMultiple = profitMultipleLabel(multiples.profit);
+                  const revenueMultiple = revenueMultipleLabel(multiples.revenue);
 
                   const categoryInfo = listing.category?.[0];
 

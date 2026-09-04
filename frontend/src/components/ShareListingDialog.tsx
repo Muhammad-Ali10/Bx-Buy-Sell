@@ -83,11 +83,21 @@ const NETWORKS = [
   },
   {
     id: "whatsapp",
+    /*
+     * The link on its own.
+     *
+     * Every other network here takes the address and the wording as separate
+     * parameters and composes the post itself. WhatsApp has no url field — only
+     * `text` — so the title was glued to the front of the link and travelled as
+     * part of the message, which is not what the sender chose to write.
+     *
+     * What names the listing on the other end is the link preview, not this
+     * string. That preview is site-wide today; see `index.html`.
+     */
     label: "WhatsApp",
     color: "#25D366",
     Icon: WhatsAppIcon,
-    href: (url: string, title: string) =>
-      `https://wa.me/?text=${encodeURIComponent(title ? `${title} ${url}` : url)}`,
+    href: (url: string) => `https://wa.me/?text=${encodeURIComponent(url)}`,
   },
   {
     id: "telegram",

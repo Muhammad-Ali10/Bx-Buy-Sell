@@ -79,3 +79,32 @@ export const formatLastSeen = (lastOffline?: string | Date | null): string => {
 
   return 'Last online over a week ago';
 };
+
+/**
+ * The same reckoning without the "Last online" prefix, for places that name two
+ * people at once and would otherwise say it twice.
+ *
+ *   Last online: 2 hours ago ←→ 4 days ago
+ */
+export const formatLastSeenShort = (
+  lastOffline?: string | Date | null,
+  isOnline?: boolean,
+): string => {
+  if (isOnline) return 'now';
+  if (!lastOffline) return 'unknown';
+
+  const then = new Date(lastOffline).getTime();
+  if (!Number.isFinite(then)) return 'unknown';
+
+  const minutes = Math.floor((Date.now() - then) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+
+  return 'over a week ago';
+};

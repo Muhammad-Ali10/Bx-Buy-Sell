@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from './stripe.service';
 import { SubscriptionStatus, BillingCycle } from '@prisma/client';
 import { subscriptionConfig } from '../config/stripe.config';
+import { notDeleted } from '../prisma/soft-delete';
 
 @Injectable()
 export class SubscriptionService {
@@ -527,7 +528,7 @@ export class SubscriptionService {
     const listingCount = await this.db.listing.count({
       where: {
         userId,
-        deleted_at: null,
+        ...notDeleted(),
       },
     });
 

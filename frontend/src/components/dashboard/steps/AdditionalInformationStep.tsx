@@ -19,24 +19,12 @@ import {
   isAllowedAttachment,
 } from "@/lib/fileTypes";
 import { isValidListingDateAnswer } from "@/lib/dateUtils";
+// Shared with the rest of the wizard rather than kept as a private copy.
+import { clampPercent, sanitizeNumberInput } from "@/lib/numberInput";
+import { getFormCurrencySymbol } from "@/lib/listingCurrency";
+import { fileNameFromUrl } from "@/lib/mediaUtils";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 
-// Keep only digits and a single decimal point (blocks + - ` e and other symbols).
-const sanitizeNumberInput = (raw: string): string => {
-  let v = raw.replace(/[^0-9.]/g, "");
-  const dot = v.indexOf(".");
-  if (dot !== -1) {
-    v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "");
-  }
-  return v;
-};
-
-// Percentage fields cannot exceed 100.
-const clampPercent = (v: string): string => {
-  if (v === "" || v === ".") return v;
-  const n = parseFloat(v);
-  return !Number.isNaN(n) && n > 100 ? "100" : v;
-};
 
 interface AdditionalInformationStepProps {
   formData?: any;
@@ -65,6 +53,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
   const [uploadingFiles, setUploadingFiles] = useState<Record<string, boolean>>({});
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   usePersistOnUnmount(onPersist, () => formData);
+  const currencySymbol = getFormCurrencySymbol(formData);
 
   const isSplitQuestion = (questionText: string) => {
     const text = (questionText || "").toLowerCase();
@@ -197,7 +186,9 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
       text.includes("order value") ||
       text.includes("price")
     ) {
-      return { prefix: "$", suffix: undefined };
+      // Whatever the seller picked in Financials — a euro business should
+      // not be asked for its inventory value in dollars.
+      return { prefix: currencySymbol, suffix: undefined };
     }
     if (
       text.includes("rate") ||
@@ -240,7 +231,15 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
       const value = formData[question.id];
 
       if (isSplitQuestion(question.question)) {
-        const rows = getSplitValue(question.id);
+        /*
+         * The same rows the step renders, not the raw stored value.
+         *
+         * These two had drifted apart: the screen built its rows through
+         * `normalizeSplitValue`, the check read `getSplitValue`, and for a
+         * question with fixed segments those are different shapes.
+         */
+        const rows = normalizeSplitValue(question.id, question.question);
+        const fixed = fixedRowsFor(question.question);
         const hasAny = rows.some((row: any) => row?.percent || row?.name);
         if (!hasAny) {
           errors.push(`${question.question} is required`);
@@ -250,8 +249,21 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
         rows.forEach((row: any) => {
           const percent = row?.percent;
           const name = row?.name;
-          if ((percent && !name) || (!percent && name)) {
-            errors.push(`${question.question} requires both % and name`);
+          /*
+           * Customer Type and its like have their names written by the app,
+           * not by the seller. Judging those rows on "a name without a
+           * percent" therefore accused the seller of half-filling a row they
+           * had never touched — the message named Customer Type while the
+           * real gap was in another group entirely.
+           */
+          if (fixed) {
+            if (!percent) {
+              errors.push(`${question.question}: enter a % for ${name}`);
+            }
+          } else if ((percent && !name) || (!percent && name)) {
+            errors.push(
+              `${question.question}: "${(name || percent || "").toString().trim()}" needs both a % and a name`,
+            );
           }
           const numeric = Number(percent);
           if (Number.isFinite(numeric)) {
@@ -304,9 +316,28 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     const validation = validateForm();
     
     if (!validation.isValid) {
-      // Show first error
+      /*
+       * Every problem at once.
+       *
+       * `validateForm` has always collected them all and this threw away
+       * everything but the first, so the step could only be corrected one
+       * mistake per submission — four gaps meant pressing Continue four
+       * times, each time being told about a single one.
+       */
       if (validation.errors.length > 0) {
-        toast.error(validation.errors[0]);
+        const [first, ...rest] = validation.errors;
+        toast.error(first, {
+          // A real list: a joined string would run the problems together on
+          // one line, which is barely better than showing one of them.
+          description: rest.length ? (
+            <ul style={{ margin: "4px 0 0", paddingLeft: "16px", listStyle: "disc" }}>
+              {rest.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          ) : undefined,
+          duration: Math.min(12000, 4000 + rest.length * 1500),
+        });
       } else {
         toast.error("Please fill in all required fields");
       }
@@ -405,7 +436,18 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
           <div className="space-y-3">
             {rows.map((row: any, index: number) => (
               <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div
+                {/*
+                  * A label, not a div.
+                  *
+                  * The input is only as wide as what has been typed into it —
+                  * one character when empty — so the "%" stays against the
+                  * number instead of floating at the far end of the card. That
+                  * left a 365px field with a 12px target: clicking anywhere but
+                  * the digit itself did nothing, and anything typed went
+                  * nowhere. Wrapping it hands every click in the card to the
+                  * input without giving up the fitted width.
+                  */}
+                <label
                   style={{
                     height: "69px",
                     borderRadius: "12px",
@@ -416,6 +458,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                     background: "rgba(255, 255, 255, 1)",
                     display: "flex",
                     alignItems: "center",
+                    cursor: "text",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "2px", width: "100%" }}>
@@ -462,8 +505,9 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                       %
                     </span>
                   </div>
-                </div>
-                <div
+                </label>
+                {/* Same again for the name beside it. */}
+                <label
                   style={{
                     height: "69px",
                     borderRadius: "12px",
@@ -496,7 +540,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                       boxShadow: "none",
                     }}
                   />
-                </div>
+                </label>
               </div>
             ))}
           </div>
@@ -821,13 +865,16 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
               <div className="space-y-2">
                 {fileUrls.map((url: string, index: number) => (
                   <div key={index} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
-                    <a 
-                      href={url} 
-                      target="_blank" 
+                    {/* Same as the attachments step: the file's own name, in
+                        the page's text colour rather than the accent. */}
+                    <a
+                      href={url}
+                      target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm text-accent hover:underline truncate flex-1"
+                      className="flex-1 truncate text-sm text-foreground hover:underline"
+                      title={fileNameFromUrl(url)}
                     >
-                      File {index + 1}
+                      {fileNameFromUrl(url)}
                     </a>
                     <button
                       type="button"

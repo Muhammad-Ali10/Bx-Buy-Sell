@@ -8,17 +8,19 @@ import {
   Patch,
   Get,
   Put,
+  Req,
 } from '@nestjs/common';
 import { signUpSchema, SignUpSchemaDTO } from 'src/auth/dto/signup-user.dto';
 import { signInSchema, SignInSchemaDTO } from 'src/auth/dto/signin.dto';
 import { AuthService } from './auth.service';
-import { Public } from 'common/decorator/public.decorator';
+import { Public, Authenticated } from 'common/decorator/public.decorator';
 import { ZodValidationPipe } from 'common/validator/zod.validator';
-import { ApiBody, ApiParam } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiParam } from '@nestjs/swagger';
+import { Roles } from 'common/decorator/roles.decorator';
 
 import { RefreshSchema, RefreshSchemaDTO } from './dto/refresh.dto';
 import { verifyOtpSchema } from './dto/verify.dto';
-import { resetPasswordSchema, updatePasswordSchema, ResetPasswordDTO, UpdatePasswordDTO } from './dto/reset-password.dto';
+import { resetPasswordSchema, updatePasswordSchema, changePasswordSchema, ResetPasswordDTO, UpdatePasswordDTO, ChangePasswordDTO } from './dto/reset-password.dto';
 
 @Public()
 @Controller('auth')
@@ -84,5 +86,31 @@ export class AuthController {
   updatePassword(@Body(new ZodValidationPipe(updatePasswordSchema)) body) {
     const { email, otp_code, new_password, confirm_password } = body;
     return this.authService.updatePassword(email, otp_code, new_password, confirm_password);
+  }
+
+  /**
+   * Change your own password while signed in.
+   *
+   * Whose password is changed comes from the token, never from the body. The
+   * route above takes an email because it is for people who cannot sign in;
+   * accepting one here would let any session change another member's password.
+   */
+  @HttpCode(HttpStatus.OK)
+  @Authenticated()
+  @Roles(['USER', 'SELLER', 'ADMIN', 'MONITER', 'STAFF'])
+  @ApiBody({ type: () => ChangePasswordDTO })
+  @ApiOperation({ summary: 'Signed-in member changes their own password' })
+  @Put('/change-password')
+  changePassword(
+    @Req() req: any,
+    @Body(new ZodValidationPipe(changePasswordSchema)) body,
+  ) {
+    const { current_password, new_password, confirm_password } = body;
+    return this.authService.changePassword(
+      req.user.id,
+      current_password,
+      new_password,
+      confirm_password,
+    );
   }
 }

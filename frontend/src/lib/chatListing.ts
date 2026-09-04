@@ -1,4 +1,5 @@
 import { parseMediaUrls } from "@/lib/mediaUtils";
+import { resolveListingTitle } from "@/lib/listingTitle";
 
 /**
  * Reading a listing's name and picture out of a chat room.
@@ -9,30 +10,20 @@ import { parseMediaUrls } from "@/lib/mediaUtils";
  * and they must agree, so the digging lives here rather than in each of them.
  */
 
-const NAME_QUESTIONS = ["business name", "company name", "brand name", "name"];
-
-/** The listing's name, or an empty string when nothing usable is stored. */
+/**
+ * The listing's name, or an empty string when nothing usable is stored.
+ *
+ * Delegates to the resolver the rest of the app already uses, which reads the
+ * advert's Title first. This used to do its own digging in the opposite order —
+ * brand answers before the advert — and ended with `brand[0].answer`: whatever
+ * question happened to be first in the Brand Information step, whatever it
+ * said. So a request card announced "https://www.youtube.com" (the Primary
+ * Domain), or "switzerland" (the Business Location), or "Yes" (to a question
+ * about inventory), while the listing's real title sat unread one section over.
+ */
 export function getChatListingTitle(listing: any): string {
   if (!listing) return "";
-  if (typeof listing.title === "string" && listing.title.trim()) return listing.title;
-  if (typeof listing.business_name === "string" && listing.business_name.trim()) {
-    return listing.business_name;
-  }
-
-  const brand = Array.isArray(listing.brand) ? listing.brand : [];
-  const named = brand.find((row: any) =>
-    NAME_QUESTIONS.some((q) => String(row?.question || "").toLowerCase().includes(q)),
-  );
-  if (named?.answer) return String(named.answer);
-  if (brand[0]?.answer) return String(brand[0].answer);
-
-  const ad = Array.isArray(listing.advertisement) ? listing.advertisement : [];
-  const adTitle = ad.find((row: any) =>
-    String(row?.question || "").toLowerCase().includes("title"),
-  );
-  if (adTitle?.answer) return String(adTitle.answer);
-
-  return "";
+  return resolveListingTitle(listing, "");
 }
 
 /**
@@ -64,4 +55,45 @@ export function getChatListingImage(listing: any): string | undefined {
   if (typeof listing.image === "string" && listing.image) return listing.image;
 
   return undefined;
+}
+
+
+/** The first answer whose question mentions one of these words. */
+const answerMatching = (rows: any, terms: string[]): string => {
+  if (!Array.isArray(rows)) return "";
+  const row = rows.find((r: any) =>
+    terms.some((term) => String(r?.question || "").toLowerCase().includes(term)),
+  );
+  const answer = Array.isArray(row?.answer) ? row?.answer[0] : row?.answer;
+  return answer == null ? "" : String(answer).trim();
+};
+
+/**
+ * What the seller wrote about the business, or an empty string.
+ *
+ * The same two places the listing page reads it from, in the same order: the
+ * Brand step's description, then the advert's. Callers that had no way to get
+ * at this printed a sentence of their own instead — "Seller package for this
+ * listing" — which said nothing about the business it sat under.
+ */
+export function getChatListingDescription(listing: any): string {
+  if (!listing) return "";
+  return (
+    answerMatching(listing.brand, ["description", "about", "business description"]) ||
+    answerMatching(listing.advertisement, ["description"])
+  );
+}
+
+/**
+ * The asking price as the seller typed it, or an empty string.
+ *
+ * A listing has no price column — it is an answer like everything else, under
+ * "Listing Price" in the advert and "Asking Price" on older records.
+ */
+export function getChatListingPrice(listing: any): string {
+  if (!listing) return "";
+  return (
+    answerMatching(listing.advertisement, ["listing price"]) ||
+    answerMatching(listing.brand, ["asking price", "selling price"])
+  );
 }

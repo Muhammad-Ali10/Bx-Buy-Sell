@@ -37,6 +37,7 @@ const MyListings = lazy(() => import("./pages/MyListings"));
 const Favourites = lazy(() => import("./pages/Favourites"));
 const Chat = lazy(() => import("./pages/Chat"));
 const VerifyAccount = lazy(() => import("./pages/VerifyAccount"));
+const VerifyFunds = lazy(() => import("./pages/VerifyFunds"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const PhoneVerification = lazy(() => import("./pages/PhoneVerification"));
 const VerifyOTP = lazy(() => import("./pages/VerifyOTP"));
@@ -92,6 +93,7 @@ const router = createBrowserRouter(
     { path: "/favourites", element: <Favourites /> },
     { path: "/chat", element: <Chat /> },
     { path: "/verify-account", element: <VerifyAccount /> },
+    { path: "/verify-funds", element: <VerifyFunds /> },
     { path: "/profile", element: <Profile /> },
     { path: "/pricing", element: <Pricing /> },
     { path: "/manage-subscription", element: <ManageSubscription /> },

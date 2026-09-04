@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { Button } from "@/components/ui/button";
@@ -372,15 +372,40 @@ const AdminAcquisitionCapacity = () => {
                           }`}
                         >
                           <td className="px-4 py-3">
-                            <div className="flex items-center gap-2.5">
-                              <Avatar className="h-8 w-8">
-                                <AvatarImage src={item.buyer?.profile_pic || undefined} />
-                                <AvatarFallback className="text-[10px]">
-                                  {buyerName(item).substring(0, 2).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              <span className="font-medium">{buyerName(item)}</span>
-                            </div>
+                            {/* The name opens the person's overview, the same
+                                way it does in the listings table. The picture
+                                goes with it — it is the part people aim at.
+                                A case whose buyer is no longer on the platform
+                                stays plain text rather than becoming a link
+                                that leads nowhere. */}
+                            {item.buyer?.id ? (
+                              <Link
+                                to={`/admin/users/${item.buyer.id}`}
+                                onClick={(event) => event.stopPropagation()}
+                                className="flex items-center gap-2.5 group"
+                                title={`Open ${buyerName(item)}`}
+                              >
+                                <Avatar className="h-8 w-8">
+                                  <AvatarImage src={item.buyer?.profile_pic || undefined} />
+                                  <AvatarFallback className="text-[10px]">
+                                    {buyerName(item).substring(0, 2).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <span className="font-medium group-hover:underline">
+                                  {buyerName(item)}
+                                </span>
+                              </Link>
+                            ) : (
+                              <div className="flex items-center gap-2.5">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarImage src={item.buyer?.profile_pic || undefined} />
+                                  <AvatarFallback className="text-[10px]">
+                                    {buyerName(item).substring(0, 2).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <span className="font-medium">{buyerName(item)}</span>
+                              </div>
+                            )}
                           </td>
 
                           <td className="px-4 py-3">

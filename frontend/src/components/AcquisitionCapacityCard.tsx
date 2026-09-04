@@ -1,7 +1,7 @@
 import { Info } from "lucide-react";
 import {
   ACQUISITION_CAPACITY_INFO,
-  getCapacityMarkerPercent,
+  getCapacityMarkerAnchor,
   getCapacityRating,
 } from "@/lib/acquisitionCapacity";
 
@@ -18,9 +18,13 @@ const ZONES = ["Not Verified", "Moderate", "High"];
  * How much of a listing's asking price a buyer can actually cover, from capital
  * the team has verified.
  *
- * Drawn as a scale rather than a filled bar: the marker pill names the rating
- * and sits in its band, so the reading is "where on the scale" instead of "how
- * full", which is what the three labels underneath describe.
+ * Drawn as a scale rather than a filled bar, and read by where the marker sits
+ * rather than by what it says. The pill used to name the rating — "Moderate"
+ * over a scale already labelled Not Verified / Moderate / High, the same word
+ * twice, a centimetre apart — so it carries the title instead and the position
+ * carries the reading.
+ *
+ * The rating is still on the pill for anything that cannot see where it is.
  */
 export const AcquisitionCapacityCard = ({
   verifiedFunds,
@@ -28,39 +32,27 @@ export const AcquisitionCapacityCard = ({
   className = "",
 }: AcquisitionCapacityCardProps) => {
   const rating = getCapacityRating(verifiedFunds, listingPrice);
-  const markerPercent = getCapacityMarkerPercent(rating.level);
+  const anchor = getCapacityMarkerAnchor(rating.level);
 
   return (
     <div className={className} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-        <span
-          style={{
-            fontFamily: "Lufga",
-            fontWeight: 500,
-            fontSize: "13px",
-            color: "rgba(0,0,0,0.55)",
-          }}
-        >
-          Acquisition Capacity
-        </span>
-        <span title={ACQUISITION_CAPACITY_INFO} style={{ cursor: "help", lineHeight: 0 }}>
-          <Info style={{ width: "14px", height: "14px", color: "rgba(0,0,0,0.35)" }} />
-        </span>
-      </div>
-
-      {/* Marker pill, positioned in the band it belongs to. */}
+      {/* Marker pill, anchored to the band it belongs to. */}
       <div style={{ position: "relative", height: "26px" }}>
         <div
           style={{
             position: "absolute",
-            left: `${markerPercent}%`,
-            transform: "translateX(-50%)",
+            ...(anchor === "start"
+              ? { left: 0 }
+              : anchor === "end"
+                ? { right: 0 }
+                : { left: "50%", transform: "translateX(-50%)" }),
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
           }}
         >
           <span
+            aria-label={`Acquisition Capacity: ${rating.label}`}
             style={{
               background: "rgba(0, 0, 0, 1)",
               color: "#fff",
@@ -71,9 +63,18 @@ export const AcquisitionCapacityCard = ({
               padding: "5px 10px",
               borderRadius: "999px",
               whiteSpace: "nowrap",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
             }}
           >
-            {rating.label}
+            Acquisition Capacity
+            <span
+              title={ACQUISITION_CAPACITY_INFO}
+              style={{ cursor: "help", lineHeight: 0 }}
+            >
+              <Info style={{ width: "13px", height: "13px", color: "rgba(255,255,255,0.8)" }} />
+            </span>
           </span>
           {/* The little tail, as on the multiples gauge. */}
           <span

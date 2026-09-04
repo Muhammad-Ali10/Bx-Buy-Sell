@@ -56,6 +56,22 @@ export const AdminChatFilters = ({
   const { data: teamMembers } = useTeamMembers();
   const activeCount = countActiveFilters(filters);
 
+  /**
+   * Hold the place of a member the list has not delivered yet.
+   *
+   * The filter can arrive already set to someone — the "Managed Chats" card
+   * opens this screen on that person — while the team list is still in flight.
+   * A Select whose value matches none of its options renders empty, so for a
+   * moment the panel would say nothing at all: worse than the "Anyone" this
+   * was meant to fix.
+   */
+  const known = new Set(['all', 'mine', 'unassigned']);
+  const membersLoaded = Array.isArray(teamMembers);
+  const seededMemberMissing =
+    !known.has(filters.responsible) &&
+    (!membersLoaded ||
+      !teamMembers.some((member: any) => member.id === filters.responsible));
+
   const set = (patch: Partial<ChatFilters>) => onChange({ ...filters, ...patch });
 
   return (
@@ -103,7 +119,12 @@ export const AdminChatFilters = ({
                 <SelectItem value="all">Anyone</SelectItem>
                 <SelectItem value="mine">My chats</SelectItem>
                 <SelectItem value="unassigned">Not assigned</SelectItem>
-                {Array.isArray(teamMembers) &&
+                {seededMemberMissing && (
+                  <SelectItem value={filters.responsible}>
+                    {membersLoaded ? 'Selected team member' : 'Loading…'}
+                  </SelectItem>
+                )}
+                {membersLoaded &&
                   teamMembers.map((member: any) => (
                     <SelectItem key={member.id} value={member.id}>
                       {member.full_name || member.email}

@@ -11,6 +11,7 @@ export const useUpdateFinancialQuestion = () => {
       question: string; 
       answer_type: string;
       options?: string[];
+      required?: boolean | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -28,6 +29,11 @@ export const useUpdateFinancialQuestion = () => {
       // Add options if provided (even if empty array to clear options)
       if (data.options !== undefined) {
         payload.option = data.options;
+      }
+
+      // Same treatment: only sent when the dialog actually decided one.
+      if (data.required !== undefined) {
+        payload.required = data.required;
       }
 
       const response = await apiClient.updateAdminQuestion(data.id, payload);

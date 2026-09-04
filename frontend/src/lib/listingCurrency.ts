@@ -26,3 +26,21 @@ export function getListingCurrencySymbol(listing: any): string {
     return getCurrencySymbol("USD");
   }
 }
+
+/**
+ * The same symbol, while the listing is still being written.
+ *
+ * `getListingCurrencySymbol` reads a saved listing; the wizard has no listing
+ * yet, only the form. The seller picks a currency in the Financials step and it
+ * sits in `formData.currency` from then on — but the price fields in Ad
+ * Information and Additional Information printed a hard "$" regardless, so a
+ * seller working in euros was asked for a price in dollars on the very next
+ * step.
+ *
+ * Falls back to USD, which is also what happens before the Financials step has
+ * been opened: nothing has been chosen yet, so nothing is claimed.
+ */
+export function getFormCurrencySymbol(formData: unknown): string {
+  const code = (formData as { currency?: unknown } | null | undefined)?.currency;
+  return getCurrencySymbol(typeof code === "string" && code ? code : "USD");
+}

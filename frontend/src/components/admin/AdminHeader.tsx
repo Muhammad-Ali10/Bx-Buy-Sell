@@ -27,7 +27,8 @@ const getPageTitle = (pathname: string, customTitle?: string): string => {
   
   const routeMap: Record<string, string> = {
     "/admin/dashboard": "Dashboard",
-    "/admin/team": "Team Members",
+    // No "/admin/team": it redirects to the Users screen before this map is
+    // ever consulted, so the entry could never have been reached.
     "/admin/users": "Users",
     "/admin/listings": "Listings",
     "/admin/chats": "Chats",

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check } from "lucide-react";
+import { AlertTriangle, Building2, Check, Globe, LayoutGrid, Sparkles } from "lucide-react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/hooks/useAuth";
@@ -59,6 +59,8 @@ function daysUntil(date?: string | null): number {
 }
 
 /** The API reports failures as a payload, not a throw. Prefer its wording. */
+const LIME = "rgba(197, 253, 31, 1)";
+
 function serverMessage(res: any, fallback: string): string {
   return res?.error || res?.message || fallback;
 }
@@ -113,7 +115,9 @@ const ManageSubscription = () => {
   const scheduledIn = daysUntil(current?.pendingChangeAt);
 
   const cards = useMemo(() => {
-    const wanted: Tier[] = ["MINIMUM", "STARTER", "PREMIUM"];
+    // Premium sits in the middle, where the design puts the plan it is
+    // pushing — not last in price order.
+    const wanted: Tier[] = ["MINIMUM", "PREMIUM", "STARTER"];
     return wanted
       .map((tier) => {
         const plan = plans.find((p) => TIER_BY_SLUG[p.slug] === tier);
@@ -144,19 +148,28 @@ const ManageSubscription = () => {
     queryClient.invalidateQueries({ queryKey: ["subscription-tier"] });
   };
 
-  /** Upgrades go through Stripe; the new plan is live as soon as it clears. */
+  /**
+   * Upgrades go through Stripe; the new plan is live as soon as it clears.
+   *
+   * When Stripe will not open, say why. This threw the server's answer away and
+   * offered "Please try again" instead — advice that could never work, because
+   * what it was hiding was "Stripe price ID not configured for MONTHLY billing"
+   * and "No such price: price_...". Both are settings, and no amount of
+   * pressing the button again changes a setting. The other two actions on this
+   * page already pass the server's own words through; this one did not.
+   */
   const confirmUpgrade = async (plan: PlanRow) => {
     setBusy(true);
     try {
-      const res = await apiClient.createSubscriptionCheckout(plan.slug, cycle);
-      const url = (res as any)?.data?.url ?? (res as any)?.url;
+      const res: any = await apiClient.createSubscriptionCheckout(plan.slug, cycle);
+      const url = res?.data?.url ?? res?.url;
       if (url) {
         window.location.href = url;
         return;
       }
-      toast.error("Could not start the checkout. Please try again.");
-    } catch {
-      toast.error("Could not start the checkout. Please try again.");
+      toast.error(serverMessage(res, "Could not start the checkout. Please try again."));
+    } catch (error: any) {
+      toast.error(error?.message || "Could not start the checkout. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -220,35 +233,46 @@ const ManageSubscription = () => {
     <div className="min-h-screen flex flex-col bg-white">
       <Header />
 
-      <main className="flex-1">
-        <div className="max-w-[1240px] mx-auto px-4 sm:px-6 py-10 sm:py-14">
-          <h1 className="text-[28px] sm:text-[36px] font-semibold text-[#0F172A] text-center">
+      <main className="flex-1 bg-white">
+        {/* Three stacked panels, as the design has them: the subscription
+            itself, then the figures, then the pitch. */}
+        <div className="mx-auto max-w-[1000px] px-4 py-8 sm:px-6 sm:py-12">
+          <div className="rounded-2xl bg-[#FAFAFA] px-5 py-8 sm:px-10 sm:py-10">
+          <h1
+            className="text-center text-[22px] font-semibold uppercase text-[#0F172A] sm:text-[28px]"
+            style={{ fontFamily: "Lufga", letterSpacing: "0.06em" }}
+          >
             Manage Your Subscription
           </h1>
-          <p className="mt-3 text-center text-[#64748B] text-[15px] max-w-[620px] mx-auto">
-            Change your plan at any time. Upgrades start right away; downgrades take effect at
-            the end of the period you have already paid for.
+          <p
+            className="mx-auto mt-3 max-w-[620px] text-center text-[14px] text-[#64748B]"
+            style={{ fontFamily: "Lufga" }}
+          >
+            Manage your package, billing cycle and optional add-ons.
           </p>
 
           {/* Buyer and seller pay for different things, so they get different
-              screens rather than one screen full of caveats. */}
-          <div className="mt-8 flex justify-center">
-            <div className="inline-flex p-1 rounded-full bg-[#F1F5F9]">
-              {(["BUYER", "SELLER"] as Audience[]).map((a) => (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => setAudience(a)}
-                  className={`px-7 py-2 rounded-full text-sm font-medium transition-colors ${
-                    audience === a
-                      ? "bg-white text-[#0F172A] shadow-sm"
-                      : "text-[#64748B] hover:text-[#0F172A]"
-                  }`}
-                >
-                  {a === "BUYER" ? "Buyer" : "Seller"}
-                </button>
-              ))}
-            </div>
+              screens rather than one screen full of caveats.
+
+              Two separate pills rather than one segmented control: the design
+              has them as a choice of who you are, not as a switch. */}
+          <div className="mt-7 flex justify-center gap-3">
+            {(["BUYER", "SELLER"] as Audience[]).map((a) => (
+              <button
+                key={a}
+                type="button"
+                onClick={() => setAudience(a)}
+                className="rounded-lg px-6 py-2.5 text-[13px] font-medium transition-colors"
+                style={{
+                  fontFamily: "Lufga",
+                  background: audience === a ? LIME : "#FFFFFF",
+                  color: "#0F172A",
+                  border: audience === a ? `1px solid ${LIME}` : "1px solid #E2E8F0",
+                }}
+              >
+                {a === "BUYER" ? "I'm A Buyer" : "I'm A Seller"}
+              </button>
+            ))}
           </div>
 
           {audience === "SELLER" ? (
@@ -306,6 +330,10 @@ const ManageSubscription = () => {
               </div>
             </>
           )}
+          </div>
+
+          <TrustBand />
+          <WhyPanel audience={audience} />
         </div>
       </main>
 
@@ -318,26 +346,173 @@ const ManageSubscription = () => {
  * Sellers do not have an account-wide plan — each listing carries its own
  * package, so the honest answer is to send them where that choice lives
  * rather than show them a plan grid that would not apply to them.
+ *
+ * Drawn as a notice rather than as an offer: nothing on this screen can be
+ * bought, and a card that looks like the buyer's plan cards would suggest
+ * otherwise.
  */
 const SellerPanel = ({ onGo }: { onGo: () => void }) => (
-  <div className="mt-10 max-w-[720px] mx-auto rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] px-6 sm:px-10 py-10 text-center">
-    <h2 className="text-[20px] font-semibold text-[#0F172A]">
-      Seller packages belong to each listing
-    </h2>
-    <p className="mt-3 text-[15px] text-[#475569] leading-relaxed">
-      Because every business you sell can need a different level of reach, the package is chosen
-      per listing instead of once for your whole account. You will find the package and any
-      add-ons in the menu beside each of your listings.
-    </p>
+  <div className="mx-auto mt-8 max-w-[760px] rounded-2xl border border-[#E9EBF2] bg-white p-5 sm:p-6">
+    <div className="flex items-start gap-3">
+      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#FEF2E8]">
+        <AlertTriangle className="h-4 w-4 text-[#EA8C2A]" />
+      </span>
+      <div className="min-w-0">
+        <h2 className="m-0 text-[14px] font-semibold text-[#0F172A]" style={{ fontFamily: "Lufga" }}>
+          Important Information
+        </h2>
+        <p
+          className="m-0 mt-1.5 text-[12.5px] leading-relaxed text-[#64748B]"
+          style={{ fontFamily: "Lufga" }}
+        >
+          Seller packages can only be managed from the{" "}
+          <strong className="font-semibold text-[#0F172A]">My Listings</strong> section, as each
+          package is assigned to a specific listing. To upgrade a package, simply open the
+          three-dot menu of the desired listing and select &ldquo;Manage Subscription&rdquo;.
+        </p>
+      </div>
+    </div>
+
     <button
       type="button"
       onClick={onGo}
-      className="mt-7 px-6 py-3 rounded-lg bg-[#0F172A] text-white text-sm font-medium hover:bg-[#1E293B]"
+      className="mt-5 w-full rounded-full py-3 text-[13.5px] font-medium text-black transition-opacity hover:brightness-95"
+      style={{ background: LIME, fontFamily: "Lufga" }}
     >
       Go to My Listings
     </button>
   </div>
 );
+
+/** The client's own figures, as copy — there is no data behind them. */
+const TRUST_STATS = [
+  { value: "$3B+", label: "Total Deal Interest" },
+  { value: "8 Weeks", label: "Average Time to Close" },
+  { value: "1 Deal", label: "Can Change Everything" },
+  { value: "190+", label: "Countries Supported" },
+];
+
+const TrustBand = () => (
+  <section className="mt-6 rounded-2xl bg-[#FAFAFA] px-5 py-8 sm:px-10">
+    <p
+      className="m-0 text-center text-[12px] text-[#94A3B8]"
+      style={{ fontFamily: "Lufga" }}
+    >
+      Trusted by <strong className="font-semibold text-[#0F172A]">thousands of users</strong>{" "}
+      worldwide
+    </p>
+    {/* Two by two on a phone, four across from small screens up: four of these
+        side by side on a narrow screen leaves each one a few characters wide. */}
+    <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
+      {TRUST_STATS.map((stat) => (
+        <div key={stat.label} className="text-center">
+          <p
+            className="m-0 text-[22px] font-semibold text-[#0F172A] sm:text-[26px]"
+            style={{ fontFamily: "Lufga" }}
+          >
+            {stat.value}
+          </p>
+          <p className="m-0 mt-1 text-[11.5px] text-[#94A3B8]" style={{ fontFamily: "Lufga" }}>
+            {stat.label}
+          </p>
+        </div>
+      ))}
+    </div>
+  </section>
+);
+
+/**
+ * The pitch, in the words of whichever side is reading it.
+ *
+ * This started as one seller-facing section shown to everybody, because the
+ * first design only showed the seller tab. A buyer was being told to "showcase
+ * your business" on a page where they were choosing what to pay to *browse*.
+ */
+const PITCH = {
+  SELLER: {
+    heading: "Why Sell with Company Exchange?",
+    subtitle: "Designed to help business owners connect with buyers and achieve successful exits.",
+    points: [
+      {
+        icon: Globe,
+        title: "Buyers from All Over the World",
+        body: "Showcase your business to a global audience of entrepreneurs, investors, and acquisition-focused buyers.",
+      },
+      {
+        icon: LayoutGrid,
+        title: "Everything in One Place",
+        body: "Manage inquiries, communicate with buyers, share documents, and oversee the entire process from one platform.",
+      },
+      {
+        icon: Building2,
+        title: "Built for Serious Sellers",
+        body: "Built for sellers who don't want to waste time and prefer a secure, professional environment to sell their business.",
+      },
+    ],
+  },
+  BUYER: {
+    heading: "Why Buy with Company Exchange?",
+    subtitle: "Explore opportunities. Connect with sellers. Acquire with confidence.",
+    points: [
+      {
+        icon: Globe,
+        title: "Listings from All Over the World",
+        body: "Access listings from sellers worldwide and discover opportunities across a wide range of industries and markets.",
+      },
+      {
+        icon: LayoutGrid,
+        title: "Everything in One Place",
+        body: "Browse listings, communicate with sellers, access documents, and manage inquiries from a single platform.",
+      },
+      {
+        icon: Building2,
+        title: "Built for Serious Buyers",
+        body: "Designed for entrepreneurs, investors, and acquirers looking to identify and pursue quality acquisition opportunities.",
+      },
+    ],
+  },
+} as const;
+
+const WhyPanel = ({ audience }: { audience: Audience }) => {
+  const { heading, subtitle, points } = PITCH[audience];
+
+  return (
+    <section className="mt-6 rounded-2xl bg-[#FAFAFA] px-5 py-10 sm:px-10">
+      <h2
+        className="m-0 text-center text-[20px] font-semibold text-[#0F172A] sm:text-[24px]"
+        style={{ fontFamily: "Lufga" }}
+      >
+        {heading}
+      </h2>
+      <p
+        className="mx-auto mt-2 max-w-[620px] text-center text-[12.5px] text-[#64748B]"
+        style={{ fontFamily: "Lufga" }}
+      >
+        {subtitle}
+      </p>
+
+      <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-3">
+        {points.map(({ icon: Icon, title, body }) => (
+          <div key={title} className="rounded-xl bg-white p-5">
+            <Icon className="h-5 w-5 text-[#0F172A]" />
+            <h3
+              className="m-0 mt-3 text-[13.5px] font-semibold text-[#0F172A]"
+              style={{ fontFamily: "Lufga" }}
+            >
+              {title}
+            </h3>
+            <p
+              className="m-0 mt-2 text-[12px] leading-relaxed text-[#64748B]"
+              style={{ fontFamily: "Lufga" }}
+            >
+              {body}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
 
 interface CardProps {
   tier: Tier;
@@ -391,7 +566,9 @@ const PlanCard = ({
   const isOpen = openTier === tier;
   const isFree = tier === "MINIMUM";
   const monthly = Number(plan.monthlyPrice) || 0;
-  const dark = tier === "PREMIUM";
+  // The card the design highlights. It was navy; the design fills it with
+  // the accent instead, which is why everything inside stays dark text.
+  const featured = tier === "PREMIUM";
 
   // Another card is open, so this one steps back and only reports what the
   // pending change means for it.
@@ -426,27 +603,47 @@ const PlanCard = ({
 
   return (
     <div
-      className={`rounded-2xl border p-6 flex flex-col h-full ${
-        dark ? "bg-[#0F172A] border-[#0F172A] text-white" : "bg-white border-[#E2E8F0]"
+      className={`flex h-full flex-col rounded-2xl border p-5 sm:p-6 ${
+        featured ? "border-transparent" : "border-[#E9EBF2] bg-white"
       } ${isOpen ? "ring-2 ring-[#16A34A]" : ""}`}
+      style={featured ? { background: LIME } : undefined}
     >
-      <h3 className={`text-[18px] font-semibold ${dark ? "text-white" : "text-[#0F172A]"}`}>
+      {/* A pill, not a heading: the design names the plan on a chip at the top
+          of the card rather than in a line of type. */}
+      <span
+        className="inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-[11.5px] font-medium"
+        style={{
+          fontFamily: "Lufga",
+          background: featured ? "#0F172A" : "#F1F5F9",
+          color: featured ? "#FFFFFF" : "#0F172A",
+        }}
+      >
+        <Sparkles className="h-3 w-3" />
         {plan.title}
-      </h3>
-      <p className={`mt-1.5 text-[13px] leading-relaxed ${dark ? "text-white/70" : "text-[#64748B]"}`}>
+      </span>
+
+      <p
+        className="mt-3 text-[12px] leading-relaxed text-[#0F172A]/70"
+        style={{ fontFamily: "Lufga" }}
+      >
         {plan.description}
       </p>
 
-      <div className="mt-5 flex items-baseline gap-1">
-        <span className={`text-[34px] font-semibold ${dark ? "text-white" : "text-[#0F172A]"}`}>
-          ${isFree ? 0 : priceFor(monthly, isOpen ? cycle : "MONTHLY")}
+      {/* "99$/monthly", the way the design writes it — the sign follows the
+          number and the period is one word. */}
+      <div className="mt-4 flex items-baseline">
+        <span
+          className="text-[30px] font-semibold text-[#0F172A] sm:text-[34px]"
+          style={{ fontFamily: "Lufga" }}
+        >
+          {isFree ? 0 : priceFor(monthly, isOpen ? cycle : "MONTHLY")}$
         </span>
-        <span className={`text-[13px] ${dark ? "text-white/60" : "text-[#64748B]"}`}>
+        <span className="text-[12px] text-[#0F172A]/60" style={{ fontFamily: "Lufga" }}>
           {isFree
-            ? "/ forever"
+            ? "/forever"
             : isOpen && cycle !== "MONTHLY"
-              ? `/ ${CYCLES.find((c) => c.value === cycle)!.months} months`
-              : "/ month"}
+              ? `/${CYCLES.find((c) => c.value === cycle)!.months} months`
+              : "/monthly"}
         </span>
       </div>
 
@@ -460,9 +657,12 @@ const PlanCard = ({
         {plan.feature.map((f) => (
           <li key={f} className="flex items-start gap-2.5">
             <Check
-              className={`w-4 h-4 mt-0.5 shrink-0 ${dark ? "text-[#4ADE80]" : "text-[#16A34A]"}`}
+              className="mt-0.5 h-4 w-4 shrink-0 text-[#0F172A]"
+
             />
-            <span className={`text-[13px] ${dark ? "text-white/80" : "text-[#475569]"}`}>{f}</span>
+            <span className="text-[12.5px] text-[#0F172A]/80" style={{ fontFamily: "Lufga" }}>
+              {f}
+            </span>
           </li>
         ))}
       </ul>
@@ -475,14 +675,12 @@ const PlanCard = ({
           {CYCLES.map((c) => (
             <label
               key={c.value}
-              className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border cursor-pointer text-[13px] ${
+              // Every card is light now, so the chosen cycle reads the same
+              // way on the highlighted one as on the others.
+              className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-[13px] ${
                 cycle === c.value
-                  ? dark
-                    ? "border-white bg-white/10"
-                    : "border-[#0F172A] bg-[#F8FAFC]"
-                  : dark
-                    ? "border-white/20"
-                    : "border-[#E2E8F0]"
+                  ? "border-[#0F172A] bg-white"
+                  : "border-[#0F172A]/15"
               }`}
             >
               <span className="flex items-center gap-2.5">
@@ -493,7 +691,7 @@ const PlanCard = ({
                   onChange={() => onCycle(c.value)}
                   className="accent-[#16A34A]"
                 />
-                <span className={dark ? "text-white" : "text-[#0F172A]"}>{c.label}</span>
+                <span className="text-[#0F172A]">{c.label}</span>
               </span>
               <span className="flex items-center gap-2">
                 {c.discount > 0 && (
@@ -501,7 +699,7 @@ const PlanCard = ({
                     −{Math.round(c.discount * 100)}%
                   </span>
                 )}
-                <span className={dark ? "text-white/70" : "text-[#64748B]"}>
+                <span className="text-[#0F172A]/70">
                   ${priceFor(monthly, c.value)}
                 </span>
               </span>
@@ -545,7 +743,7 @@ const PlanCard = ({
               type="button"
               onClick={onClose}
               className={`w-full py-2 text-[13px] font-medium ${
-                dark ? "text-white/70 hover:text-white" : "text-[#64748B] hover:text-[#0F172A]"
+                "text-[#0F172A]/60 hover:text-[#0F172A]"
               }`}
             >
               {scheduledTier ? "Back" : "Never mind"}
@@ -560,7 +758,9 @@ const PlanCard = ({
             {isFree ? "Your Current Plan" : "Manage Subscription"}
           </ActionButton>
         ) : RANK[tier] > RANK[currentTier] ? (
-          <ActionButton tone={dark ? "dark-invert" : "green"} busy={busy} onClick={onOpen}>
+          // The highlighted card sits on the accent, so its button goes dark to
+          // stand out; the others use the accent itself.
+          <ActionButton tone={featured ? "dark" : "green"} busy={busy} onClick={onOpen}>
             Upgrade to {plan.title}
           </ActionButton>
         ) : (

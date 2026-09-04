@@ -164,6 +164,52 @@ class ApiClient {
       }
 
       if (!response.ok) {
+        /**
+         * A blocked account, told to leave.
+         *
+         * Blocking clears the refresh token and every guarded route starts
+         * answering 403, so the account is already shut out of the API. But the
+         * access token it holds stays valid until it expires, and nothing here
+         * read a 403 — so the session simply carried on: the team-member area
+         * still drew itself and only its contents failed, and an ordinary user
+         * noticed nothing at all.
+         *
+         * Only this one message ends the session. A 403 on its own means "not
+         * allowed to do that", which is an ordinary answer and no reason to
+         * throw someone out.
+         */
+        if (response.status === 403) {
+          const blockedMessage = (() => {
+            const payload: any = data;
+            const raw =
+              typeof payload?.message === 'string'
+                ? payload.message
+                : typeof payload?.message?.message === 'string'
+                  ? payload.message.message
+                  : typeof payload?.error === 'string'
+                    ? payload.error
+                    : '';
+            return /account has been blocked/i.test(raw) ? raw : null;
+          })();
+
+          if (blockedMessage) {
+            this.clearToken();
+            localStorage.removeItem('user_data');
+            localStorage.removeItem('bearer_token');
+            window.dispatchEvent(
+              new CustomEvent('auth:logout', {
+                detail: { reason: 'blocked', message: blockedMessage },
+              }),
+            );
+            if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+              setTimeout(() => {
+                window.location.href = `/login?blocked=1`;
+              }, 800);
+            }
+            return { success: false, error: blockedMessage };
+          }
+        }
+
         // Handle 401 Unauthorized specifically
         if (response.status === 401) {
           // Don't auto-logout for auth endpoints (login/signup) - 401 is expected for invalid credentials
@@ -355,6 +401,24 @@ class ApiClient {
     }
     
     return response;
+  }
+
+  /**
+   * Change your own password while signed in.
+   *
+   * No email address in the body: the server reads who you are from the token.
+   * The emailed-code flow is for people who cannot sign in at all — and it
+   * cannot finish until a verified sender is configured.
+   */
+  async changePassword(body: {
+    current_password: string;
+    new_password: string;
+    confirm_password: string;
+  }) {
+    return this.request('/auth/change-password', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
   }
 
   async signIn(credentials: { email: string; password: string }) {
@@ -1491,6 +1555,36 @@ class ApiClient {
 
   async unarchiveChat(chatId: string, userId: string) {
     return this.request(`/chat/unarchive/${chatId}/${userId}`, {
+      method: 'PUT',
+    });
+  }
+
+  /**
+   * Hold a conversation at the top of this person's own list.
+   *
+   * Pins used to live in localStorage, so they were a property of the browser
+   * rather than of the person — gone on a second device, and invisible to a
+   * colleague looking at the same queue.
+   */
+  /**
+   * Find conversations by message text, listing name, or participant.
+   *
+   * The list could only filter what it was already holding — the two names and
+   * the single most recent message — so a word said earlier in a conversation
+   * was unfindable. This asks the database instead.
+   */
+  async searchChats(query: string) {
+    return this.request(`/chat/search?q=${encodeURIComponent(query)}`);
+  }
+
+  async pinChat(chatId: string, userId: string) {
+    return this.request(`/chat/pin/${chatId}/${userId}`, {
+      method: 'PUT',
+    });
+  }
+
+  async unpinChat(chatId: string, userId: string) {
+    return this.request(`/chat/unpin/${chatId}/${userId}`, {
       method: 'PUT',
     });
   }

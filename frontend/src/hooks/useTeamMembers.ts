@@ -10,6 +10,8 @@ export interface TeamMember {
   created_at: string;
   availability_status: string;
   last_offline?: string | null;
+  /** Barred from the platform. The API has always sent it; nothing read it. */
+  blocked?: boolean;
 }
 
 export const useTeamMembers = () => {
@@ -66,7 +68,8 @@ export const useTeamMembers = () => {
             role: user.role?.toLowerCase() || "user",
             created_at: user.created_at || user.createdAt || new Date().toISOString(),
             availability_status: user.availability_status || availabilityStatus,
-          last_offline: user.last_offline || null,
+            last_offline: user.last_offline || null,
+            blocked: user.blocked === true,
           };
         });
 

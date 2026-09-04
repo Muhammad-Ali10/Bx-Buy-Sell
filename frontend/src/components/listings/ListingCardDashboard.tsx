@@ -2,6 +2,7 @@ import { useState } from "react";
 import { MoreVertical, Share2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import ExIcon from "@/assets/Ex icon.svg";
 import { LISTING_TITLE_COLOR } from "@/lib/listingTitle";
 import {
   DropdownMenu,
@@ -13,6 +14,16 @@ import { toast } from "sonner";
 import { apiClient } from "@/lib/api";
 import ShareListingDialog from "@/components/ShareListingDialog";
 import ManageAddonsDialog from "@/components/listings/ManageAddonsDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import redInfoIcon from "@/assets/red info icon.svg";
 import dateIcon from "@/assets/date.svg";
 import { Link, useNavigate } from "react-router-dom";
@@ -30,15 +41,6 @@ interface ListingCardDashboardProps {
   onUpdate: () => void;
   /** Why the team blocked it, shown to the owner on hover. */
   blockedReason?: string | null;
-  /**
-   * What clicking the card does.
-   *
-   * On My Listings the seller is managing their own listings, so the card
-   * opens the editor and viewing moves into the menu. An admin looking at
-   * someone else's listings wants the opposite — they are inspecting, and
-   * they have their own way in to editing.
-   */
-  primaryAction?: "view" | "edit";
 }
 
 export const ListingCardDashboard = ({
@@ -54,12 +56,13 @@ export const ListingCardDashboard = ({
   unread_messages_count,
   onUpdate,
   blockedReason,
-  primaryAction = "view",
 }: ListingCardDashboardProps) => {
   const navigate = useNavigate();
   const [isPublishing, setIsPublishing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [addonsOpen, setAddonsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const normalizedPrice =
     typeof price === "number" ? price : Number(price ?? 0);
   const displayPrice = Number.isFinite(normalizedPrice) ? normalizedPrice : 0;
@@ -111,21 +114,32 @@ export const ListingCardDashboard = ({
 
   const viewHref = `/listing/${id}`;
   const editHref = `/listing/${id}/edit`;
-  const opensEditor = primaryAction === "edit";
-  // The menu offers whichever of the two the card itself does not do.
-  const cardHref = opensEditor ? editHref : viewHref;
+  /**
+   * Clicking a listing opens the listing.
+   *
+   * On the seller's own page it used to open the editor instead, on the
+   * reasoning that they came to manage rather than to look. That put the
+   * riskiest destination behind the least deliberate gesture, and it made the
+   * two cards behave differently for no visible reason. Editing has its own
+   * entry in the menu now, where it is asked for rather than arrived at.
+   */
+  const cardHref = viewHref;
 
   const handleDelete = async () => {
+    setIsDeleting(true);
     try {
       const response = await apiClient.deleteListing(id);
       if (response.success) {
-        toast.success("Listing deleted successfully");
+        toast.success("Listing deleted");
+        setDeleteOpen(false);
         onUpdate();
       } else {
-        toast.error("Failed to delete listing");
+        toast.error(response.error || "Failed to delete listing");
       }
     } catch (error) {
       toast.error("Failed to delete listing");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -169,6 +183,58 @@ export const ListingCardDashboard = ({
           </div>
         )}
       
+        {/*
+          * Managed by EX.
+          *
+          * The card has taken this prop since it was written and never drew
+          * anything with it, so a seller whose listing the team is handling saw
+          * no sign of it on their own listings page — only visitors did, on the
+          * public card.
+          *
+          * Top left, because the category badge already sits bottom left. No
+          * link on it either: the whole card is a link to the listing, and an
+          * anchor inside an anchor is invalid HTML — that exact fault was
+          * cleared out of this card once already.
+          */}
+        {managed_by_ex && (
+          <div className="absolute top-2 left-2 sm:top-3 sm:left-3">
+            <Badge
+              variant="accent"
+              className="border-0 shadow-lg flex items-center"
+              style={{
+                height: "32px",
+                borderRadius: "60px",
+                padding: "6px 14px 6px 8px",
+                gap: "6px",
+                background: "rgba(197, 253, 31, 1)",
+                backdropFilter: "blur(44px)",
+              }}
+            >
+              <img
+                src={ExIcon}
+                alt=""
+                style={{
+                  width: "18px",
+                  height: "18px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(0, 0, 0, 1)",
+                }}
+              />
+              <span
+                className="font-lufga whitespace-nowrap"
+                style={{
+                  fontWeight: 500,
+                  fontSize: "14px",
+                  lineHeight: "140%",
+                  color: "rgba(0, 0, 0, 1)",
+                }}
+              >
+                Managed by EX
+              </span>
+            </Badge>
+          </div>
+        )}
+
         {/* Category Badge */}
         {categoryLabel && (
           <div className="absolute bottom-2 sm:bottom-3 left-2 sm:left-3 h-8 sm:h-9 px-3 sm:px-4 md:px-[17px] py-1.5 sm:py-2 md:py-[7px] rounded-full bg-[rgba(0,0,0,0.25)] backdrop-blur-[44px] flex items-center justify-center">
@@ -178,55 +244,64 @@ export const ListingCardDashboard = ({
           </div>
         )}
 
-        {/* Top Actions */}
-        <div className="absolute top-2 sm:top-3 right-2 sm:right-3 flex flex-col gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 bg-white rounded-full flex items-center justify-center border-none cursor-pointer shadow-sm">
-                <MoreVertical className="w-3 h-3 sm:w-4 sm:h-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {/* Real links, so right-click and open-in-new-tab work — the
-                  client reported that missing on "View Listing" before. */}
-              {opensEditor ? (
-                <DropdownMenuItem asChild>
-                  <Link to={viewHref}>View Listing</Link>
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem asChild>
-                  <Link to={editHref}>Edit Listing</Link>
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onSelect={(event) => {
-                  // The card is wrapped in a Link — do not open the listing.
-                  event.preventDefault();
-                  setAddonsOpen(true);
-                }}
-              >
-                Add-ons
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleDelete} className="text-destructive">
-                Delete Listing
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <button
-            onClick={(event) => {
-              // The card is wrapped in a Link — do not open the listing.
-              event.preventDefault();
-              event.stopPropagation();
-              handleShare();
-            }}
-            className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 bg-white rounded-full flex items-center justify-center border-none cursor-pointer shadow-sm"
-            title="Share"
-          >
-            <Share2 className="w-3 h-3 sm:w-4 sm:h-4" />
-          </button>
-        </div>
       </div>
       </Link>
+      {/* Top Actions.
+
+        A sibling of the Link, deliberately, not a child of it. Inside, every
+        click in here reached the card's own link as well: the two menu
+        entries were anchors nested inside an anchor, which is not valid
+        HTML, and choosing Delete opened the confirmation while navigating to
+        the listing behind it. Radix's `onSelect` preventDefault only stops
+        the menu from closing, so it was never going to hold that back.
+
+        The inset is measured from the card rather than from the image, so it
+        is the card's padding (12/16px) plus the old offset (8/12px). */}
+      <div className="absolute top-5 right-5 sm:top-7 sm:right-7 z-10 flex flex-col gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 bg-white rounded-full flex items-center justify-center border-none cursor-pointer shadow-sm">
+              <MoreVertical className="w-3 h-3 sm:w-4 sm:h-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {/* Both, always.
+                The menu used to offer whichever one the card itself did not:
+                on a draft the card opened the editor, so the menu said "View
+                Listing" and editing had no entry anywhere on screen. Knowing
+                that clicking the card edits it is not something the card says
+                out loud, so for anyone who opened the menu looking for it,
+                Edit Listing simply was not there.
+
+                Real links, so right-click and open-in-new-tab work — the
+                client reported that missing on "View Listing" before. */}
+            <DropdownMenuItem asChild>
+              <Link to={viewHref}>View Listing</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to={editHref}>Edit Listing</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => setAddonsOpen(true)}
+            >
+              Add-ons
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => setDeleteOpen(true)}
+              className="text-destructive"
+            >
+              Delete Listing
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <button
+          onClick={handleShare}
+          className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 bg-white rounded-full flex items-center justify-center border-none cursor-pointer shadow-sm"
+          title="Share"
+        >
+          <Share2 className="w-3 h-3 sm:w-4 sm:h-4" />
+        </button>
+        </div>
       <ShareListingDialog
         open={shareOpen}
         onOpenChange={setShareOpen}
@@ -239,6 +314,35 @@ export const ListingCardDashboard = ({
         open={addonsOpen}
         onOpenChange={setAddonsOpen}
       />
+      {/* Deleting a listing is not undoable and does not stop at the listing:
+          the conversations attached to it, and every message inside them, go
+          with it. The dialog says so, because nothing afterwards can. */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this listing?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &ldquo;{title}&rdquo; will be permanently deleted, along with every conversation
+              about it and the messages inside them. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeleting}
+              onClick={(event) => {
+                // Keep the dialog up while the request is in flight; it closes
+                // itself once the server has confirmed.
+                event.preventDefault();
+                void handleDelete();
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Deleting…" : "Delete listing"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Content */}
       <div className="flex flex-col mt-3 sm:mt-4 md:mt-4">
         {/* First Row: Title and Status */}

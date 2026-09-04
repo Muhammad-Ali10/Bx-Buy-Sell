@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { List, Heart, MessageSquare, User, ShieldCheck, Menu } from "lucide-react";
+import { List, Heart, MessageSquare, User, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import logo from "@/assets/_App Icon 1 (2).png";
 import rocketIcon from "@/assets/roccket.svg";
@@ -50,12 +50,19 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
     onLinkClick?.();
   };
 
+  /*
+   * No "Verify Your Account" here.
+   *
+   * Account Details → Overview already carries all four of them — phone,
+   * email, identity and funds — opening the same dialogs this pointed at, so
+   * the entry was a second door onto one room. `/verify-account` still answers
+   * for anyone holding the link; it simply is not advertised twice.
+   */
   const menuItems = [
     { icon: List, label: "My Listings", path: "/my-listings" },
     { icon: Heart, label: "Favourites", path: "/favourites" },
     { icon: MessageSquare, label: "Chat", path: "/chat" },
     { icon: User, label: "Account Details", path: "/profile" },
-    { icon: ShieldCheck, label: "Verify Your Account", path: "/verify-account" },
   ];
 
   return (

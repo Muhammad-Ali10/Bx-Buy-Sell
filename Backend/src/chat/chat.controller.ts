@@ -301,6 +301,34 @@ export class ChatController {
     return this.chatService.unarchiveChat(chatId, userId);
   }
 
+  // Pin a chat to the top of this person's own list.
+  @Roles(['ADMIN', 'MONITER', 'USER', 'STAFF'])
+  @Put('/pin/:chatId/:userId')
+  @ApiParam({ name: 'chatId', description: 'Chat ID', type: String })
+  @ApiParam({ name: 'userId', description: 'User ID', type: String })
+  async pinChat(
+    @Param('chatId') chatId: string,
+    @Param('userId') userId: string,
+    @Req() req: any,
+  ) {
+    this.ensureSelfOrStaff(userId, req);
+    return this.chatService.setChatPinned(chatId, userId, true);
+  }
+
+  // Release it back into the ordinary order.
+  @Roles(['ADMIN', 'MONITER', 'USER', 'STAFF'])
+  @Put('/unpin/:chatId/:userId')
+  @ApiParam({ name: 'chatId', description: 'Chat ID', type: String })
+  @ApiParam({ name: 'userId', description: 'User ID', type: String })
+  async unpinChat(
+    @Param('chatId') chatId: string,
+    @Param('userId') userId: string,
+    @Req() req: any,
+  ) {
+    this.ensureSelfOrStaff(userId, req);
+    return this.chatService.setChatPinned(chatId, userId, false);
+  }
+
   // Begin the assisted deal process for this conversation.
   @Roles(['ADMIN', 'MONITER', 'USER', 'STAFF'])
   @Post('/start-deal/:chatId')
@@ -510,6 +538,22 @@ export class ChatController {
   ) {
     const { id: userId } = (req as any).user;
     return this.chatService.deleteMessage(messageId, userId);
+  }
+
+  /**
+   * Search conversations by message text, listing name, or participant.
+   *
+   * Declared above `@Get('/:id')` — Nest matches in order, so the wildcard
+   * would otherwise read "search" as a chat id.
+   */
+  @Get('search')
+  @Roles(['ADMIN', 'MONITER', 'STAFF', 'USER'])
+  async searchChats(@Query('q') q: string, @Req() req: any) {
+    const currentUser = req?.user;
+    if (!currentUser?.id) {
+      throw new ForbiddenException('Unauthorized');
+    }
+    return this.chatService.searchChats(q, currentUser.id, currentUser.role);
   }
 
   // Get chat by ID with full details (must be last to avoid route conflicts)

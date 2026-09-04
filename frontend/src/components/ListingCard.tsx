@@ -1,3 +1,5 @@
+import { isLockedValue } from "@/lib/listingLock";
+import {  } from "@/lib/financialTableUtils";
 import { Heart, Share2, Crown, Lock } from "lucide-react";
 import { LISTING_TITLE_COLOR } from "@/lib/listingTitle";
 import { Button } from "./ui/button";
@@ -43,8 +45,9 @@ const ListingCard = ({
   name,
   description,
   price,
-  profitMultiple = "Multiple 1.5x Profit",
-  revenueMultiple = "0.5x Revenue",
+  // A card rendered without figures says so, rather than borrowing a number.
+  profitMultiple = "Profit multiple unknown",
+  revenueMultiple = "Revenue multiple unknown",
   location,
   locationFlag,
   businessAge,
@@ -65,9 +68,6 @@ const ListingCard = ({
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
-  const isLockedValue = (value: unknown): value is string =>
-    typeof value === "string" &&
-    value.toLowerCase().includes("to unlock");
 
   // Share ONE favorites fetch across every card via React Query, instead of
   // each card calling getFavorites() on mount (that was N identical requests
@@ -312,7 +312,19 @@ const ListingCard = ({
             title={name || "Business Listing"}
           />
         </div>
-        <div className="absolute bottom-4 left-4 flex gap-2">
+        {/*
+          * Bounded on the right, and allowed to wrap.
+          *
+          * Premium, Managed by EX and the category sit in one row anchored only
+          * on the left, so the row had nothing to stop it: on a narrower card
+          * the last badge ran past the image and was cut in half by the rounded
+          * corner. Nobody saw it while no listing was marked as managed — the
+          * row only gets long enough once that badge is in it.
+          *
+          * Wrapping grows upward from `bottom-4`, so a second line rises into
+          * the image rather than pushing anything off the bottom.
+          */}
+        <div className="absolute bottom-4 left-4 right-4 flex flex-wrap gap-2">
           {isPremium && (
             <Badge
               variant="dark"
@@ -339,7 +351,9 @@ const ListingCard = ({
                 variant="accent"
                 className="border-0 shadow-lg cursor-pointer hover:opacity-90 transition-opacity flex items-center"
                 style={{
-                  width: "176px",
+                  // Was a hard 176px, measured off one screen. Its own content
+                  // comes to the same width and costs nothing when the row has
+                  // to give way.
                   height: "36px",
                   borderRadius: "60px",
                   paddingTop: "7px",
@@ -349,6 +363,7 @@ const ListingCard = ({
                   gap: "8px",
                   background: "rgba(197, 253, 31, 1)",
                   backdropFilter: "blur(44px)",
+                  whiteSpace: "nowrap",
                 }}
               >
                 <img

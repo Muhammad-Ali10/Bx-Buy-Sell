@@ -42,14 +42,14 @@ const menuItems = [
   { id: "brand-information" as DashboardStep, label: "Brand Information", iconActive: Svg2, iconInactive: Svg2Black },
   { id: "tools" as DashboardStep, label: "Tools you use", iconActive: Svg3, iconInactive: Svg3Black },
   { id: "financials" as DashboardStep, label: "Financials", iconActive: Svg4, iconInactive: Svg4Black },
-  { id: "statistics" as DashboardStep, label: "Statistics", iconActive: Svg5, iconInactive: Svg5Black },
-  { id: "products" as DashboardStep, label: "Products", iconActive: Svg6, iconInactive: Svg6Black },
-  { id: "management" as DashboardStep, label: "Management", iconActive: Svg7, iconInactive: Svg7Black },
+  { id: "statistics" as DashboardStep, label: "Statistics", iconActive: Svg6, iconInactive: Svg6Black },
+  { id: "products" as DashboardStep, label: "Products", iconActive: Svg7, iconInactive: Svg7Black },
+  { id: "management" as DashboardStep, label: "Management", iconActive: Svg8, iconInactive: Svg8Black },
 
-  { id: "accounts" as DashboardStep, label: "Accounts", iconActive: Svg8, iconInactive: Svg8Black },
-  { id: "ad-informations" as DashboardStep, label: "Ad Informations", iconActive: Svg9, iconInactive: Svg9Black },
-  { id: "handover" as DashboardStep, label: "Handover", iconActive: Svg10, iconInactive: Svg10Black },
-  { id: "packages" as DashboardStep, label: "Packages", iconActive: Svg11, iconInactive: Svg11Black },
+  { id: "accounts" as DashboardStep, label: "Accounts", iconActive: Svg9, iconInactive: Svg9Black },
+  { id: "ad-informations" as DashboardStep, label: "Ad Informations", iconActive: Svg10, iconInactive: Svg10Black },
+  { id: "handover" as DashboardStep, label: "Handover", iconActive: Svg11, iconInactive: Svg11Black },
+  { id: "packages" as DashboardStep, label: "Packages", iconActive: Svg12, iconInactive: Svg12Black },
 ];
 
 const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep: DashboardStep; onStepChange: (step: DashboardStep) => void; onLinkClick?: () => void }) => {

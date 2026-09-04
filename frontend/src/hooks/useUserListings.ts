@@ -122,6 +122,26 @@ export const useUserListings = (userId: string | undefined) => {
               created_at: listing.created_at || listing.createdAt || new Date().toISOString(),
               requests_count: listing.requests_count || 0,
               unread_messages_count: listing.unread_messages_count || 0,
+              /**
+               * What the seller is paying for on this listing.
+               *
+               * The Subscriptions tab lists a card per listing, and these are
+               * what it lists. The visibility layer strips them from anyone but
+               * the owner and the team, so they only arrive here when the person
+               * asking is entitled to see them — which is exactly who this
+               * screen is for.
+               */
+              selectedPackage: listing.selectedPackage ?? null,
+              packageActive: listing.packageActive ?? null,
+              packageBillingCycle: listing.packageBillingCycle ?? null,
+              packageAddons: Array.isArray(listing.packageAddons) ? listing.packageAddons : [],
+              packageExpiresAt: listing.packageExpiresAt ?? null,
+              description:
+                listing.description ||
+                listing.advertisement?.find((a: any) =>
+                  a.question?.toLowerCase().includes('description'),
+                )?.answer ||
+                '',
             };
           });
           

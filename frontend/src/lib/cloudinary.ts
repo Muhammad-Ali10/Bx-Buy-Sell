@@ -22,12 +22,39 @@ console.log('🔧 Cloudinary Configuration:', {
 });
 
 /**
- * Turns "P&L Statement 2024.xlsx" into "P-L-Statement-2024-k3f9a2.xlsx".
+ * Which kind of asset Cloudinary should store this as.
  *
- * Cloudinary needs a URL-safe id; the extension is kept so the listing page can
- * still tell which icon to show, and the random suffix avoids collisions.
+ * Documents must be `raw`. Everything that was not an image used to be sent as
+ * `auto`, and Cloudinary reads a PDF as an *image* — it can render pages — so
+ * PDFs were stored and delivered through the image pipeline and came back as
+ * something a PDF reader would not open. `raw` hands the bytes back exactly as
+ * they arrived.
  */
-function buildPublicId(fileName: string): string | null {
+function resourceTypeFor(file: File): 'image' | 'video' | 'raw' {
+  const type = String(file.type || '').toLowerCase();
+  if (type.startsWith('image/')) return 'image';
+  if (type.startsWith('video/')) return 'video';
+  return 'raw';
+}
+
+/**
+ * The name the file keeps: "P&L Statement 2024.xlsx" -> "P-L-Statement-2024.xlsx".
+ *
+ * Cloudinary needs a URL-safe id, so punctuation becomes a hyphen; beyond that
+ * the seller's own name survives, because the last segment of the URL is what
+ * every screen shows.
+ *
+ * Two rules about the extension, and getting them the wrong way round is what
+ * produced "…-4j8pq3.pdf.pdf":
+ *  - a `raw` asset has no separate format, so its id carries the extension;
+ *  - an `image` or `video` id must not, because Cloudinary appends the format
+ *    when it builds the URL — and an id ending in ".png" then became ".png.png".
+ *
+ * There is no random suffix here any more. It was guarding against one upload
+ * overwriting another of the same name; that guard now lives in the folder, so
+ * it protects the file without being read out as part of its name.
+ */
+function buildPublicId(fileName: string, keepExtension: boolean): string | null {
   const name = String(fileName || '').trim();
   if (!name) return null;
 
@@ -39,12 +66,23 @@ function buildPublicId(fileName: string): string | null {
     .normalize('NFKD')
     .replace(/[^a-zA-Z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
+    .slice(0, 80);
 
   if (!safeBase) return null;
 
-  const suffix = Math.random().toString(36).slice(2, 8);
-  return ext ? `${safeBase}-${suffix}.${ext}` : `${safeBase}-${suffix}`;
+  return keepExtension && ext ? `${safeBase}.${ext}` : safeBase;
+}
+
+/**
+ * A folder nobody will collide in.
+ *
+ * Cloudinary overwrites when two uploads share a public id, so uploading a
+ * second "Agreement.pdf" would silently replace the first. Giving each upload
+ * its own folder keeps the names clean and still makes that impossible.
+ */
+function uniqueFolder(folder?: string): string {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return folder ? `${folder}/${suffix}` : suffix;
 }
 
 export interface UploadResult {
@@ -73,8 +111,16 @@ export async function uploadToCloudinary(
       };
     }
 
-    // Check file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    /*
+     * A backstop, not the rule.
+     *
+     * Every caller already enforces its own limit and says so in its own words
+     * — 20 MB for proof of funds, 10 MB for attachments, 100 MB for video. This
+     * used to refuse anything over 10 MB regardless, so a 15 MB bank statement
+     * passed the check the buyer was shown and was then turned away here by a
+     * number nothing on screen had mentioned.
+     */
+    const maxSize = 100 * 1024 * 1024;
     if (file.size > maxSize) {
       return {
         success: false,
@@ -87,24 +133,19 @@ export async function uploadToCloudinary(
     formData.append('file', file);
     formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
     
-    // Add folder if specified
-    if (folder) {
-      formData.append('folder', folder);
-    }
+    const resourceType = resourceTypeFor(file);
+
+    // Every upload gets its own folder, so the file itself can keep the name
+    // the seller gave it without one upload ever replacing another.
+    formData.append('folder', uniqueFolder(folder));
 
     // Keep the seller's own file name in the URL. Without this Cloudinary
     // invents a random id and the listing page shows "fgg8rbrwmxlnp7w6pjyg.xlsx"
-    // instead of "P&L 2024.xlsx". A short suffix keeps two uploads of the same
-    // name from overwriting each other.
-    const publicId = buildPublicId(file.name);
+    // instead of "P&L 2024.xlsx".
+    const publicId = buildPublicId(file.name, resourceType === 'raw');
     if (publicId) {
       formData.append('public_id', publicId);
     }
-
-    // Determine resource type based on file type
-    // For images: use 'image', for PDFs and other files: use 'raw' or 'auto' (auto detects)
-    const isImage = file.type.startsWith('image/');
-    const resourceType = isImage ? 'image' : 'auto'; // 'auto' automatically detects file type
 
     // Upload to Cloudinary using the standard upload endpoint
     // Format: https://api.cloudinary.com/v1_1/{cloud_name}/{resource_type}/upload

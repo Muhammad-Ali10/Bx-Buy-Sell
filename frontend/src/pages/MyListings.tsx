@@ -303,9 +303,6 @@ const MyListings = () => {
                   key={listing.id}
                   {...listing}
                   onUpdate={() => refetch()}
-                  // This is the seller's own manager: clicking a listing means
-                  // "work on this", not "look at what buyers see".
-                  primaryAction="edit"
                 />
               ))}
             </div>

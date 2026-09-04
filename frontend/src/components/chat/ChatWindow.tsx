@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Send, Search, Video, MoreVertical, X, UserX, Trash2, User, PhoneOff, Archive, MessageSquare, Paperclip, Edit2, Check, XCircle, Pin } from "lucide-react";
+import { Send, Search, Video, MoreVertical, X, UserX, Trash2, User, PhoneOff, Archive, MessageSquare, Paperclip, Edit2, Check, XCircle, Pin, Info } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { apiClient } from "@/lib/api";
 import { getCachedChatRoom, setCachedChatRoom } from "@/lib/chatRoomCache";
 import { getChatListingTitle } from "@/lib/chatListing";
-import { isSystemMessage, systemMessageText, POLICY_SENDER_NAME } from "@/lib/systemMessages";
+import { isSystemMessage, systemMessageText, isDealPrompt, readSystemMeta, POLICY_SENDER_NAME } from "@/lib/systemMessages";
+import DealProcessCard from "@/components/chat/DealProcessCard";
 import ChatWelcomeCards from "@/components/chat/ChatWelcomeCards";
 import StartDealProcessDialog from "@/components/chat/StartDealProcessDialog";
 import { formatChatTime, formatAdminMessageTime } from "@/lib/timeFormatter";
@@ -1794,6 +1795,15 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   };
 
   // Filter messages for search
+  /**
+   * Read off the thread rather than off a flag on the chat: the notice is the
+   * record, it arrives with the messages either party already has, and it is
+   * right again the moment the thread reloads.
+   */
+  const dealStarted = messages.some(
+    (m: any) => readSystemMeta(m).kind === 'DEAL_STARTED',
+  );
+
   const filteredMessages = searchQuery
     ? messages.filter(msg =>
         msg.content.toLowerCase().includes(searchQuery.toLowerCase())
@@ -2166,22 +2176,21 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     }
   }, [isVideoCallDialogOpen]);
 
+  /**
+   * Whether this person has pinned this conversation.
+   *
+   * The answer comes from the server with the room. It used to be read from a
+   * `pinned_chat_ids` list in localStorage, which made a pin a property of the
+   * browser rather than of the person: gone on a second device, and invisible
+   * to anyone else looking at the same conversation.
+   */
   useEffect(() => {
-    const chatIdToUse = chatRoom?.id || conversationId;
-    if (!chatIdToUse) {
+    if (!(chatRoom?.id || conversationId)) {
       setIsChatPinned(false);
       return;
     }
-
-    try {
-      const rawPinned = localStorage.getItem("pinned_chat_ids");
-      const parsedPinned = rawPinned ? (JSON.parse(rawPinned) as string[]) : [];
-      setIsChatPinned(parsedPinned.includes(chatIdToUse));
-    } catch (error) {
-      console.error("Error reading pinned chats:", error);
-      setIsChatPinned(false);
-    }
-  }, [chatRoom?.id, conversationId]);
+    setIsChatPinned(Boolean((chatRoom as any)?.pinned));
+  }, [chatRoom, conversationId]);
 
   const handleDeleteChat = async () => {
     const chatIdToUse = chatRoom?.id || conversationId;
@@ -2282,28 +2291,29 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     }
   };
 
-  const handlePinChat = () => {
+  const handlePinChat = async () => {
     const chatIdToUse = chatRoom?.id || conversationId;
-    if (!chatIdToUse) {
+    if (!chatIdToUse || !currentUserId) {
       toast.error("Chat room not loaded");
       return;
     }
 
+    const wasPinned = isChatPinned;
     try {
-      const rawPinned = localStorage.getItem("pinned_chat_ids");
-      const parsedPinned = rawPinned ? (JSON.parse(rawPinned) as string[]) : [];
-      const isPinned = parsedPinned.includes(chatIdToUse);
-      const nextPinned = isPinned
-        ? parsedPinned.filter((id) => id !== chatIdToUse)
-        : [...parsedPinned, chatIdToUse];
+      const response = wasPinned
+        ? await apiClient.unpinChat(chatIdToUse, currentUserId)
+        : await apiClient.pinChat(chatIdToUse, currentUserId);
 
-      localStorage.setItem("pinned_chat_ids", JSON.stringify(nextPinned));
-      setIsChatPinned(!isPinned);
-      toast.success(isPinned ? "Chat unpinned" : "Chat pinned");
-
-      if (chatRoom) {
-        setChatRoom({ ...chatRoom, isPinned: !isPinned });
+      if (!response.success) {
+        toast.error(response.error || "Failed to update pin");
+        return;
       }
+
+      setIsChatPinned(!wasPinned);
+      if (chatRoom) {
+        setChatRoom({ ...chatRoom, pinned: !wasPinned });
+      }
+      toast.success(wasPinned ? "Chat unpinned" : "Chat pinned");
       if (refreshConversations) {
         refreshConversations();
       }
@@ -2739,13 +2749,24 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             className="mb-4 rounded-xl px-4 py-3.5"
             style={{ background: 'rgba(250, 250, 250, 1)', border: '1px solid rgba(0,0,0,0.08)' }}
           >
-            <p
-              className="m-0 text-[13px] text-[#0F172A]"
-              style={{ fontFamily: 'Lufga' }}
-            >
-              <strong>{otherUser?.first_name || 'This buyer'}</strong> wants access to the
-              confidential details of your listing.
-            </p>
+            {/* The icon and the face, as the design has them: a notice about a
+                particular person reads better with that person on it. */}
+            <div className="flex items-start gap-2.5">
+              <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#64748B]" />
+              <Avatar className="h-5 w-5 flex-shrink-0">
+                <AvatarImage src={otherUser?.profile_pic || undefined} />
+                <AvatarFallback className="text-[9px]">
+                  {(otherUser?.first_name || 'B').charAt(0)}
+                </AvatarFallback>
+              </Avatar>
+              <p
+                className="m-0 text-[13px] text-[#0F172A]"
+                style={{ fontFamily: 'Lufga' }}
+              >
+                <strong>{otherUser?.first_name || 'This buyer'}</strong> wants access to the
+                confidential details of your listing.
+              </p>
+            </div>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -2770,8 +2791,17 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         )}
 
         {/* The client's two standing notices. Replaces the single-line
-            warning that used to sit here and said the same thing. */}
-        <ChatWelcomeCards onStartDeal={() => setStartDealOpen(true)} />
+            warning that used to sit here and said the same thing.
+
+            One of them invites the reader to start a deal process, so they are
+            shown only where there is a listing to deal on — a moderator writing
+            to a member has nothing attached, and the advice would be nonsense. */}
+        {Boolean(listingId || (chatRoom as any)?.listingId) && (
+          <ChatWelcomeCards
+            onStartDeal={() => setStartDealOpen(true)}
+            dealStarted={dealStarted}
+          />
+        )}
 
         {filteredMessages.length === 0 && !isSearchOpen ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -2840,6 +2870,22 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
               );
             }
             
+            /*
+             * The platform's periodic prompt is a card with a button, not
+             * something anybody said, so it does not take the message bubble
+             * and the "Official EX-Support" byline that go with a person.
+             * Placed here with the other special rows above it, before the
+             * sender is worked out — there is no sender to work out.
+             */
+            if (isDealPrompt(message)) {
+              if (dealStarted) return null;
+              return (
+                <div key={message.id} className="my-3">
+                  <DealProcessCard onStartDeal={() => setStartDealOpen(true)} />
+                </div>
+              );
+            }
+
             // Get sender information - CRITICAL: Prioritize message.sender and message.type for admin messages
             // Check if this is an admin message first (by type or by sender role)
             // The platform's own notices render in the same card as staff

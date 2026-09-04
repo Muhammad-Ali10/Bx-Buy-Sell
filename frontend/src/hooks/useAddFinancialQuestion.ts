@@ -10,12 +10,16 @@ export const useAddFinancialQuestion = () => {
       question: string; 
       answer_type: string;
       options?: string[];
+      required?: boolean | null;
     }) => {
       const response = await apiClient.createAdminQuestion({
         question: data.question,
         answer_type: data.answer_type,
         answer_for: "FINANCIAL",
         options: data.options || [],
+      // Carried through like every other section's hook; without it the
+      // dialog's choice was dropped between the form and the request.
+        required: data.required,
       });
 
       if (!response.success) {

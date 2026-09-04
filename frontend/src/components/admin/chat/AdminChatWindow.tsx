@@ -2,17 +2,24 @@ import { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Send, Search, Video, MoreVertical } from "lucide-react";
+import { Send, Search, Video, MoreVertical, Archive, ArchiveRestore, Pin, PinOff, Paperclip, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { format } from "date-fns";
 import { formatAdminMessageTime } from "@/lib/timeFormatter";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
+import { resolveListingTitle } from "@/lib/listingTitle";
 import { Socket } from "socket.io-client";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import chatSearchIcon from "@/assets/chatsearch.svg";
-import videoCallIcon from "@/assets/vedio call.svg";
 
 interface Message {
   id: string;
@@ -40,10 +47,15 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [conversation, setConversation] = useState<any>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [messageSearch, setMessageSearch] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const markAllMessagesAsRead = async (chatId: string) => {
     if (!chatId) return;
@@ -262,6 +274,91 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
     setSocket(newSocket);
   };
 
+  /**
+   * This moderator's own filing of this conversation.
+   *
+   * Read from their row in `chatLabels`, never from `Chat.status` — archiving
+   * used to write that shared field, so one person tidying their queue took the
+   * conversation out of the other two people's lists as well.
+   */
+  const myChatState = (() => {
+    const rows = Array.isArray(conversation?.chatLabels) ? conversation.chatLabels : [];
+    const mine = rows.find((row: any) => row.userId === user?.id);
+    return { archived: Boolean(mine?.archived), pinned: Boolean(mine?.pinned) };
+  })();
+
+  const [filingBusy, setFilingBusy] = useState(false);
+
+  /** Apply a filing change, then reflect it locally so the menu label flips. */
+  const applyFiling = async (
+    action: () => Promise<any>,
+    nextState: { archived?: boolean; pinned?: boolean },
+    done: string,
+    failed: string,
+  ) => {
+    if (!user?.id || !conversationId) {
+      toast.error("Conversation not loaded");
+      return;
+    }
+    setFilingBusy(true);
+    try {
+      const response = await action();
+      if (!response?.success) {
+        toast.error(response?.error || failed);
+        return;
+      }
+      setConversation((previous: any) => {
+        if (!previous) return previous;
+        const rows = Array.isArray(previous.chatLabels) ? [...previous.chatLabels] : [];
+        const at = rows.findIndex((row: any) => row.userId === user.id);
+        const merged = { ...(at >= 0 ? rows[at] : { userId: user.id }), ...nextState };
+        if (at >= 0) rows[at] = merged;
+        else rows.push(merged);
+        return { ...previous, chatLabels: rows };
+      });
+      toast.success(done);
+      // The list shows the same two flags, so it has to hear about this.
+      window.dispatchEvent(new CustomEvent("chat:filing-changed", {
+        detail: { chatId: conversationId },
+      }));
+    } catch (error) {
+      console.error(failed, error);
+      toast.error(failed);
+    } finally {
+      setFilingBusy(false);
+    }
+  };
+
+  const handleToggleArchive = () =>
+    myChatState.archived
+      ? applyFiling(
+          () => apiClient.unarchiveChat(conversationId, user!.id),
+          { archived: false },
+          "Chat unarchived",
+          "Failed to unarchive chat",
+        )
+      : applyFiling(
+          () => apiClient.archiveChat(conversationId, user!.id),
+          { archived: true },
+          "Chat archived",
+          "Failed to archive chat",
+        );
+
+  const handleTogglePin = () =>
+    myChatState.pinned
+      ? applyFiling(
+          () => apiClient.unpinChat(conversationId, user!.id),
+          { pinned: false },
+          "Chat unpinned",
+          "Failed to unpin chat",
+        )
+      : applyFiling(
+          () => apiClient.pinChat(conversationId, user!.id),
+          { pinned: true },
+          "Chat pinned",
+          "Failed to pin chat",
+        );
+
   const fetchConversationDetails = async () => {
     try {
       const response = await apiClient.getChatById(conversationId);
@@ -342,6 +439,76 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
     }
   };
 
+  /**
+   * Attach a file to the conversation.
+   *
+   * There was no way to do this from the moderator's side at all — the button
+   * simply was not in the design — although the upload endpoint and the
+   * `fileUrl` field the socket already carries were both there and in use on
+   * the members' side of the same conversation.
+   */
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Clear immediately, so picking the same file twice still fires onChange.
+    event.target.value = '';
+    if (!file) return;
+
+    if (!user?.id || !socket || !isConnected) {
+      toast.error('Connection not ready. Please wait...');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const isImage = file.type.startsWith('image/');
+      const uploadResponse = await apiClient.uploadFile(file, isImage ? 'photo' : 'attachment');
+      if (!uploadResponse.success || !uploadResponse.data) {
+        throw new Error(uploadResponse.error || 'Upload failed');
+      }
+
+      const data = uploadResponse.data as any;
+      const fileUrl = data.url || data.path || '';
+      if (!fileUrl) throw new Error('No file URL returned');
+
+      const content = isImage ? '📷 Image' : `📎 ${file.name}`;
+      socket.emit('message:send:admin', {
+        chatId: conversationId,
+        senderId: user.id,
+        content,
+        role: 'MONITER',
+        fileUrl,
+        type: isImage ? 'IMAGE' : 'FILE',
+      });
+
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          content,
+          senderId: user.id,
+          createdAt: new Date().toISOString(),
+          read: false,
+          type: 'ADMIN',
+          fileUrl,
+          sender: {
+            id: user.id,
+            first_name: user.first_name || '',
+            last_name: user.last_name || '',
+            email: user.email || '',
+            profile_pic: user.profile_pic || null,
+            role: (user.role as 'USER' | 'SELLER' | 'ADMIN' | 'MONITER') || 'ADMIN',
+          },
+        } as Message,
+      ]);
+      scrollToBottom();
+    } catch (error: any) {
+      console.error('Error uploading file:', error);
+      toast.error(error?.message || 'Failed to upload file');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -362,11 +529,33 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
 
   const buyerName = `${conversation.user?.first_name || ''} ${conversation.user?.last_name || ''}`.trim() || 'Buyer';
   const sellerName = `${conversation.seller?.first_name || ''} ${conversation.seller?.last_name || ''}`.trim() || 'Seller';
-  const memberCount = 3; // buyer + seller + admin
-  const onlineCount = 1; // TODO: Add real-time presence
-  const listingTitle = conversation.listing?.portfolioLink 
-    ? `Listing: ${conversation.listing.portfolioLink.substring(0, 50)}...` 
-    : `${buyerName} ↔ ${sellerName}`;
+
+  /**
+   * The listing this conversation is about.
+   *
+   * The heading used to read `conversation.listing?.portfolioLink`, which is a
+   * web address rather than a name — and one the visibility layer replaces with
+   * "register to unlock" for anyone it has not identified, so the heading could
+   * end up advertising a lock. With no link it fell back to the two
+   * participants, which is what the screen was actually showing.
+   *
+   * `resolveListingTitle` reads the name the seller typed in Ad Information,
+   * the same way the conversation list beside it already does.
+   */
+  /**
+   * What the message list shows. Filtering here rather than inside the map keeps
+   * the count in the search bar honest — it counts what is on screen.
+   */
+  const messageNeedle = messageSearch.trim().toLowerCase();
+  const visibleMessages = messageNeedle
+    ? messages.filter((message) =>
+        String(message.content || '').toLowerCase().includes(messageNeedle),
+      )
+    : messages;
+
+  const listingTitle = conversation.listing
+    ? resolveListingTitle(conversation.listing, 'Untitled Listing')
+    : 'No listing attached';
 
   return (
     <div className="flex-1 flex flex-col bg-background overflow-hidden h-full">
@@ -384,28 +573,64 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
           >
             {listingTitle}
           </h2>
+          {/* "3 Members, 1 online" was two hard-coded numbers with a TODO
+              beside them — the same figures on every conversation, whoever was
+              actually there. The draft asks for the two names here, each opening
+              that person's record. */}
           <p
-            className="text-base lg:text-[11px] xl:text-base text-black/50 m-0"
+            className="text-base lg:text-[11px] xl:text-base text-black/50 m-0 truncate"
             style={{
               fontFamily: 'Lufga',
               fontWeight: 400,
-              lineHeight: '100%',
+              lineHeight: '140%',
               letterSpacing: '0%',
             }}
           >
-            {memberCount} Members, {onlineCount} online
+            <span className="mr-1.5">Chat History</span>
+            {conversation.user?.id && (
+              <>
+                <span className="mx-1">·</span>
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-black transition-colors"
+                  onClick={() => navigate(`/admin/users/${conversation.user.id}`)}
+                  title={`Open ${buyerName}`}
+                >
+                  {buyerName}
+                </button>
+              </>
+            )}
+            {conversation.seller?.id && (
+              <>
+                <span className="mx-1">↔</span>
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-black transition-colors"
+                  onClick={() => navigate(`/admin/users/${conversation.seller.id}`)}
+                  title={`Open ${sellerName}`}
+                >
+                  {sellerName}
+                </button>
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center flex-shrink-0" style={{ gap: '4px' }}>
+          {/* Search inside this conversation. It was a button that raised
+              "coming soon" and did nothing else. */}
           <button
             type="button"
-            onClick={() => toast.info("Search feature coming soon!")}
+            aria-label={showSearch ? 'Close search' : 'Search this conversation'}
+            onClick={() => {
+              setShowSearch((open) => !open);
+              if (showSearch) setMessageSearch('');
+            }}
             style={{
               width: '32px',
               height: '32px',
               padding: '6px',
               borderRadius: '16px',
-              background: 'rgba(249, 251, 252, 1)',
+              background: showSearch ? 'rgba(174, 243, 31, 1)' : 'rgba(249, 251, 252, 1)',
               border: 'none',
               cursor: 'pointer',
               display: 'flex',
@@ -414,81 +639,123 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
               flexShrink: 0,
             }}
           >
-            <img 
-              src={chatSearchIcon} 
-              alt="Search" 
-              style={{ 
-                width: '14px', 
+            <img
+              src={chatSearchIcon}
+              alt="Search"
+              style={{
+                width: '14px',
                 height: '14px',
-              }} 
+              }}
             />
           </button>
-          <button
-            type="button"
-            onClick={() => toast.info("Video call feature coming soon!")}
-            style={{
-              width: '32px',
-              height: '32px',
-              padding: '6px',
-              borderRadius: '16px',
-              background: 'rgba(249, 251, 252, 1)',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <img 
-              src={videoCallIcon} 
-              alt="Video Call" 
-              style={{ 
-                width: '14px', 
-                height: '14px',
-              }} 
-            />
-          </button>
-          <button
-            type="button"
-            onClick={() => toast.info("More options coming soon!")}
-            style={{
-              width: '32px',
-              height: '32px',
-              padding: '6px',
-              borderRadius: '16px',
-              background: 'rgba(249, 251, 252, 1)',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <MoreVertical 
-              style={{ 
-                width: '14px', 
-                height: '14px',
-                color: 'rgba(0, 0, 0, 1)',
-              }} 
-            />
-          </button>
+          {/* The video-call button stood here doing nothing, and it could not
+              have done anything: the gateway rejects any call whose two ends are
+              not the buyer and the seller, by design. A moderator's job on this
+              screen is to read what was said — a call would be the one exchange
+              that left no record on a page built to keep one. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="More options"
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  padding: '6px',
+                  borderRadius: '16px',
+                  background: 'rgba(249, 251, 252, 1)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <MoreVertical
+                  style={{
+                    width: '14px',
+                    height: '14px',
+                    color: 'rgba(0, 0, 0, 1)',
+                  }}
+                />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={filingBusy} onClick={handleToggleArchive}>
+                {myChatState.archived ? (
+                  <><ArchiveRestore className="mr-2 h-4 w-4" /> Unarchive Chat</>
+                ) : (
+                  <><Archive className="mr-2 h-4 w-4" /> Archive Chat</>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={filingBusy} onClick={handleTogglePin}>
+                {myChatState.pinned ? (
+                  <><PinOff className="mr-2 h-4 w-4" /> Unpin Chat</>
+                ) : (
+                  <><Pin className="mr-2 h-4 w-4" /> Pin Chat</>
+                )}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
+      {/* Search within this conversation */}
+      {showSearch && (
+        <div className="flex items-center gap-2 border-b px-4 py-2 bg-card flex-shrink-0">
+          <Search className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+          <input
+            autoFocus
+            type="text"
+            value={messageSearch}
+            onChange={(event) => setMessageSearch(event.target.value)}
+            placeholder="Find in this conversation"
+            className="flex-1 min-w-0 border-none outline-none bg-transparent text-sm"
+            style={{ fontFamily: 'Lufga' }}
+          />
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            {messageSearch.trim() ? `${visibleMessages.length} of ${messages.length}` : `${messages.length} messages`}
+          </span>
+          <button
+            type="button"
+            aria-label="Close search"
+            onClick={() => { setShowSearch(false); setMessageSearch(''); }}
+            className="flex-shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 admin-chat-scrollbar">
-        {messages.length === 0 ? (
+        {visibleMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-muted-foreground">No messages yet. Start the conversation!</p>
+            <p className="text-muted-foreground">
+              {messageSearch.trim()
+                ? `Nothing in this conversation matches "${messageSearch.trim()}"`
+                : 'No messages yet. Start the conversation!'}
+            </p>
           </div>
         ) : (
-          messages.map((message) => {
+          visibleMessages.map((message) => {
             const isSender = message.senderId === user?.id;
             const isFromBuyer = message.senderId === conversation.user?.id;
             const isFromSeller = message.senderId === conversation.seller?.id;
-            const isAdmin = message.type === 'ADMIN' || (!isFromBuyer && !isFromSeller);
+            /**
+             * Staff, on the sender's own role.
+             *
+             * This used to read "type is ADMIN, or the sender is neither the
+             * buyer nor the seller" — which is false whenever a moderator is
+             * themselves the seller in the conversation, and most of them are.
+             */
+            const staffRole = String(message.sender?.role || (message as any).senderRole || '');
+            const isAdmin =
+              staffRole === 'ADMIN' ||
+              staffRole === 'MONITER' ||
+              message.type === 'ADMIN' ||
+              message.type === 'MONITER';
             
             // Get sender info - prioritize message.sender (from backend) for accurate admin info
             const sender = message.sender || (isFromBuyer ? conversation.user : isFromSeller ? conversation.seller : null);
@@ -793,13 +1060,29 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
       {/* Message Input */}
       <div className="border-t p-4 bg-card flex-shrink-0">
         <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleFileSelect}
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
+          />
+          <button
+            type="button"
+            aria-label="Attach a file"
+            disabled={isUploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border-none bg-[rgba(249,251,252,1)] text-black/60 hover:text-black disabled:opacity-50 cursor-pointer"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
           <Input
-            placeholder="Your message"
+            placeholder={isUploading ? 'Uploading…' : 'Your message'}
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyPress={handleKeyPress}
-            className="flex-1"
-            disabled={!socket || !isConnected}
+            className="flex-1 min-w-0"
+            disabled={isUploading || !socket || !isConnected}
           />
           <Button 
             onClick={sendMessage}

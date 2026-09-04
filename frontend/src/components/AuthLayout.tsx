@@ -180,7 +180,7 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
 
         {/* Frosted squares drifting over the photo, as in the design. Decorative
             only, so they are hidden from assistive tech and ignore pointers. */}
-        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+        {/* <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
           {[
             { top: "6%", right: "8%", size: 96 },
             { top: "14%", right: "20%", size: 56 },
@@ -200,7 +200,7 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
               }}
             />
           ))}
-        </div>
+        </div> */}
 
         <div className="relative z-10 max-w-2xl">
           <div className="backdrop-blur-xl bg-background/10 rounded-3xl p-8 border border-white/20">

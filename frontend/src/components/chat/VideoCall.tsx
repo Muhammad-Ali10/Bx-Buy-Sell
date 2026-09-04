@@ -120,9 +120,32 @@ export const VideoCall = ({
         existingStream: !!localStreamRef.current
       });
       
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        const errorMsg = 'getUserMedia is not supported in this browser. Please use a modern browser like Chrome, Firefox, or Edge.';
-        console.error('❌ VideoCall:', errorMsg);
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        /**
+         * Blame the connection, not the browser.
+         *
+         * A browser hands out the camera only to a secure page — https, or
+         * localhost. On anything else it does not merely refuse: it removes
+         * `navigator.mediaDevices` altogether. Chrome, Firefox and Edge all do
+         * this, so reading the gap as "your browser is too old" told someone on
+         * the newest Chrome to go and find a modern browser, and no amount of
+         * changing browsers ever fixed it.
+         *
+         * The distinction matters here because the app is served over http on
+         * the local network, which is exactly how a second device joins a call
+         * to test one.
+         */
+        const secureContext =
+          window.isSecureContext ||
+          window.location.protocol === 'https:' ||
+          window.location.hostname === 'localhost' ||
+          window.location.hostname === '127.0.0.1';
+
+        const errorMsg = secureContext
+          ? 'getUserMedia is not supported in this browser. Please use a modern browser like Chrome, Firefox, or Edge.'
+          : `Video calls need a secure connection. This page is served over ${window.location.protocol}//, and browsers only allow camera and microphone access over https (or on localhost).`;
+
+        console.error('❌ VideoCall:', errorMsg, { secureContext, origin: window.location.origin });
         throw new Error(errorMsg);
       }
       
@@ -248,6 +271,12 @@ export const VideoCall = ({
           initializeLocalStream(true); // Try audio-only
         }, 1000);
         return;
+      } else if (error.message?.includes('secure connection')) {
+        // The browser is fine; the page is not. Said plainly, because the
+        // person can act on this one — changing browsers never helps.
+        errorMessage = 'Video calls need a secure connection.';
+        detailedMessage =
+          'Browsers only allow camera and microphone access over https, or on localhost. Open this site over https and try again.';
       } else if (error.message?.includes('not supported')) {
         errorMessage = 'Video calling not supported in this browser.';
         detailedMessage = 'Please use a modern browser like Chrome, Firefox, or Edge.';
@@ -1016,6 +1045,10 @@ export const VideoCall = ({
   };
 
   if (error) {
+    // Set where the error is raised; read here so the screen can offer advice
+    // the person can act on rather than the permission checklist.
+    const needsSecureConnection = error.includes('secure connection');
+
     return (
       <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center text-white">
         <div className="text-center p-6 max-w-md">
@@ -1024,7 +1057,11 @@ export const VideoCall = ({
               <Video className="h-8 w-8 text-red-500" />
             </div>
             <p className="text-xl mb-2 text-red-400 font-semibold">{error}</p>
-            <p className="text-sm text-gray-400">Please check your browser permissions and device settings.</p>
+            <p className="text-sm text-gray-400">
+              {needsSecureConnection
+                ? 'This is a restriction of the browser, not of the site — changing browsers will not help.'
+                : 'Please check your browser permissions and device settings.'}
+            </p>
           </div>
           
           <div className="flex flex-col gap-3">
@@ -1044,11 +1081,26 @@ export const VideoCall = ({
           
           <div className="mt-6 text-xs text-gray-500">
             <p className="mb-2">Troubleshooting tips:</p>
+            {/*
+              A locked camera and an insecure page are different problems, and
+              the permission tips are wasted on the second one: there is no
+              icon in the address bar to click, because the browser never asked.
+            */}
             <ul className="text-left space-y-1 list-disc list-inside">
-              <li>Check browser address bar for camera/mic icon</li>
-              <li>Allow permissions when prompted</li>
-              <li>Ensure no other app is using your camera/mic</li>
-              <li>Try refreshing the page</li>
+              {needsSecureConnection ? (
+                <>
+                  <li>Open this site over https:// instead of http://</li>
+                  <li>Camera access also works on localhost during development</li>
+                  <li>Retrying on this address will not help until then</li>
+                </>
+              ) : (
+                <>
+                  <li>Check browser address bar for camera/mic icon</li>
+                  <li>Allow permissions when prompted</li>
+                  <li>Ensure no other app is using your camera/mic</li>
+                  <li>Try refreshing the page</li>
+                </>
+              )}
             </ul>
           </div>
         </div>

@@ -21,7 +21,7 @@ const ChatPaneLoader = () => (
 
 const AdminChats = () => {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const autoUserId = searchParams.get("userId");
   const autoChatId = searchParams.get("chatId");
   // A team member's "Managed Chats" card links here with ?assigned=<id>.
@@ -102,7 +102,7 @@ const AdminChats = () => {
           <div
             className={`
               ${hideConversationList ? 'hidden' : (selectedConversationId ? 'hidden md:flex' : 'flex')}
-              flex-col w-full md:w-[360px] lg:w-[400px] xl:w-[440px] flex-shrink-0
+              flex-col w-full md:w-[360px] lg:w-[400px] 2xl:w-[440px] flex-shrink-0
             `}
             style={{
               height: '100%',
@@ -118,6 +118,14 @@ const AdminChats = () => {
               onSelectConversation={setSelectedConversationId}
               autoSelectUserId={autoUserId}
               assignedTo={assignedTo}
+              onClearAssigned={() => {
+                // The link only seeds the filter; once someone changes it by
+                // hand, leaving `assigned` in the address would re-apply it on
+                // the next reload.
+                const next = new URLSearchParams(searchParams);
+                next.delete("assigned");
+                setSearchParams(next, { replace: true });
+              }}
             />
           </div>
 
@@ -145,9 +153,13 @@ const AdminChats = () => {
           )}
 
           {/* Third Div - Chat Details */}
+          {/* The third column appeared only past 1400px, so on an ordinary
+              laptop the details panel was simply display:none — which is what
+              "nothing on the right" was. Collapsing the menu bought the room
+              for it; this is what spends it. */}
           {selectedConversationId && (
             <div
-              className="hidden 2xl:flex flex-col flex-shrink-0 w-full 2xl:w-[383px]"
+              className="hidden xl:flex flex-col flex-shrink-0 w-full xl:w-[340px] 2xl:w-[383px]"
               style={{
                 height: '100%',
                 maxHeight: '100%',

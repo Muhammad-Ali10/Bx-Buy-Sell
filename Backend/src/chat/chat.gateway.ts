@@ -660,7 +660,38 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         message.createdAt = savedMessage.createdAt.toISOString();
         message.read = savedMessage.read;
         message.fileUrl = savedMessage.fileUrl || message.fileUrl;
-        
+
+        /**
+         * Say who sent it, and in what capacity.
+         *
+         * The payload used to be whatever the client typed plus an id, with no
+         * sender attached — so the receiver had no way to tell a moderator's
+         * message from an ordinary one and the "Official EX-Support" badge
+         * never appeared for anybody but the moderator themselves. It showed up
+         * for them only because their own screen already knew who they were.
+         *
+         * The badge cannot be worked out from the participants either: a
+         * moderator is quite often the seller in their own conversation, so
+         * "not the buyer and not the seller" is not the same question as "is
+         * staff".
+         */
+        const sender = await this.db.user.findUnique({
+          where: { id: message.senderId },
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            profile_pic: true,
+            role: true,
+          },
+        });
+        if (sender) {
+          message.sender = sender;
+          if (sender.role === 'ADMIN' || sender.role === 'MONITER') {
+            message.senderRole = sender.role;
+          }
+        }
+
       } catch (dbError) {
         console.error('❌ Error saving message to database:', dbError);
         throw new WsException('Failed to save message to database');

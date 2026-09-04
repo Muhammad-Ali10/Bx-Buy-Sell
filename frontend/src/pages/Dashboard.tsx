@@ -598,10 +598,24 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
   // Packages stay locked until the seller has entered a listing price, since
   // every package/add-on/success-fee amount is derived from it.
   const listingPrice = getListingPriceFromForm(formData, adInformationQuestions);
+  /**
+   * Picking Packages while already on it starts that step over.
+   *
+   * Its confidentiality and agreement screens live inside the step, so
+   * `activeStep` stays "packages" throughout them and setting it again changes
+   * nothing. Those screens carry a single button, as the design has them, which
+   * left the sidebar as the way back — and the sidebar was the one control that
+   * did nothing there. Remounting is what "go back to Packages" has to mean.
+   */
+  const [packagesKey, setPackagesKey] = useState(0);
+
   const handleStepChange = (step: DashboardStep) => {
     if (step === "packages" && listingPrice === null) {
       toast.error(PACKAGES_LOCKED_MESSAGE);
       return;
+    }
+    if (step === "packages" && activeStep === "packages") {
+      setPackagesKey((n) => n + 1);
     }
     setActiveStep(step);
   };
@@ -667,6 +681,7 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
       case "packages":
         return (
           <PackagesStep
+            key={packagesKey}
             formData={formData}
             listingId={id}
             onBack={() => setActiveStep("handover")}

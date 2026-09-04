@@ -37,14 +37,23 @@ export const ACQUISITION_CAPACITY_INFO =
   "cannot afford the acquisition.";
 
 /**
- * Where the marker sits on the three-zone scale, as a percentage of its width.
- * Centred in its own zone rather than at the boundary, so it never reads as
- * belonging to the band next door.
+ * Which end of the scale the marker belongs to.
+ *
+ * This used to be a percentage — 17, 50, 83 — with the marker centred on it.
+ * That worked while the marker read "High": three characters have room to sit
+ * either side of a point 17% along a narrow panel. It reads "Acquisition
+ * Capacity" now, five times as wide, and centring that on 17% puts half of it
+ * off the left edge.
+ *
+ * So the outer two anchor to the edges they point at rather than to a point
+ * inside them, which is also how the design draws all three.
  */
-export function getCapacityMarkerPercent(level: CapacityLevel): number {
-  if (level === 'HIGH') return 83;
-  if (level === 'MODERATE') return 50;
-  return 17;
+export function getCapacityMarkerAnchor(
+  level: CapacityLevel,
+): 'start' | 'center' | 'end' {
+  if (level === 'HIGH') return 'end';
+  if (level === 'MODERATE') return 'center';
+  return 'start';
 }
 
 export function getCapacityRating(

@@ -33,9 +33,17 @@ export interface ListingViewer {
 /** How much of the description a logged-out visitor gets — roughly three lines. */
 export const PUBLIC_DESCRIPTION_CHARS = 300;
 
+/**
+ * What a locked value says in place of itself.
+ *
+ * These two strings are also the labels on the buttons that undo the lock, so
+ * they read as an instruction rather than a description. The front end matches
+ * on them to tell a withheld answer from a real one — see `listingLock.ts`
+ * there — so changing one of them means changing it in both places.
+ */
 const REGISTER_LABEL = 'register to unlock 🔓';
 const REGISTER_REDIRECT = '/register';
-const AGREEMENT_LABEL = 'accept the agreement to unlock 🔓';
+const AGREEMENT_LABEL = 'Unlock Confidential Details';
 
 const STAFF_ROLES = new Set(['ADMIN', 'MONITER', 'MODERATOR']);
 
@@ -74,13 +82,19 @@ const CONFIDENTIAL_ANSWER_TYPES = new Set(['PHOTO', 'FILE']);
 /**
  * The business's name, wherever it is written.
  *
- * A passer-by sees that a business is for sale and what kind it is; which
- * business it is takes an account. The card falls back to the register prompt
- * in place of the name, the same way the picture falls back to a blur.
+ * The title is not on this list any more. It used to be: a passer-by saw that a
+ * business was for sale and what kind, and which business it was took an
+ * account — so the listing's own heading came back as "register to unlock", on
+ * the page and on every card. The client asked for the title to read plainly to
+ * everyone, so it does.
+ *
+ * The remaining three are the brand, business and company name asked for in the
+ * Brand Information step. They stay held back: they are the seller's own
+ * identity rather than the advert's heading, and nothing on the public page
+ * needs them. In practice every published listing that has a name at all has it
+ * as an advert title, so this costs a visitor nothing.
  */
 const REGISTERED_QUESTION_PATTERNS = [
-  /^\s*title\s*$/i,
-  /listing\s*title/i,
   /brand\s*name/i,
   /business\s*name/i,
   /company\s*name/i,

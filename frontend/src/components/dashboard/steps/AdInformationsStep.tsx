@@ -6,7 +6,10 @@ import { Upload, X, Paperclip, ImageIcon, Loader2 } from "lucide-react";
 import { useAdInformationQuestions } from "@/hooks/useAdInformationQuestions";
 import { toast } from "sonner";
 import { uploadMultipleToCloudinary } from "@/lib/cloudinary";
-import { parseMediaUrls } from "@/lib/mediaUtils";
+import { fileNameFromUrl, parseMediaUrls } from "@/lib/mediaUtils";
+import { isQuestionRequired } from "@/lib/questionRequired";
+import { sanitizeNumberInput } from "@/lib/numberInput";
+import { getFormCurrencySymbol } from "@/lib/listingCurrency";
 import {
   ALLOWED_ATTACHMENT_LABEL,
   ATTACHMENT_ACCEPT,
@@ -33,8 +36,14 @@ interface FieldConfig {
 }
 
 /**
- * Map an admin Ad-Information question to the fixed client design (widget, limits,
- * placeholder). Photos & attachments are never required; every other field is.
+ * Map an admin Ad-Information question to the fixed client design (widget,
+ * limits, placeholder).
+ *
+ * Nothing here decides whether a field must be answered. It used to say so in
+ * its own `required` — "photos and attachments are never required; every other
+ * field is" — which is why the admin panel's setting had no effect on this
+ * step. That question is settled by `isQuestionRequired`, from the flag an
+ * administrator can actually see.
  */
 const getFieldConfig = (question: any): FieldConfig => {
   const type = String(question?.answer_type || "").toUpperCase();
@@ -83,6 +92,7 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
   const { data: questions, isLoading } = useAdInformationQuestions();
   const [formData, setFormData] = useState<Record<string, any>>(parentFormData || {});
   const [uploadingFiles, setUploadingFiles] = useState<Record<string, boolean>>({});
+  const currencySymbol = getFormCurrencySymbol(formData);
 
   // Normalize media fields to arrays whenever the parent data (re)hydrates.
   useEffect(() => {
@@ -165,18 +175,35 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
     const errors: string[] = [];
     (questions || []).forEach((q: any) => {
       const cfg = getFieldConfig(q);
-      if (cfg.kind === "photo" || cfg.kind === "file") return; // media is never required
 
       const value = formData[q.id];
       const empty =
         !value ||
         (typeof value === "string" && value.trim() === "") ||
         (Array.isArray(value) && value.length === 0);
-      if (empty) {
+
+      /*
+       * Only what the administrator marked mandatory.
+       *
+       * This step asked for everything. It never read `required`, so a question
+       * turned optional in the admin panel went on blocking the seller anyway —
+       * Intro text and USPs are stored `required: false` today and were still
+       * demanded here. Every other question-driven step already checks this;
+       * this was the one that did not, which is why Accounts behaved and Ad
+       * Information did not.
+       *
+       * The photo and file fields used to be skipped outright, under a rule of
+       * their own that no administrator could see or change. They are ordinary
+       * questions now: optional unless someone says otherwise, and genuinely
+       * required when they do.
+       */
+      if (isQuestionRequired(q) && empty) {
         errors.push(`${q.question} is required`);
         return;
       }
-      if (cfg.kind === "price" && isNaN(Number(value))) {
+
+      // Whether or not it had to be filled in, what is in it has to make sense.
+      if (!empty && cfg.kind === "price" && isNaN(Number(value))) {
         errors.push(`${q.question} must be a valid number`);
       }
     });
@@ -330,14 +357,17 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                           >
                             <div className="flex items-center gap-2 min-w-0 flex-1">
                               <Paperclip className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                              {/* The seller's own file name. It read "File 1",
+                                  "File 2" — which of three tax statements is
+                                  the one being removed? */}
                               <a
                                 href={url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-sm text-accent hover:underline truncate"
-                                title={url}
+                                className="truncate text-sm text-foreground hover:underline"
+                                title={fileNameFromUrl(url)}
                               >
-                                File {i + 1}
+                                {fileNameFromUrl(url)}
                               </a>
                             </div>
                             <button
@@ -357,15 +387,22 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
 
                 {cfg.kind === "price" && (
                   <div className="relative">
+                    {/* The currency the seller chose in Financials, not a
+                        hard dollar sign. */}
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
-                      $
+                      {currencySymbol}
                     </span>
+                    {/* A price, so a decimal point is allowed — but nothing
+                        else is. `type="number"` had let "e" and a leading
+                        minus through. */}
                     <Input
-                      type="number"
-                      inputMode="numeric"
+                      type="text"
+                      inputMode="decimal"
                       placeholder="0"
                       value={textValue}
-                      onChange={(e) => handleInputChange(question.id, e.target.value)}
+                      onChange={(e) =>
+                        handleInputChange(question.id, sanitizeNumberInput(e.target.value))
+                      }
                       className="bg-muted/50 pl-7"
                     />
                   </div>

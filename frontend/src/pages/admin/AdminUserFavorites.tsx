@@ -1,3 +1,4 @@
+import { multipleOf, listingMultiples, profitMultipleLabel, revenueMultipleLabel } from "@/lib/financialTableUtils";
 import { useNavigate, useParams } from "react-router-dom";
 import { resolveListingTitle } from "@/lib/listingTitle";
 import { useState } from "react";
@@ -273,19 +274,10 @@ export default function AdminUserFavorites() {
                     avgNetProfit = totalProfit / yearlyFinancials.length / 12;
                   }
 
-                  let profitMultiple = "Multiple 1.5x Profit";
-                  if (askingPrice && avgNetProfit > 0) {
-                    const annualProfit = avgNetProfit * 12;
-                    const multiple = parseFloat(askingPrice.toString()) / annualProfit;
-                    profitMultiple = `Multiple ${multiple.toFixed(1)}x Profit`;
-                  }
-
-                  let revenueMultiple = "0.5x Revenue";
-                  if (askingPrice && avgRevenue > 0) {
-                    const annualRevenue = avgRevenue * 12;
-                    const multiple = parseFloat(askingPrice.toString()) / annualRevenue;
-                    revenueMultiple = `${multiple.toFixed(1)}x Revenue`;
-                  }
+                  // Worked out from the seller's grid, the same as the listing's own page.
+                  const multiples = listingMultiples(listing, askingPrice?.toString());
+                  const profitMultiple = profitMultipleLabel(multiples.profit);
+                  const revenueMultiple = revenueMultipleLabel(multiples.revenue);
 
                   const categoryInfo = listing.category?.[0];
 

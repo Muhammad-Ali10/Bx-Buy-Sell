@@ -26,7 +26,6 @@ import {
   MonitoringAlertsSvg,
   PackagesSvg,
   SettingsSvg,
-  TeamMembersSvg,
   ToolsSvg,
   UsersSvg,
 } from "@/assets/svg";
@@ -55,11 +54,10 @@ type SidebarMenuItem = {
 const menuItems: SidebarMenuItem[] = [
   { id: "dashboard", label: "Dashboard", icon: DashboardSvg, path: "/admin/dashboard" },
   { id: "listings", label: "Listings", icon: ListingsSvg, path: "/admin/listings" },
+  // Team members are users with a staff role, so they live on this screen too,
+  // behind its own role filter. The separate "Team Members" entry pointed at
+  // the same place with `?role=team` on the end — two doors into one room.
   { id: "users", label: "Users", icon: UsersSvg, path: "/admin/users" },
-  // Team members are users with a staff role, so they are managed on the Users
-  // screen. This entry stays as the shortcut it always was, but it now opens
-  // that screen already filtered rather than a separate list.
-  { id: "team", label: "Team Members", icon: TeamMembersSvg, path: "/admin/users?role=team" },
   {
     id: "acquisition-capacity",
     label: "Acquisition Capacity",
@@ -175,22 +173,10 @@ function isPathActive(pathname: string, path: string) {
   return pathname === base || pathname.startsWith(base + "/");
 }
 
-function isMenuItemActive(
-  item: SidebarMenuItem,
-  pathname: string,
-  search = "",
-): boolean {
-  const [base, query] = item.path.split("?");
-
-  // Users and Team Members now share one screen, so the path alone cannot tell
-  // them apart — the ?role= filter does.
-  if (base === "/admin/users") {
-    if (!isPathActive(pathname, base)) return false;
-    const itemWantsTeam = new URLSearchParams(query || "").get("role") === "team";
-    const viewingTeam = new URLSearchParams(search).get("role") === "team";
-    return itemWantsTeam === viewingTeam;
-  }
-
+function isMenuItemActive(item: SidebarMenuItem, pathname: string): boolean {
+  // Two entries used to share /admin/users and were told apart by `?role=`.
+  // With one left, the path is enough again — and so the query string, which
+  // was only ever read to separate them, is no longer needed here.
   if (isPathActive(pathname, item.path)) return true;
   return item.subItems?.some((sub) => isPathActive(pathname, sub.path)) ?? false;
 }
@@ -345,7 +331,7 @@ const AdminSidebarContent = ({
         }}
       >
         {filteredMenuItems.map((item) => {
-          const active = isMenuItemActive(item, location.pathname, location.search);
+          const active = isMenuItemActive(item, location.pathname);
           const hasChildren = !!item.subItems?.length;
           const isExpanded = expandedItems.includes(item.id);
           const textColor = active ? ACTIVE_TEXT : INACTIVE_TEXT;

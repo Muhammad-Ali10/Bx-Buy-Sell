@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
+import { isLockedValue, REGISTER_LOCK_LABEL } from "@/lib/listingLock";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -8,13 +9,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useIsTablet } from "@/hooks/use-tablet";
 import {
   Heart, Share2, MessageSquare, Check , ArrowLeft, Globe, MapPin, DollarSign,
   TrendingUp, Users, Calendar, Download, FileText, CheckCircle2,
   Instagram, Twitter, Music, Mail, ShoppingBag, Building2, Clock,
-  PieChart as PieChartIcon, Settings, Globe as GlobeIcon, Lock, AlertTriangle
+  PieChart as PieChartIcon, Settings, Globe as GlobeIcon, Lock, AlertTriangle,
+  UserRound, Paperclip, Image as ImageIcon, Contact
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { formatDistanceToNow } from "date-fns";
@@ -28,11 +31,22 @@ import {
   computeListingFinancialMetrics,
   getMultipleRating,
   type MultipleKind,
+  resolveFinancialColumns,
+  coversFullYear,
+  coverageLabel,
+  formatMultipleValue,
+  multipleOf,
+  listingMultiples,
+  profitMultipleLabel,
+  revenueMultipleLabel,
 } from "@/lib/financialTableUtils";
 import { resolveListingTitle, LISTING_TITLE_COLOR } from "@/lib/listingTitle";
+import { tidySellerText } from "@/lib/sellerText";
+import { domainDisplay, getDomainHref } from "@/lib/domainUtils";
 import FlagIcon from "@/components/FlagIcon";
 import AcquisitionCapacityCard from "@/components/AcquisitionCapacityCard";
 import ShareListingDialog from "@/components/ShareListingDialog";
+import FinancingDialog from "@/components/FinancingDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {SalesChannels, Country, AdvertisingChannels, Info, Dollar, Customer} from "@/assets/svg"
@@ -79,7 +93,7 @@ const withCurrencySymbol = (value: string | number, symbol: string): string | nu
 };
 import { useAccounts } from "@/hooks/useAccounts";
 import { useAccountQuestions } from "@/hooks/useAccountQuestions";
-import { parseMediaUrls } from "@/lib/mediaUtils";
+import { fileNameFromUrl, parseMediaUrls } from "@/lib/mediaUtils";
 import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Legend, Tooltip } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -117,6 +131,24 @@ const getAnswerByQuestion = (questions: any[], searchText: string | string[]): s
     }
   }
   return null;
+};
+
+/**
+ * "33" -> "33 months", "1" -> "1 month".
+ *
+ * The card printed the seller's answer as it was stored, so a promise of three
+ * months of help read as the number 3 sitting on its own under a heading, with
+ * nothing to say whether that meant months, weeks or visits.
+ *
+ * Only a bare number is given a unit. Anything the seller worded themselves is
+ * left exactly as they wrote it — otherwise "3 months" would come back out as
+ * "3 months months" — and so is "not available".
+ */
+const formatSupportDuration = (value: string | null | undefined): string => {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return text;
+  const months = Number(text);
+  return `${months} ${months === 1 ? 'month' : 'months'}`;
 };
 
 // Helper function to get all answers from question array
@@ -506,9 +538,73 @@ const aggregateSocialByPlatform = (
   return out;
 };
 
-const isLockedValue = (value: unknown): value is string =>
-  typeof value === "string" &&
-  value.toLowerCase().includes("to unlock");
+
+
+/**
+ * Works out which stored question feeds which card.
+ *
+ * Cards find their data by looking for keywords inside the seller's question
+ * wording, and two problems came out of doing that one card at a time:
+ *
+ *  - a keyword could miss the real wording entirely — "included in price"
+ *    never matched "Is it included in the price?", so the card read
+ *    "not available" no matter what the seller had answered; and
+ *  - a broad keyword could take a question belonging to another card, so
+ *    "Seller has inventory?" and "Is it included in the price?" both showed
+ *    the answer to "Is inventory included?".
+ *
+ * Resolving the whole section at once fixes the second: specs are tried in
+ * order, most specific first, and a question already claimed is out of play.
+ * The first is a matter of the keywords themselves being right.
+ */
+const resolveSectionAnswers = (
+  questions: any[] | undefined,
+  specs: { key: string; match: string[] }[],
+): Record<string, string | null> => {
+  const rows = Array.isArray(questions) ? questions : [];
+  const claimed = new Set<number>();
+  const out: Record<string, string | null> = {};
+
+  for (const spec of specs) {
+    let answer: string | null = null;
+
+    // Term by term rather than row by row, so a spec's most exact phrasing is
+    // tried against every question before its looser ones are. Two wordings of
+    // the same question can both be stored — "Is it included in the price?"
+    // and "Is inventory included?" — and the precise one should win whichever
+    // order they happen to sit in.
+    outer: for (const term of spec.match) {
+      for (let i = 0; i < rows.length; i += 1) {
+        if (claimed.has(i)) continue;
+        if (String(rows[i]?.question || '').toLowerCase().includes(term)) {
+          claimed.add(i);
+          answer = rows[i]?.answer ?? null;
+          break outer;
+        }
+      }
+    }
+
+    out[spec.key] = answer;
+  }
+
+  return out;
+};
+
+/**
+ * What to show where a card found nothing.
+ *
+ * For a viewer who has not unlocked the section, always the unlock button —
+ * never "not available". Saying a field is empty tells them the seller left it
+ * blank, which is a small fact about the listing they have not earned, and it
+ * makes one card look broken beside four that offer a way in.
+ *
+ * The section's own rows decide this rather than a copy of the visibility
+ * rules: if the server locked anything here, this viewer is locked out.
+ */
+const missingValueLabel = (questions: any[] | undefined, unlockLabel: string): string => {
+  const rows = Array.isArray(questions) ? questions : [];
+  return rows.some((row) => isLockedValue(row?.answer)) ? unlockLabel : NOT_AVAILABLE_LABEL;
+};
 
 // MediaCarousel Component
 /** The lime "Managed by EX" pill, as it appears on the listing cards. */
@@ -633,7 +729,7 @@ const MediaCarousel = ({ images, isFavorite, isTogglingFavorite, onFavorite, onS
         >
           <Lock className="w-8 h-8 text-white" />
           <span className="text-white text-lg font-medium underline capitalize">
-            {lockCtaText || 'register to unlock 🔓'}
+            {lockCtaText || REGISTER_LOCK_LABEL}
           </span>
         </button>
       )}
@@ -752,6 +848,8 @@ const SummaryCard = ({
   verifiedFunds?: number | null;
   listingPriceNumber?: number;
 }) => {
+  const [financingOpen, setFinancingOpen] = useState(false);
+
   const formatPrice = (price: number | string | undefined) => {
     if (!price) return "$0";
     const numPrice = typeof price === 'string' ? parseFloat(price) : price;
@@ -802,7 +900,18 @@ const SummaryCard = ({
     adQuestions: listing?.advertisement?.length || 0,
   });
 
-  const fullDescription = getAnswerByQuestion(listing?.brand || [], ['description', 'about', 'business description']) ||
+  /*
+   * The Intro, which is what this line is for.
+   *
+   * Sellers write a short Intro for exactly this spot and a long Description
+   * for the body of the page. This read the Description and cut it at 109
+   * characters, so the card under the title showed the opening sentence of the
+   * long text — and the Intro, written to be read here, appeared nowhere near
+   * the title. Description stays as the fallback for listings that have no
+   * Intro yet.
+   */
+  const fullDescription = getAnswerByQuestion(listing?.advertisement || [], ['intro text', 'intro']) ||
+    getAnswerByQuestion(listing?.brand || [], ['description', 'about', 'business description']) ||
     advertisementAnswers['Description'] ||
     advertisementAnswers['description'] ||
     'No description available';
@@ -812,22 +921,20 @@ const SummaryCard = ({
     ? fullDescription.substring(0, 109) + '...'
     : fullDescription;
 
-  // Calculate financials for profit/revenue multiples (same as listing cards)
-  const financials = listing?.financials || [];
-  const monthlyFinancials = financials.filter((f: any) => f.type === 'monthly');
-  const totalRevenue = financials.reduce((sum: number, f: any) => sum + parseFloat(f.revenue_amount || 0), 0);
-  const totalProfit = financials.reduce((sum: number, f: any) => sum + parseFloat(f.net_profit || 0), 0);
-  const avgMonthlyProfit = monthlyFinancials.length > 0
-    ? monthlyFinancials.reduce((sum: number, f: any) => sum + parseFloat(f.net_profit || 0), 0) / monthlyFinancials.length
-    : 0;
-
-  // Calculate profit multiple and revenue multiple (same as listing cards)
-  const profitMultiple = totalProfit > 0 && avgMonthlyProfit > 0
-    ? `Multiple ${(parseFloat(askingPrice.toString()) / (avgMonthlyProfit * 12)).toFixed(1)}x Profit`
-    : 'Multiple 1.5x Profit';
-  const revenueMultiple = totalRevenue > 0
-    ? `${(parseFloat(askingPrice.toString()) / totalRevenue).toFixed(1)}x Revenue`
-    : '0.5x Revenue';
+  /**
+   * The multiples shown beside the asking price.
+   *
+   * These read the same figures as the rating panel further down the page.
+   * They used to sum `revenue_amount` across every financial row instead,
+   * which on a listing filled in through the current form means running
+   * parseFloat over the JSON document the grid is stored in — so no multiple
+   * could be worked out, the fallback fired, and every listing on the site
+   * showed "Multiple 1.5x Profit" and "0.5x Revenue" no matter what it cost or
+   * earned. Two badges contradicting the correct figures directly beneath them.
+   */
+  const multiples = listingMultiples(listing, askingPrice?.toString());
+  const profitMultiple = profitMultipleLabel(multiples.profit);
+  const revenueMultiple = revenueMultipleLabel(multiples.revenue);
 
   return (
     <div className="sticky top-24 bg-card border border-border rounded-2xl p-6 space-y-6">
@@ -982,8 +1089,12 @@ const SummaryCard = ({
             {financingInstalments(parseFloat(askingPrice.toString()) || 0)} installments
           </span>
         </div>
-        <a
-          href="#"
+        {/* A button, not a link: it opens a dialog rather than going anywhere,
+            and it pointed at "#" until now, so clicking it jumped the page to
+            the top and answered nothing. */}
+        <button
+          type="button"
+          onClick={() => setFinancingOpen(true)}
           style={{
             fontFamily: 'Lufga',
             fontWeight: 500,
@@ -998,10 +1109,19 @@ const SummaryCard = ({
             textDecorationSkipInk: 'auto',
             color: 'rgba(0, 103, 255, 1)',
             cursor: 'pointer',
+            background: 'none',
+            border: 'none',
+            padding: 0,
           }}
         >
           Financing
-        </a>
+        </button>
+
+        <FinancingDialog
+          open={financingOpen}
+          onOpenChange={setFinancingOpen}
+          listingName={listingTitle}
+        />
         {/* Divider Line */}
         <div
           style={{
@@ -1054,7 +1174,9 @@ const SummaryCard = ({
             >
               {listing.profile.full_name || "Unknown User"}
             </h3>
-            {/* ID Verified */}
+            {/* Only for a seller who has been through the check. It sat on
+                every listing, which made it worth nothing to those who had. */}
+            {Boolean(listing.profile.id_verified) && (
             <div className="flex items-center gap-2">
               <img
                 src={FaceScanSquareIcon}
@@ -1078,6 +1200,7 @@ const SummaryCard = ({
                 ID Verified
               </span>
             </div>
+            )}
           </div>
         </div>
       )}
@@ -1251,7 +1374,7 @@ const UnlockPill = ({
   >
     <Lock style={{ width: '14px', height: '14px', flexShrink: 0 }} />
     {/* The emoji belongs to the server's label, not to this design. */}
-    {String(label ?? 'register to unlock').replace(/[🔓🔒]/g, '').trim()}
+    {String(label ?? REGISTER_LOCK_LABEL).replace(/[🔓🔒]/g, '').trim()}
   </button>
 );
 
@@ -1306,9 +1429,16 @@ const InfoBadge = ({ text }: { text: string }) => (
 const CustomerTypeCard = ({
   segments,
   info,
+  locked,
+  unlockLabel,
+  onUnlockClick,
 }: {
   segments: Array<{ name: string; percent: number }>;
   info?: string;
+  /** Withheld from this viewer, as opposed to simply not filled in. */
+  locked?: boolean;
+  unlockLabel?: string;
+  onUnlockClick?: () => void;
 }) => {
   const total = segments.reduce((sum, s) => sum + s.percent, 0);
   const colours = ['rgba(197, 253, 31, 1)', 'rgba(0, 0, 0, 1)'];
@@ -1336,7 +1466,11 @@ const CustomerTypeCard = ({
         Customer Type
       </div>
 
-      {total <= 0 ? (
+      {locked ? (
+        // A way in, like every other card in the section. "not available" here
+        // would say the seller left it blank, which is not what happened.
+        <UnlockPill label={unlockLabel ?? REGISTER_LOCK_LABEL} onClick={onUnlockClick} />
+      ) : total <= 0 ? (
         <div style={{ fontFamily: 'Lufga', fontWeight: 600, fontSize: '20px' }}>{NOT_AVAILABLE_LABEL}</div>
       ) : (
         <>
@@ -1462,7 +1596,7 @@ const MultipleRow = ({
               margin: '2px 0 4px',
             }}
           >
-            {rating && value !== null ? `${value.toFixed(1)}x` : UNKNOWN_LABEL}
+            {rating && formatMultipleValue(value) ? `${formatMultipleValue(value)}x` : UNKNOWN_LABEL}
           </div>
           <div style={{ fontFamily: 'Lufga', fontSize: '10px', color: 'rgba(0,0,0,0.4)' }}>
             Compared with Similar Listings
@@ -1514,7 +1648,7 @@ const MultipleRow = ({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {value !== null ? value.toFixed(1) : ''}
+                  {formatMultipleValue(value) ?? ''}
                   {/* Tooltip pointer aiming at the position on the bar. */}
                   <span
                     style={{
@@ -1879,8 +2013,23 @@ const AttachmentCard = ({ fileName, url }: { fileName: string; url?: string }) =
     if (!url || url === '#') return;
 
     try {
-      // Fetch the file
       const response = await fetch(url);
+
+      /*
+       * Do not save a refusal as if it were the file.
+       *
+       * The CDN answers 401 for a document it is not allowed to deliver, and
+       * that response has a body like any other — so this saved it under the
+       * file's own name and handed the buyer a "PDF" of nothing, which is what
+       * "the file is destroyed, I can't open it" actually was. Say so instead.
+       */
+      if (!response.ok) {
+        toast.error(
+          `This file could not be downloaded (${response.status}). Please tell the seller.`,
+        );
+        return;
+      }
+
       const blob = await response.blob();
 
       // Create a download link
@@ -1990,10 +2139,12 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   const [agreementOpen, setAgreementOpen] = useState(false);
   const [isAcceptingAgreement, setIsAcceptingAgreement] = useState(false);
   const [hasConfidentialAccess, setHasConfidentialAccess] = useState(false);
+  const [agreementChecked, setAgreementChecked] = useState(false);
   // The viewer's own verified capital, compared against this listing's price.
   const [myVerifiedFunds, setMyVerifiedFunds] = useState<number | null>(null);
   // Reporting a listing to the moderation team.
   const [shareOpen, setShareOpen] = useState(false);
+  const [financingOpen, setFinancingOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [reportNotes, setReportNotes] = useState("");
@@ -2067,7 +2218,10 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
             : user.first_name || user.last_name || null,
           avatar_url: user.profile_pic || null,
           user_type: user.user_type || user.role || null,
-          id_verified: user.id_verified ?? null,
+          // The column is `verified`. This asked for `id_verified`, which is
+          // not a field on a user, so it read null for everyone — and the
+          // badge that should depend on it was drawn unconditionally.
+          id_verified: user.verified ?? user.id_verified ?? null,
         };
       } else if (listingData.user_id || listingData.userId) {
         // Fallback: fetch user if not included
@@ -2082,7 +2236,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                 : user.first_name || user.last_name || null,
               avatar_url: user.profile_pic || null,
               user_type: user.user_type || user.role || null,
-              id_verified: user.id_verified ?? null,
+              id_verified: user.verified ?? user.id_verified ?? null,
             };
           }
         } catch (error) {
@@ -2295,7 +2449,16 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   const website = getAnswerByQuestion(listing?.brand || [], ['website', 'url', 'domain']) || '';
   // The seller may or may not have typed a protocol; adding one blindly produced
   // links like "https://https://example.com".
-  const websiteHref = /^https?:\/\//i.test(website) ? website : `https://${website}`;
+  /*
+   * The label and the link are not the same string.
+   *
+   * This printed whatever was stored, so a seller who had entered a path saw
+   * the whole thing — protocol, www and all — where the design has a short
+   * field. The address on screen is now just the host; the link behind it is
+   * the full stored URL, so a shop at test.com/shop still opens at the shop.
+   */
+  const websiteLabel = domainDisplay(website);
+  const websiteHref = getDomainHref(website);
 
   // Advertisement fields - extract dynamically from advertisement questions
   const introRaw = getAnswerByQuestion(listing?.advertisement || [], ['intro text', 'intro', 'Intro']) ||
@@ -2344,14 +2507,49 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   }
 
   // Statistics
-  const conversionRate = getAnswerByQuestion(listing?.statistics || [], ['conversion rate', 'conversion']) || NOT_AVAILABLE_LABEL;
-  const refundRate = getAnswerByQuestion(listing?.statistics || [], ['refund rate', 'refund']) || NOT_AVAILABLE_LABEL;
-  const returningCustomers = getAnswerByQuestion(listing?.statistics || [], ['returning customer', 'returning', 'repeat']) || NOT_AVAILABLE_LABEL;
-  const emailSubscribers = getAnswerByQuestion(listing?.statistics || [], ['email subscriber', 'subscriber', 'email']) || UNKNOWN_LABEL;
+  // Declared before the sections that need it: every card's fallback asks
+  // whether this viewer is locked out.
+  // The server names its own prompt; this only covers a response that
+  // arrived without one.
+  const unlockCtaText = listing?.lockAction?.ctaText || REGISTER_LOCK_LABEL;
+
+  /**
+   * The whole section at once, so no two cards can claim the same question.
+   *
+   * "Customer base" used to be resolved with a bare 'customers', which matched
+   * "Returning customers" first — so the Customer base card showed the
+   * returning-customer figure. That was not only wrong, it leaked: returning
+   * customers is one of the two statistics shown to visitors who have not
+   * registered, while customer base is meant to stay locked.
+   */
+  const statisticsMissing = missingValueLabel(listing?.statistics, unlockCtaText);
+  const statisticValues = resolveSectionAnswers(listing?.statistics, [
+    { key: 'conversionRate', match: ['conversion rate', 'conversion'] },
+    { key: 'refundRate', match: ['refund rate', 'refund'] },
+    { key: 'returningCustomers', match: ['returning customer', 'returning', 'repeat'] },
+    { key: 'customerType', match: ['customer type'] },
+    { key: 'avgOrderValue', match: ['average order value', 'average order', 'aov', 'order value'] },
+    { key: 'emailSubscribers', match: ['e-mail subscriber', 'email subscriber', 'subscriber'] },
+    { key: 'customerBase', match: ['customer base', 'total customer', 'customers'] },
+    { key: 'pageViews', match: ['page views', 'traffic', 'views'] },
+  ]);
+
+  const conversionRate = statisticValues.conversionRate || statisticsMissing;
+  const refundRate = statisticValues.refundRate || statisticsMissing;
+  const returningCustomers = statisticValues.returningCustomers || statisticsMissing;
+  const emailSubscribers = statisticValues.emailSubscribers || UNKNOWN_LABEL;
 
   // Customer Type is stored like the other percentage splits: [{ name, percent }].
+  const customerTypeRaw = statisticValues.customerType;
+  /**
+   * A locked viewer gets the placeholder text, which is not JSON. Parsing it
+   * threw, the catch returned no segments, and the card fell back to
+   * "not available" — telling a visitor the seller had left it empty when in
+   * fact it was being withheld from them.
+   */
+  const customerTypeLocked = isLockedValue(customerTypeRaw);
   const customerTypeSegments = (() => {
-    const raw = getAnswerByQuestion(listing?.statistics || [], ['customer type']);
+    const raw = customerTypeLocked ? null : customerTypeRaw;
     if (!raw) return [];
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -2366,9 +2564,9 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       return [];
     }
   })();
-  const avgOrderValue = getAnswerByQuestion(listing?.statistics || [], ['average order', 'aov', 'order value']) || NOT_AVAILABLE_LABEL;
-  const customerBase = getAnswerByQuestion(listing?.statistics || [], ['customer base', 'total customer', 'customers']) || NOT_AVAILABLE_LABEL;
-  const pageViews = getAnswerByQuestion(listing?.statistics || [], ['page views', 'views', 'traffic']) || NOT_AVAILABLE_LABEL;
+  const avgOrderValue = statisticValues.avgOrderValue || statisticsMissing;
+  const customerBase = statisticValues.customerBase || statisticsMissing;
+  const pageViews = statisticValues.pageViews || statisticsMissing;
 
   // Financials
   const financials = listing?.financials || [];
@@ -2429,10 +2627,6 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
     financialMetrics.profitMarginPercent !== null
       ? `${Math.round(financialMetrics.profitMarginPercent)}%`
       : NOT_AVAILABLE_LABEL;
-  const monthlyProfitDisplay =
-    avgMonthlyProfit !== null
-      ? `${listingCurrencySymbol}${formatNumber(Math.round(avgMonthlyProfit))}/m`
-      : NOT_AVAILABLE_LABEL;
 
   // A business that is not profitable has no meaningful profit multiple.
   const profitMultipleValue =
@@ -2444,16 +2638,17 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       ? askingPriceNum / annualRevenue
       : null;
 
-  const profitMultiple =
-    profitMultipleValue !== null ? `${profitMultipleValue.toFixed(1)}x` : UNKNOWN_LABEL;
-  const revenueMultiple =
-    revenueMultipleValue !== null
-      ? `${revenueMultipleValue.toFixed(1)}x Revenue`
-      : UNKNOWN_LABEL;
-  const profitMultipleLabel =
-    profitMultipleValue !== null
-      ? `Multiple ${profitMultipleValue.toFixed(1)}x Profit`
-      : UNKNOWN_LABEL;
+  const profitMultipleText = formatMultipleValue(profitMultipleValue);
+  const revenueMultipleText = formatMultipleValue(revenueMultipleValue);
+
+  const profitMultiple = profitMultipleText ? `${profitMultipleText}x` : UNKNOWN_LABEL;
+  const revenueMultiple = revenueMultipleText
+    ? `${revenueMultipleText}x Revenue`
+    : UNKNOWN_LABEL;
+  // Named for the badge, not for the shared helper of the same name.
+  const profitMultipleBadge = profitMultipleText
+    ? `Multiple ${profitMultipleText}x Profit`
+    : UNKNOWN_LABEL;
 
   const unreadMessagesCount = listing?.unread_messages_count ?? 0;
   const requestsCount = listing?.requests_count ?? 0;
@@ -2471,7 +2666,6 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
    */
   const descriptionIsCapped = listing?.viewerLevel === 'PUBLIC';
   const unlockRedirect = listing?.lockAction?.redirectTo || '/register';
-  const unlockCtaText = listing?.lockAction?.ctaText || 'register to unlock 🔓';
 
   /**
    * Two different locks reach this handler. A logged-out visitor needs an
@@ -2509,31 +2703,52 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
     const target = event.target as HTMLElement | null;
     if (!target) return;
 
-    // Only the "…to unlock" label itself should navigate. Containers report the
-    // text of everything inside them, so without this check a click on the empty
+    // Only the prompt itself should act. Containers report the text of
+    // everything inside them, so without this check a click on the empty
     // margins beside the page counted as a click on the label and sent
     // logged-out visitors to the register page.
     if (target.children.length > 0) return;
 
-    const text = (target.textContent || '').toLowerCase();
-    if (!text.includes('to unlock')) return;
+    // Matched against the server's two prompts rather than a phrase — this
+    // searched for "to unlock", which the agreement prompt no longer says.
+    if (!isLockedValue(target.textContent || '')) return;
 
     event.preventDefault();
     event.stopPropagation();
     handleUpgradeUnlockClick();
   };
 
-  // Management
-  const freelancers = getAnswerByQuestion(listing?.managementQuestion || [], ['freelancer', 'freelance']) || NOT_AVAILABLE_LABEL;
-  const employees = getAnswerByQuestion(listing?.managementQuestion || [], ['employee', 'staff', 'team member']) || NOT_AVAILABLE_LABEL;
-  const ceoTime = getAnswerByQuestion(listing?.managementQuestion || [], ['ceo time', 'owner time', 'hours per week']) || NOT_AVAILABLE_LABEL;
+  // Management. Order matters: the narrower phrasing gets first refusal.
+  const managementMissing = missingValueLabel(listing?.managementQuestion, unlockCtaText);
+  const managementValues = resolveSectionAnswers(listing?.managementQuestion, [
+    { key: 'freelancers', match: ['freelancer', 'freelance'] },
+    { key: 'employees', match: ['employee', 'staff', 'team member'] },
+    // "How many hours you invest per week?" is the real wording; the old
+    // 'hours per week' never matched it, so this card was always blank.
+    { key: 'ceoTime', match: ['ceo time', 'owner time', 'time is required', 'hours you invest', 'per week', 'per day', 'daily'] },
+  ]);
+  const freelancers = managementValues.freelancers || managementMissing;
+  const employees = managementValues.employees || managementMissing;
+  const ceoTime = managementValues.ceoTime || managementMissing;
 
   // Products
-  const numProducts = getAnswerByQuestion(listing?.productQuestion || [], ['number of product', 'product count', 'products']) || NOT_AVAILABLE_LABEL;
-  const sellingModel = getAnswerByQuestion(listing?.productQuestion || [], ['selling model', 'model', 'dropshipping']) || NOT_AVAILABLE_LABEL;
-  const hasInventory = getAnswerByQuestion(listing?.productQuestion || [], ['inventory', 'stock', 'has inventory']) || NOT_AVAILABLE_LABEL;
-  const inventoryValue = getAnswerByQuestion(listing?.productQuestion || [], ['inventory value', 'stock value', 'how much']) || NOT_AVAILABLE_LABEL;
-  const inventoryIncluded = getAnswerByQuestion(listing?.productQuestion || [], ['included in price', 'inventory included']) || NOT_AVAILABLE_LABEL;
+  const productsMissing = missingValueLabel(listing?.productQuestion, unlockCtaText);
+  const productValues = resolveSectionAnswers(listing?.productQuestion, [
+    // Most specific first. 'inventory value' has to be tried before anything
+    // that merely says 'inventory', or it loses its question to another card.
+    { key: 'inventoryValue', match: ['inventory value', 'stock value', 'what is the inventory'] },
+    // The real wording is "Is it included in the price?" — with "the" in it,
+    // which is exactly what the old keyword missed.
+    { key: 'inventoryIncluded', match: ['included in the price', 'included in price', 'inventory included'] },
+    { key: 'hasInventory', match: ['do you have inventory', 'has inventory', 'seller has inventory', 'inventory', 'stock'] },
+    { key: 'numProducts', match: ['how many different products', 'number of product', 'product count', 'products'] },
+    { key: 'sellingModel', match: ['selling model', 'dropshipping', 'model'] },
+  ]);
+  const numProducts = productValues.numProducts || productsMissing;
+  const sellingModel = productValues.sellingModel || productsMissing;
+  const hasInventory = productValues.hasInventory || productsMissing;
+  const inventoryValue = productValues.inventoryValue || productsMissing;
+  const inventoryIncluded = productValues.inventoryIncluded || productsMissing;
 
   // Handover
   const handoverItems = listing?.handover || [];
@@ -2546,12 +2761,23 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       "post purchase",
       "support",
     ]) || NOT_AVAILABLE_LABEL;
-  const supportDuration =
+  /*
+   * "how long", not "months".
+   *
+   * Two spellings of this question are in the database — "How long in months"
+   * and an older "How long is month" — and searching for "months" matched only
+   * the first. A seller on the older wording filled the field in and the card
+   * still read "not available", because the step that asks the question already
+   * recognises both and this did not.
+   */
+  const supportDuration = formatSupportDuration(
     getAnswerByQuestion(listing?.handover || [], [
       "support duration",
       "support period",
+      "how long",
       "months",
-    ]) || NOT_AVAILABLE_LABEL;
+    ]) || NOT_AVAILABLE_LABEL,
+  );
 
   // Attachments
   /** Social links are held back until the agreement, like attachments. */
@@ -2565,8 +2791,9 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
     .filter((a: any) => a.answer_type === 'FILE' && a.answer && !isLockedValue(a.answer))
     .flatMap((a: any) => parseMediaUrls(a.answer))
     .map((url: string) => ({
-      // Cloudinary percent-encodes spaces and the like in the stored name.
-      fileName: decodeURIComponent(url.split('/').pop() || '') || 'Document',
+      // Shared with the two upload steps, so the name a seller sees while
+      // attaching a file is the name a buyer sees on the listing.
+      fileName: fileNameFromUrl(url),
       url,
     }));
 
@@ -2649,16 +2876,24 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
     'Transaction Costs',
     'Other Expenses',
   ];
-  const defaultColumnLabels = [
-    { key: '2023', label: '2023' },
-    { key: '2024', label: '2024' },
-    { key: 'today', label: new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) },
-  ];
+  // Worked out the same way the seller's editor does, rather than a second
+  // hardcoded list that would drift away from it.
+  const defaultColumnLabels = resolveFinancialColumns(null, {});
 
   const rowLabels = (financialTableData?.rowLabels || defaultRowLabels).map((r: string) =>
     r === 'Gross Revenue' ? 'Revenue' : r,
   );
-  const columnLabels = financialTableData?.columnLabels || defaultColumnLabels;
+  /**
+   * The buyer sees exactly the columns the seller does, read through the same
+   * resolver — including the year and the date a part-year runs to, which an
+   * older listing has not stored.
+   */
+  const columnLabels = financialTableData?.columnLabels
+    ? resolveFinancialColumns(
+        financialTableData.columnLabels,
+        financialTableData.financialData,
+      )
+    : defaultColumnLabels;
   const financialData = (() => {
     const fd = financialTableData?.financialData || {};
     if (fd['Gross Revenue'] && !fd['Revenue']) {
@@ -2853,9 +3088,20 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   };
 
   /**
-   * A buyer must accept the confidentiality agreement before contacting the
-   * seller. Once accepted the chat opens straight away, unless the seller
-   * reviews buyers manually — then it waits for their approval.
+   * A buyer accepts the confidentiality agreement.
+   *
+   * Accepting reveals the listing, and nothing else. It used to end by opening
+   * the chat, which took a buyer who had only wanted to read the hidden figures
+   * away from the page they were reading.
+   *
+   * Revealing them takes a fresh copy of the listing. The one on screen came
+   * from the server already masked — the confidential answers are not hidden in
+   * the browser, they were never sent — so no local flag can uncover them. The
+   * server decides again now that the agreement is on file, and the page
+   * re-renders with what comes back.
+   *
+   * With "approve buyers manually" switched on, nothing is granted yet: there
+   * is nothing new to fetch and nothing to show.
    */
   const handleAcceptAgreement = async () => {
     if (!listing?.id) return;
@@ -2877,8 +3123,10 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       }
 
       setHasConfidentialAccess(true);
-      toast.success("Agreement accepted");
-      void startChat();
+      // Prefix of the query's own key (["listing", id, isAuthenticated]), so it
+      // matches whichever variant is mounted.
+      await queryClient.invalidateQueries({ queryKey: ["listing", id] });
+      toast.success("Agreement accepted — the listing details are now visible");
     } catch (error) {
       console.error("Agreement error:", error);
       toast.error("Could not accept the agreement");
@@ -3039,7 +3287,10 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   const sellerIsLocked = Boolean(ownerProfile.locked) || isLockedValue(ownerName);
   const ownerUserType = (ownerProfile.user_type || ownerProfile.role || '').toLowerCase();
   const ownerIsPro = ownerUserType === 'seller';
-  const ownerIdVerified = Boolean(ownerProfile.id_verified);
+  /** Prepared for the badge below, which until now ignored it. */
+  const ownerIdVerified = Boolean(
+    ownerProfile.verified ?? ownerProfile.id_verified,
+  );
 
   const content = (
     <div
@@ -3213,7 +3464,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                     paddingRight: '12px',
                     borderRight: '1px solid rgba(0, 0, 0, 0.1)',
                   }}>
-                    {profitMultipleLabel}
+                    {profitMultipleBadge}
                   </span>
                   <span style={{
                     fontFamily: 'Lufga',
@@ -3261,8 +3512,11 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                 </span>
               </div>
 
-              <a
-                href="#"
+              {/* Same dialog as the one beside the sticky price. Both said
+                  "Financing" and both went nowhere. */}
+              <button
+                type="button"
+                onClick={() => setFinancingOpen(true)}
                 style={{
                   fontFamily: 'Lufga',
                   fontWeight: 500,
@@ -3280,7 +3534,13 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                 }}
               >
                 Financing
-              </a>
+              </button>
+
+              <FinancingDialog
+                open={financingOpen}
+                onOpenChange={setFinancingOpen}
+                listingName={businessName}
+              />
 
               <div
                 style={{
@@ -3348,6 +3608,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                     >
                       {sellerIsLocked ? <LockedBlur chars={16} /> : ownerName}
                     </div>
+                    {ownerIdVerified && (
                     <div className="flex items-center gap-2">
                       <img
                         src={FaceScanSquareIcon}
@@ -3368,6 +3629,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                         ID Verified
                       </span>
                     </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -3469,7 +3731,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                   wordBreak: 'break-all',
                 }}
               >
-                {website}
+                {websiteLabel}
               </a>
             )}
           </div>
@@ -3507,7 +3769,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                       whiteSpace: 'pre-wrap',
                     }}
                   >
-                    {intro}
+                    {tidySellerText(intro)}
                   </p>
                 </div>
               </div>
@@ -3546,7 +3808,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                       whiteSpace: 'pre-wrap',
                     }}
                   >
-                    {usp}
+                    {tidySellerText(usp)}
                   </p>
                 </div>
               </div>
@@ -3593,10 +3855,10 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                   }}
                 >
                   {descriptionIsCapped
-                    ? adDescription
+                    ? tidySellerText(adDescription)
                     : readMore
-                      ? adDescription
-                      : `${adDescription.substring(0, isMobile ? 200 : 300)}...`}
+                      ? tidySellerText(adDescription)
+                      : `${tidySellerText(adDescription).substring(0, isMobile ? 200 : 300)}...`}
                 </div>
               </div>
               {descriptionIsCapped ? (
@@ -3708,17 +3970,17 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
               value={businessAge}
               info="How long the business has been running, based on its starting date."
             />
+            {/* Monthly profit stood here and again as "⌀ Monthly Profit" in
+                the Averages box directly below, which is where it belongs —
+                the same figure twice, a screen apart. The margin is the one
+                thing this row was missing: what the business keeps of what it
+                takes. */}
             <MetricCard
-              label="Monthly Profit"
-              value={monthlyProfitDisplay}
-              info="Average annual profit divided by twelve."
-            />
-            {/* <MetricCard
               label="Profit Margin"
               value={profitMarginDisplay}
               info="Annual profit as a percentage of annual revenue."
             />
-            <MetricCard
+            {/* <MetricCard
               label="Page Views"
               value={pageViews}
             /> */}
@@ -3854,6 +4116,21 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                       }}
                     >
                       {col.label}
+                      {/* The date only when the year is unfinished — same rule
+                          as the seller's side. No pencil: a buyer has nothing
+                          to correct here. */}
+                      {col.kind !== 'forecast' && coverageLabel(col) && (
+                        <span
+                          style={{
+                            display: 'block',
+                            fontWeight: 500,
+                            fontSize: getFontSize('9px', '12px', '14px'),
+                            opacity: 0.75,
+                          }}
+                        >
+                          {coverageLabel(col)}
+                        </span>
+                      )}
                     </span>
                   </div>
                 ))}
@@ -4046,11 +4323,14 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
 
           {/* Cards Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ width: '100%', gap: isMobile ? '12px' : '20px' }}>
+            {/* Returning customers, then Refund Rate, then Conversion Rate —
+                the client's order, and the two a visitor can actually read
+                without registering come first. */}
             <ProgressMetricCard
-              label="Conversion Rate"
-              value={conversionRate}
+              label="Returning customers"
+              value={returningCustomers}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="The share of visitors who complete a purchase."
+              info="The share of customers who bought more than once."
             />
             <ProgressMetricCard
               label="Refund Rate"
@@ -4059,13 +4339,16 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
               info="The share of orders that were refunded."
             />
             <ProgressMetricCard
-              label="Returning customers"
-              value={returningCustomers}
+              label="Conversion Rate"
+              value={conversionRate}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="The share of customers who bought more than once."
+              info="The share of visitors who complete a purchase."
             />
             <CustomerTypeCard
               segments={customerTypeSegments}
+              locked={customerTypeLocked}
+              unlockLabel={customerTypeRaw ?? unlockCtaText}
+              onUnlockClick={handleUpgradeUnlockClick}
               info="How the customer base splits between business (B2B) and consumer (B2C) buyers."
             />
             <MetricCard
@@ -4260,6 +4543,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  top: "50%",
                 }}
               >
                 <UnlockPill label={unlockCtaText} onClick={handleUpgradeUnlockClick} />
@@ -5023,6 +5307,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    margin: 'auto',
                   }}
                 >
                   <UnlockPill label={unlockCtaText} onClick={handleUpgradeUnlockClick} />
@@ -5116,18 +5401,17 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                       businessAge = calculateBusinessAgeFromListing(listingCreatedAt, userCreatedAt);
                     }
 
-                    // Calculate financials
-                    const allFinancials = similarListing.financials || [];
-                    const totalRevenue = allFinancials.reduce((sum: number, f: any) =>
-                      sum + (parseFloat(f.revenue_amount || 0) || 0), 0
-                    ) || 0;
-                    const totalNetProfit = allFinancials.reduce((sum: number, f: any) =>
-                      sum + (parseFloat(f.net_profit || 0) || 0), 0
-                    ) || 0;
-
-                    // Calculate multiples
-                    const revenueMultiple = (askingPrice > 0 && totalRevenue > 0) ? (askingPrice / totalRevenue).toFixed(1) + 'x Revenue' : '0.5x Revenue';
-                    const profitMultiple = (askingPrice > 0 && totalNetProfit > 0) ? 'Multiple ' + (askingPrice / totalNetProfit).toFixed(1) + 'x Profit' : 'Multiple 1.5x Profit';
+                    /*
+                     * The same figures the listing's own page works from. The
+                     * revenue and profit printed on this card came off the same
+                     * broken sum as the multiples did, so they are read from
+                     * here too rather than recomputed beside it.
+                     */
+                    const similarMultiples = listingMultiples(similarListing, askingPrice);
+                    const totalRevenue = similarMultiples.annualRevenue ?? 0;
+                    const totalNetProfit = similarMultiples.annualProfit ?? 0;
+                    const revenueMultiple = revenueMultipleLabel(similarMultiples.revenue);
+                    const profitMultiple = profitMultipleLabel(similarMultiples.profit);
 
                     // Get image
                     const photoQuestion = adQuestions.find((a: any) =>
@@ -5284,50 +5568,110 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
     </Dialog>
   );
 
+  /**
+   * What accepting actually opens up, in the order the design lists it.
+   *
+   * Each one is a real consequence of reaching CONFIDENTIAL: the domain
+   * questions and every uploaded photo or file are held back below that level,
+   * and the seller's name and picture are replaced by the lock prompt until
+   * then. "Contact Details" is the seller becoming reachable, through the
+   * platform, as the terms below require. The email address itself is stripped
+   * from every response at every level and is not part of this.
+   */
+  const UNLOCK_ITEMS = [
+    { icon: Globe, label: 'Domain Name' },
+    { icon: UserRound, label: 'Seller Profile' },
+    { icon: Paperclip, label: 'Attachments' },
+    { icon: ImageIcon, label: 'Listing Images' },
+    { icon: FileText, label: 'Additional Documents' },
+    { icon: Contact, label: 'Contact Details' },
+  ];
+
+  const AGREEMENT_TERMS = [
+    'Keep all information confidential',
+    'Not contact sellers outside the platform',
+    'Conduct all communication through the EX Platform',
+    'Use the information solely to evaluate a potential acquisition',
+    'Not share information with third parties',
+  ];
+
   const agreementDialog = (
-    <Dialog open={agreementOpen} onOpenChange={setAgreementOpen}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-bold">Confidentiality Agreement</DialogTitle>
+    <Dialog
+      open={agreementOpen}
+      onOpenChange={(open) => {
+        setAgreementOpen(open);
+        // Closing without accepting clears the tick: the next visit asks again.
+        if (!open) setAgreementChecked(false);
+      }}
+    >
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl">
+        <DialogHeader className="items-center text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-accent">
+            <Lock className="h-7 w-7 text-black" />
+          </div>
+          <DialogTitle className="text-center text-xl font-bold">
+            Access Confidential Information
+          </DialogTitle>
         </DialogHeader>
 
-        <p className="text-sm text-muted-foreground">
-          This listing contains confidential business information. Before you can contact the
-          seller, you must accept our confidentiality agreement.
+        <p className="text-center text-sm text-muted-foreground">
+          You are about to access confidential listing information. Before you can view these
+          details, you must accept our platform confidentiality agreement.
         </p>
 
         <div className="rounded-2xl bg-muted/40 p-4">
-          <p className="text-sm font-semibold mb-2">By continuing, you agree to:</p>
+          <p className="mb-3 text-sm font-semibold">You’ll unlock:</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {UNLOCK_ITEMS.map(({ icon: Icon, label }) => (
+              <div
+                key={label}
+                className="flex items-center gap-2.5 rounded-xl bg-background px-3 py-2.5"
+              >
+                <Icon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                <span className="truncate text-sm">{label}</span>
+              </div>
+            ))}
+          </div>
+
+          <p className="mb-2 mt-5 text-sm font-semibold">By continuing, you agree to:</p>
           <ul className="space-y-1.5 text-sm text-muted-foreground">
-            <li>→ Treat all information about this business as confidential</li>
-            <li>→ Not share it with third parties</li>
-            <li>→ Use it solely to evaluate a possible acquisition</li>
-            <li>→ Conduct all communication through the EX Platform</li>
+            {AGREEMENT_TERMS.map((term) => (
+              <li key={term}>→ {term}</li>
+            ))}
           </ul>
+
+          {/* Present, as the design has it. It has nowhere to lead yet -- the
+              platform has no terms page and no terms text -- so it does not
+              pretend to be a link that can be followed. */}
+          <p className="mt-4 text-sm font-medium underline underline-offset-2">
+            View Full Terms
+          </p>
         </div>
+
+        <label className="flex cursor-pointer items-start gap-3">
+          <Checkbox
+            checked={agreementChecked}
+            onCheckedChange={(checked) => setAgreementChecked(checked === true)}
+            disabled={isAcceptingAgreement}
+            className="mt-0.5 data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+          />
+          <span className="text-sm">I agree to the confidentiality terms</span>
+        </label>
 
         <p className="text-xs text-muted-foreground">
           Breaching these terms may result in account suspension, legal action, and other remedies
           available under our Terms and Conditions.
         </p>
 
-        <div className="flex items-center gap-3 pt-2">
-          <Button
-            variant="outline"
-            className="rounded-full h-11 px-6"
-            onClick={() => setAgreementOpen(false)}
-            disabled={isAcceptingAgreement}
-          >
-            Cancel
-          </Button>
-          <Button
-            className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-11 flex-1 font-semibold"
-            onClick={handleAcceptAgreement}
-            disabled={isAcceptingAgreement}
-          >
-            {isAcceptingAgreement ? "Please wait..." : "Accept & Contact Seller"}
-          </Button>
-        </div>
+        {/* One button, full width. The tick is what makes accepting an act
+            rather than a side effect of pressing the only thing on screen. */}
+        <Button
+          className="h-12 w-full rounded-full bg-accent font-semibold text-accent-foreground hover:bg-accent/90"
+          onClick={handleAcceptAgreement}
+          disabled={!agreementChecked || isAcceptingAgreement}
+        >
+          {isAcceptingAgreement ? "Please wait..." : "Continue"}
+        </Button>
       </DialogContent>
     </Dialog>
   );

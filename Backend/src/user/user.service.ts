@@ -141,6 +141,20 @@ export class UserService {
       }));
   }
 
+  /**
+   * The stored hash, for checking a password someone has just typed.
+   *
+   * `findOneByID` omits `password_hash` on purpose — that one answers the
+   * browser. This one never leaves the server, so it is deliberately narrow:
+   * the hash and nothing else.
+   */
+  async findCredentialsByID(id: string) {
+    return this.db.user.findUnique({
+      where: { id },
+      select: { id: true, password_hash: true },
+    });
+  }
+
   async findOneByID(id: string) {
     const user = await this.db.user.findUnique({
       where: { id: id },
@@ -285,6 +299,17 @@ export class UserService {
       where: {
         userId: `${id}`,
       },
+      /**
+       * Most recently saved first.
+       *
+       * There was no order here at all, so the list came back in whatever order
+       * the database found convenient — which for these rows is by `_id`, and
+       * `_id` is a uuid. The result looked sorted and was not: a listing saved
+       * in June sat above one saved a month later, and the newest save could
+       * appear anywhere. Saving something is how you say "look at this next",
+       * so it belongs at the top.
+       */
+      orderBy: { created_at: 'desc' },
       // The favourites grid renders the same card as the feed, so it only needs
       // these relations. Skipping tools/productQuestion/managementQuestion/
       // social_account/handover means fewer DB round-trips per favourite. The

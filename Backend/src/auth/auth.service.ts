@@ -28,13 +28,24 @@ export class AuthService {
 
     const hash = await this.hashData(password);
 
+    /*
+     * `verified` is left at the schema's default of false.
+     *
+     * It used to be set true here for every new account, which made the flag
+     * mean "has an account" rather than "has proved who they are" — and the
+     * listing page drew an "ID Verified" badge from it. Thirty-six of the
+     * forty-eight members carry it today without a single identity check
+     * having been run against any of them.
+     *
+     * The one place that may set it is the identity service, when the provider
+     * comes back approved.
+     */
     const payload = {
       role: process.env.DEFAULT_ROLE || 'USER',
       email: UserService.normalizeEmail(email),
       password_hash: hash,
       first_name: body.first_name,
       last_name: body.last_name,
-      verified: true, // Set verified to true by default for new signups
     };
 
     const user = await this.userService.createUser(payload);
@@ -312,6 +323,64 @@ export class AuthService {
     // TODO: Send email with OTP and reset link
     // await this.sendEmail(email, otp);
     return { message: 'Password reset OTP sent to your email', success: true };
+  }
+
+  /**
+   * A signed-in member changes their own password.
+   *
+   * Separate from the OTP flow above, which exists for people who cannot sign
+   * in and which cannot finish today anyway: it mails a code, and the mailer
+   * has no verified sender configured. Someone already signed in does not need
+   * to be told a code they could read in their own inbox — knowing the current
+   * password proves the same thing, immediately.
+   *
+   * The mismatch and the wrong-current-password cases answer differently. That
+   * is deliberate: both are the account holder's own mistake, and telling them
+   * which one they made reveals nothing they did not already know.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) {
+    if (this.checkPassword(newPassword, confirmPassword)) {
+      throw new HttpException('Passwords do not match', HttpStatus.BAD_REQUEST);
+    }
+
+    const user = await this.userService.findCredentialsByID(userId);
+    if (!user) {
+      throw new HttpException('User Not Found', HttpStatus.NOT_FOUND);
+    }
+    if (!user.password_hash) {
+      throw new HttpException(
+        'This account has no password set. Use the reset link instead.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const matches = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!matches) {
+      throw new HttpException(
+        'Your current password is not correct',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // A new password that is the old one is a no-op the member would read as
+    // success, so say so rather than pretending something changed.
+    if (await bcrypt.compare(newPassword, user.password_hash)) {
+      throw new HttpException(
+        'That is already your current password',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    await this.userService.updateUser(user.id, {
+      password_hash: await this.hashData(newPassword),
+    });
+
+    return { message: 'Password changed', success: true };
   }
 
   // Update Password with OTP

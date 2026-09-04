@@ -1,3 +1,4 @@
+import { multipleOf, listingMultiples, profitMultipleLabel, revenueMultipleLabel } from "@/lib/financialTableUtils";
 import ListingCard from "@/components/ListingCard";
 import { resolveListingTitle } from "@/lib/listingTitle";
 import FilterSidebar, { FilterState, PRICE_MAX, AGE_MAX, MONEY_MAX, MULTIPLE_MAX } from "@/components/listings/FilterSidebar";
@@ -319,9 +320,24 @@ const AllListings = () => {
     try {
       console.log('🔍 Fetching ALL listings (will filter to PUBLISH client-side)');
       
+      /*
+       * Ask for all of them, and only the published ones.
+       *
+       * Neither argument used to be passed, so the server applied its own
+       * default of 40 rows and sent whatever the first page happened to hold.
+       * The count under the heading was therefore the page size, not a total —
+       * and it changed with who was looking: staff are shown drafts, so an
+       * admin's 40 rows included two that the client-side filter then dropped,
+       * leaving 38 where a member saw 40 and the database held 41. Three
+       * numbers for one figure.
+       *
+       * Filtering by status here also stops unpublished listings being sent to
+       * a browser at all, rather than being fetched and hidden.
+       */
+      const feedParams = { status: 'PUBLISH', limit: 1000 };
       const response = isAuthenticated
-        ? await apiClient.getSecureListings()
-        : await apiClient.getListings(); // Cached public feed (TTL ~10s, purged on create/update/delete)
+        ? await apiClient.getSecureListings(feedParams)
+        : await apiClient.getListings(feedParams); // Cached public feed (TTL ~10s, purged on create/update/delete)
       console.log('📦 API Response (ALL):', response);
       
       if (response.success) {
@@ -1501,21 +1517,11 @@ const AllListings = () => {
                         }
                       }
                       
-                      // Calculate multiples (using average monthly profit * 12 for annual)
-                      let profitMultiple = "Multiple 1.5x Profit";
-                      if (askingPrice && avgNetProfit > 0) {
-                        const annualProfit = avgNetProfit * 12;
-                        const multiple = parseFloat(askingPrice) / annualProfit;
-                        profitMultiple = `Multiple ${multiple.toFixed(1)}x Profit`;
-                      }
-                      
-                      // Calculate revenue multiple (using average monthly revenue * 12 for annual)
-                      let revenueMultiple = "0.5x Revenue";
-                      if (askingPrice && avgRevenue > 0) {
-                        const annualRevenue = avgRevenue * 12;
-                        const multiple = parseFloat(askingPrice) / annualRevenue;
-                        revenueMultiple = `${multiple.toFixed(1)}x Revenue`;
-                      }
+                      // Monthly averages, so x12 for the annual figure.
+                      // Worked out from the seller's grid, the same as the listing's own page.
+                      const multiples = listingMultiples(listing, askingPrice);
+                      const profitMultiple = profitMultipleLabel(multiples.profit);
+                      const revenueMultiple = revenueMultipleLabel(multiples.revenue);
                       
                       const categoryInfo = listing.category?.[0];
                       const listingKey = listing.id || `listing-${index}-${businessName}`;

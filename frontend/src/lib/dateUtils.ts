@@ -227,8 +227,16 @@ export function listingBusinessAgeYears(startDateAnswer: unknown): number | null
 
 /**
  * Business age in the format the listing page specifies:
- *   under a year -> "9 months"
- *   otherwise    -> "1 year | 5 months" / "2 years | 6 months"
+ *   under a year      -> "9 months"
+ *   a whole number    -> "1 year" / "2 years"
+ *   anything else     -> "1 year | 5 months" / "2 years | 6 months"
+ *
+ * The months half used to be printed whether or not there were any, so a
+ * business that had just turned two read "2 years | 0 months" — a phrase that
+ * spends half its length saying nothing. It only comes round for a listing in
+ * the month of its anniversary, which is why it looks rare in the data and is
+ * not: every listing reaches it eventually.
+ *
  * Returns null when there is no usable start date, so callers can show "Unknown"
  * instead of a made-up figure.
  */
@@ -252,5 +260,7 @@ export function formatListingBusinessAge(startDateAnswer: unknown): string | nul
   if (years === 0) return monthLabel;
 
   const yearLabel = `${years} ${years === 1 ? 'year' : 'years'}`;
+  if (remainingMonths === 0) return yearLabel;
+
   return `${yearLabel} | ${monthLabel}`;
 }

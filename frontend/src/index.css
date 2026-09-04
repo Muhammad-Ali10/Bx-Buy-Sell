@@ -101,11 +101,17 @@
   scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
 
-/* Fixed width for chat window on desktop */
+/* The chat column's width on desktop.
+ *
+ * A cap, not a fixed size. It was `width: 688px !important; flex: none`, which
+ * meant the middle column refused to give up a pixel: once the details panel
+ * joined the row, the three columns needed about 1590px and anything narrower
+ * pushed the third one off the screen. The element already carries `flex-1
+ * min-w-0`, so leaving the width to flex lets it shrink when the window is
+ * small and stop at the design's 688px when there is room to spare. */
 @media (min-width: 1280px) {
   [data-desktop-width="688px"] {
-    width: 688px !important;
-    flex: none !important;
+    max-width: 688px;
   }
 }
 

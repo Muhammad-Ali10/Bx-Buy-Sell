@@ -8,11 +8,16 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Settings, MessageSquare, Trash2, CheckCircle, Edit2, ChevronRight, Loader2, Ban, ShieldCheck, KeyRound } from "lucide-react";
+import {
+  ArrowLeft, Settings, MessageSquare, Trash2, CheckCircle, Edit2, ChevronRight,
+  Loader2, Ban, ShieldCheck, KeyRound, UserRound, Mail, Smartphone, Info,
+  Wallet, Lock as LockIcon, IdCard,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { formatPresence } from "@/lib/lastSeen";
 import { formatMoney } from "@/lib/formatNumber";
 import { TeamMemberStatistics } from "@/components/admin/TeamMemberStatistics";
-import { UserSubscriptionsPanel } from "@/components/admin/UserSubscriptionsPanel";
+import { UserSubscriptionsList } from "@/components/admin/UserSubscriptionsPanel";
 import { ChangePasswordDialog } from "@/components/admin/ChangePasswordDialog";
 import { UserInvoiceList } from "@/components/admin/UserInvoiceList";
 
@@ -24,48 +29,48 @@ const ACCOUNT_TABS = [
 
 type AccountTab = (typeof ACCOUNT_TABS)[number]["key"];
 
-/**
- * A verification status. An admin can set it by hand when someone has proved
- * themselves another way; for everyone else it is a read-out, which is what
- * the client asked for — moderators see the status but cannot change it.
- */
-const VerificationMark = ({
-  verified,
-  canEdit,
-  busy,
-  label,
-  onToggle,
-}: {
-  verified: boolean;
-  canEdit: boolean;
-  busy: boolean;
-  label: string;
-  onToggle: (next: boolean) => void;
-}) => {
-  const mark = verified ? (
-    <img src={verifiedTick} alt="Verified" style={{ width: "18px", height: "18px" }} />
-  ) : (
-    <span className="inline-flex h-[18px] w-[18px] rounded-full border border-[#D9D9D9] bg-[#F5F5F5]" />
-  );
-
-  if (!canEdit) {
-    return <span title={verified ? "Verified" : "Not verified"}>{mark}</span>;
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => onToggle(!verified)}
-      disabled={busy}
-      title={verified ? `Mark ${label} as unverified` : `Mark ${label} as verified`}
-      className="rounded-full transition-opacity hover:opacity-70 disabled:opacity-40"
-    >
-      {busy ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : mark}
-    </button>
-  );
-};
 
 /** The database calls a moderator a "MONITER"; the interface should not. */
+/**
+ * One line of the account card: an icon, what it says, and how it stands.
+ *
+ * The card used to be a column of "X Verified" rows with a control beside each
+ * one. The design puts the value first — the address, the number, the type —
+ * and the verdict beside it, which is the order someone reads them in.
+ */
+const DetailLine = ({
+  icon: Icon,
+  label,
+  value,
+  badge,
+}: {
+  icon: LucideIcon;
+  label: string | null;
+  value: string;
+  badge?: { text: string; className: string };
+}) => (
+  <div className="flex items-center justify-between gap-3">
+    <span className="flex min-w-0 items-center gap-2">
+      <Icon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+      <span
+        className="truncate text-sm"
+        style={{ fontFamily: 'ABeeZee', color: '#000000' }}
+        title={label ? `${label}: ${value}` : value}
+      >
+        {label ? `${label}: ` : ''}
+        {value}
+      </span>
+    </span>
+    {badge && (
+      <span
+        className={`flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${badge.className}`}
+      >
+        {badge.text}
+      </span>
+    )}
+  </div>
+);
+
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: "Admin",
   MONITER: "Moderator",
@@ -76,6 +81,7 @@ import proIcon from "@/assets/fi_5076417.svg";
 import simIcon from "@/assets/sim icon.svg";
 import verifiedTick from "@/assets/Tick.svg";
 import { useUserDetails } from "@/hooks/useUserDetails";
+import { useUserListings } from "@/hooks/useUserListings";
 import { useUserFavorites } from "@/hooks/useUserFavorites";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
@@ -101,6 +107,8 @@ export default function AdminUserDetails() {
   const { user: currentUser } = useAuth();
   const { data, isLoading, refetch } = useUserDetails(id);
   const { data: userFavorites } = useUserFavorites(id);
+  // The Subscriptions tab lists a card per listing this member pays for.
+  const { data: userListings } = useUserListings(id);
   const [isPrefsOpen, setIsPrefsOpen] = useState(false);
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [infoForm, setInfoForm] = useState({
@@ -139,7 +147,6 @@ export default function AdminUserDetails() {
   const [isChangingRole, setIsChangingRole] = useState(false);
   const [activeTab, setActiveTab] = useState<AccountTab>("overview");
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
-  const [verificationSaving, setVerificationSaving] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -345,32 +352,6 @@ export default function AdminUserDetails() {
     }
   };
 
-  /**
-   * Email and phone verification can be set by hand when someone has proved
-   * themselves another way. Admins only — a moderator sees the status but
-   * cannot change it, which is what the client asked for.
-   */
-  const handleToggleVerification = async (
-    field: "is_email_verified" | "is_phone_verified",
-    next: boolean,
-  ) => {
-    if (!id || currentRole !== "ADMIN") return;
-    setVerificationSaving(field);
-    try {
-      const response = await apiClient.updateUserByAdmin(id, { [field]: next } as any);
-      if (!response.success) {
-        throw new Error(response.error || "Failed to update the verification status");
-      }
-      toast.success(
-        `${field === "is_email_verified" ? "Email" : "Phone"} marked as ${next ? "verified" : "unverified"}`,
-      );
-      await refetch();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to update the verification status");
-    } finally {
-      setVerificationSaving(null);
-    }
-  };
 
   const handleMessageUser = () => {
     if (!id) return;
@@ -433,8 +414,32 @@ export default function AdminUserDetails() {
     typeof (profile as any)?.verified_funds === "number"
       ? (profile as any).verified_funds
       : null;
+  /**
+   * Where the verified figure sits against the bands the team judges by.
+   *
+   * Nothing verified is not "a little": it is the first mark, and the bar stays
+   * empty. The thresholds are the same ones the acquisition-capacity screen
+   * uses to describe a buyer.
+   */
+  const capacityBand = verifiedFunds === null || verifiedFunds <= 0
+    ? 0
+    : verifiedFunds < 100_000
+      ? 1
+      : 2;
+  const capacityFill = capacityBand === 0 ? 0 : capacityBand === 1 ? 50 : 100;
+
+  const statusBadge = (verified: boolean) =>
+    verified
+      ? { text: 'Verified', className: 'bg-accent text-black' }
+      : { text: 'Not Verified', className: 'bg-red-100 text-red-600' };
+
+  const emailBadge = statusBadge(Boolean((profile as any)?.email_verified));
+  const phoneBadge = statusBadge(Boolean((profile as any)?.phone_verified));
+  const idBadge = statusBadge(Boolean((profile as any)?.id_verified));
+
   // "Moniter" is what the database calls it; nobody should have to read that.
   const userType = ROLE_LABELS[targetRole] ?? null;
+  const userTypeLabel = userType ?? 'User';
   const isTeamMember = targetRole === "ADMIN" || targetRole === "MONITER";
   // Only admins may change a user type, and the control is hidden rather than
   // shown-and-refused so a moderator is not invited to try.
@@ -468,7 +473,76 @@ export default function AdminUserDetails() {
           {/* The account splits into three views rather than one long scroll:
               who they are, what they pay for, and how they pay. */}
           <div className="flex flex-col gap-1">
-            <h2 className="text-xl font-semibold">Your Account Details</h2>
+            {/* Settings sits level with the title, as the design has it: it
+                acts on the account, not on the profile card below. */}
+            <div className="flex items-start justify-between gap-4">
+              <h2 className="text-xl font-semibold">Your Account Details</h2>
+                {/* Moderators see this menu too — they police ordinary members,
+                    including resetting a forgotten password. Which entries they
+                    get is decided per action below, and enforced server-side. */}
+                {(
+                  <div className="flex items-center gap-3">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button className="bg-accent text-black hover:bg-accent/90 rounded-full px-6">
+                          <Settings className="h-4 w-4 mr-2" />
+                          Settings
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="rounded-2xl border-border p-2">
+                        <DropdownMenuItem className="rounded-xl" onClick={handleMessageUser}>
+                          <MessageSquare className="h-4 w-4 mr-2" />
+                          Chat
+                        </DropdownMenuItem>
+                        {canChangePassword && (
+                          <DropdownMenuItem
+                            className="rounded-xl"
+                            onClick={() => setIsPasswordDialogOpen(true)}
+                          >
+                            <KeyRound className="h-4 w-4 mr-2" />
+                            Change password
+                          </DropdownMenuItem>
+                        )}
+                        {canModerateTarget && (
+                          <DropdownMenuItem className="rounded-xl" onClick={handleBlockUser}>
+                            <Ban className="h-4 w-4 mr-2" />
+                            {isBlocked ? "Unblock" : "Block"}
+                          </DropdownMenuItem>
+                        )}
+                        {canModerateTarget && (
+                          <DropdownMenuItem className="rounded-xl text-destructive" onClick={handleDeleteUser}>
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        )}
+                        {/* Promoting a member to the team, or returning a team
+                            member to an ordinary account, is an admin-only act —
+                            the backend refuses it for anyone else. */}
+                        {canChangeUserType && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <div className="px-2 py-1.5 text-xs text-muted-foreground">User type</div>
+                            {(["USER", "MONITER", "ADMIN"] as const).map((role) => (
+                              <DropdownMenuItem
+                                key={role}
+                                className="rounded-xl"
+                                disabled={targetRole === role || isChangingRole}
+                                onClick={() => handleChangeUserType(role)}
+                              >
+                                <ShieldCheck className="h-4 w-4 mr-2" />
+                                {ROLE_LABELS[role]}
+                                {targetRole === role && (
+                                  <span className="ml-auto text-xs text-muted-foreground">current</span>
+                                )}
+                              </DropdownMenuItem>
+                            ))}
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
+            </div>
             <div className="flex items-center gap-6 border-b border-border">
               {ACCOUNT_TABS.map((tab) => (
                 <button
@@ -500,7 +574,13 @@ export default function AdminUserDetails() {
             {/* Wraps on narrow screens: the avatar, the two verification
                 columns, the notes box and the menu add up to roughly 1100px,
                 which pushed a phone's whole page sideways. */}
-            <div className="flex flex-wrap items-start justify-between gap-6 w-full">
+            {/* Three panels, as the design stands them: who this is,
+                what we know about them, and what they are watching for.
+                They stack on a narrow screen — side by side the row runs
+                to about 1100px and used to push a phone sideways. */}
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)_minmax(0,0.75fr)]">
+
+              <div className="flex flex-col gap-5 rounded-2xl border border-border p-5">
               <div className="flex items-start gap-[20px]">
                 <div className="relative flex-shrink-0">
                   <Avatar
@@ -595,208 +675,127 @@ export default function AdminUserDetails() {
                       </Badge>
                     )}
                   </div>
-                </div>
-
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-4 min-w-[150px]">
-                  <span style={{ fontFamily: 'ABeeZee', fontSize: '14px', lineHeight: '100%', color: '#000000' }}>Email Verified</span>
-                  <VerificationMark
-                    verified={Boolean((profile as any)?.email_verified)}
-                    canEdit={currentRole === "ADMIN"}
-                    busy={verificationSaving === "is_email_verified"}
-                    label="email verification"
-                    onToggle={(next) => handleToggleVerification("is_email_verified", next)}
+                  {/* The design keeps the note beside the presence pill rather
+                      than in a column of its own — it is a line about the
+                      person, and it belongs with their name. */}
+                  <div className="mt-3">
+                  <p
+                    className="mb-2"
+                    style={{
+                      fontFamily: 'Outfit',
+                      fontWeight: 400,
+                      fontSize: '14px',
+                      lineHeight: '100%',
+                      letterSpacing: '0px',
+                      color: '#000000',
+                    }}
+                  >
+                    Notes (Text Field)
+                  </p>
+                  <Textarea
+                    placeholder="Type important notes about this user..."
+                    className="min-h-[44px] resize-none bg-muted/30 border-border"
+                    value={adminNote}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setAdminNote(nextValue);
+                      if (id) {
+                        setAdminUserNote(id, nextValue);
+                      }
+                    }}
                   />
-                </div>
-                <div className="flex items-center justify-between gap-4 min-w-[150px]">
-                  <span style={{ fontFamily: 'ABeeZee', fontSize: '14px', lineHeight: '100%', color: '#000000' }}>Funds Verified</span>
-                  {/* The figure a moderator could actually verify, not a tick.
-                      "How much" is the useful part when judging a buyer. */}
-                  {verifiedFunds !== null ? (
-                    <span className="text-sm font-semibold text-foreground whitespace-nowrap">
-                      {formatMoney(verifiedFunds)}
-                    </span>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">Not verified</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-4 min-w-[150px]">
-                  <span style={{ fontFamily: 'ABeeZee', fontSize: '14px', lineHeight: '100%', color: '#000000' }}>Phone Verified</span>
-                  <VerificationMark
-                    verified={Boolean((profile as any)?.phone_verified)}
-                    canEdit={currentRole === "ADMIN"}
-                    busy={verificationSaving === "is_phone_verified"}
-                    label="phone verification"
-                    onToggle={(next) => handleToggleVerification("is_phone_verified", next)}
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-4 min-w-[150px]">
-                  <span style={{ fontFamily: 'ABeeZee', fontSize: '14px', lineHeight: '100%', color: '#000000' }}>ID Verified</span>
-                  {(profile as any)?.id_verified ? (
-                    <img src={verifiedTick} alt="Verified" style={{ width: '18px', height: '18px' }} />
-                  ) : (
-                    <span className="inline-flex h-[18px] w-[18px] rounded-full border border-[#D9D9D9] bg-[#F5F5F5]" />
-                  )}
-                </div>
-              </div>
-
-              <div className="min-w-[220px]">
-                <p
-                  className="mb-2"
-                  style={{
-                    fontFamily: 'Outfit',
-                    fontWeight: 400,
-                    fontSize: '14px',
-                    lineHeight: '100%',
-                    letterSpacing: '0px',
-                    color: '#000000',
-                  }}
-                >
-                  Notes (Text Field)
-                </p>
-                <Textarea
-                  placeholder="Type important notes about this user..."
-                  className="min-h-[44px] resize-none bg-muted/30 border-border"
-                  value={adminNote}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    setAdminNote(nextValue);
-                    if (id) {
-                      setAdminUserNote(id, nextValue);
-                    }
-                  }}
-                />
-              </div>
-
-              {/* Moderators see this menu too — they police ordinary members,
-                  including resetting a forgotten password. Which entries they
-                  get is decided per action below, and enforced server-side. */}
-              {(
-                <div className="flex items-center gap-3">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button className="bg-accent text-black hover:bg-accent/90 rounded-full px-6">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Settings
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="rounded-2xl border-border p-2">
-                      <DropdownMenuItem className="rounded-xl" onClick={handleMessageUser}>
-                        <MessageSquare className="h-4 w-4 mr-2" />
-                        Chat
-                      </DropdownMenuItem>
-                      {canChangePassword && (
-                        <DropdownMenuItem
-                          className="rounded-xl"
-                          onClick={() => setIsPasswordDialogOpen(true)}
-                        >
-                          <KeyRound className="h-4 w-4 mr-2" />
-                          Change password
-                        </DropdownMenuItem>
-                      )}
-                      {canModerateTarget && (
-                        <DropdownMenuItem className="rounded-xl" onClick={handleBlockUser}>
-                          <Ban className="h-4 w-4 mr-2" />
-                          {isBlocked ? "Unblock" : "Block"}
-                        </DropdownMenuItem>
-                      )}
-                      {canModerateTarget && (
-                        <DropdownMenuItem className="rounded-xl text-destructive" onClick={handleDeleteUser}>
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      )}
-                      {/* Promoting a member to the team, or returning a team
-                          member to an ordinary account, is an admin-only act —
-                          the backend refuses it for anyone else. */}
-                      {canChangeUserType && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <div className="px-2 py-1.5 text-xs text-muted-foreground">User type</div>
-                          {(["USER", "MONITER", "ADMIN"] as const).map((role) => (
-                            <DropdownMenuItem
-                              key={role}
-                              className="rounded-xl"
-                              disabled={targetRole === role || isChangingRole}
-                              onClick={() => handleChangeUserType(role)}
-                            >
-                              <ShieldCheck className="h-4 w-4 mr-2" />
-                              {ROLE_LABELS[role]}
-                              {targetRole === role && (
-                                <span className="ml-auto text-xs text-muted-foreground">current</span>
-                              )}
-                            </DropdownMenuItem>
-                          ))}
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              )}
-            </div>
-
-            <div className="my-6 w-full border-t" style={{ borderColor: '#00000040' }} />
-
-            {/* Personal + Address */}
-            <div className="grid grid-cols-2 items-center mb-4">
-              <h3
-                className="font-lufga"
-                style={{
-                  fontWeight: 500,
-                  fontSize: '20px',
-                  lineHeight: '140%',
-                  letterSpacing: '0%',
-                  color: '#000000',
-                }}
-              >
-                Personal Information
-              </h3>
-              <div className="flex items-center justify-between">
-                <h3
-                  className="font-lufga"
-                  style={{
-                    fontWeight: 500,
-                    fontSize: '20px',
-                    lineHeight: '140%',
-                    letterSpacing: '0%',
-                    color: '#000000',
-                  }}
-                >
-                  Address Information
-                </h3>
-                {isEditingInfo ? (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsEditingInfo(false)}
-                      disabled={isSavingInfo}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={saveInfo}
-                      disabled={isSavingInfo}
-                      className="bg-accent text-black hover:bg-accent/90"
-                    >
-                      {isSavingInfo ? "Saving..." : "Save"}
-                    </Button>
                   </div>
-                ) : (
-                  <Button variant="ghost" size="icon" onClick={openInfoEditor}>
-                    <Edit2 className="h-4 w-4" />
-                  </Button>
-                )}
+                </div>
+
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-3">
+
+              {/* The account, as the design lists it: what the person is,
+                  how to reach them, and what has been checked.
+
+                  These read; they do not act. Email and phone verification used
+                  to be switches here, so a moderator could mark an address
+                  verified without anyone having opened the mail — which is the
+                  one thing verification is supposed to mean. The client asked
+                  for status, and status is what a record of a check should be. */}
+              <div className="flex min-w-[260px] flex-col gap-3">
+                <DetailLine icon={UserRound} label="User Type" value={userTypeLabel} />
+                <DetailLine icon={Mail} label={null} value={profile.email || '—'} badge={emailBadge} />
+                <DetailLine icon={LockIcon} label="Password" value="••••••" />
+                <DetailLine
+                  icon={Smartphone}
+                  label={null}
+                  value={profile.phone || 'No phone number'}
+                  badge={phoneBadge}
+                />
+                <DetailLine
+                  icon={IdCard}
+                  label={null}
+                  value={(profile as any)?.id_verified ? 'ID Verified' : 'ID not Verified'}
+                  badge={idBadge}
+                />
+
+                {/* What the buyer can actually put behind an offer. A tick would
+                    say only that somebody looked; the figure is the answer. */}
+                <div className="flex flex-col gap-2 pt-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-black px-2.5 py-1 text-[11px] font-medium text-white">
+                      <Wallet className="h-3 w-3" />
+                      Acquisition Capacity
+                      <span title="Funds this buyer has had verified by the team">
+                        <Info className="h-3 w-3 opacity-70" />
+                      </span>
+                    </span>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                        verifiedFunds !== null
+                          ? 'bg-accent text-black'
+                          : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      {verifiedFunds !== null ? formatMoney(verifiedFunds) : 'Not verified'}
+                    </span>
+                  </div>
+
+                  {/* Three marks rather than a number line: the bands are what
+                      the team judges by, and a bar pretends to a precision the
+                      figure behind it does not have. */}
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-accent transition-all"
+                      style={{ width: `${capacityFill}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    <span className={capacityBand === 0 ? 'font-semibold text-foreground' : ''}>
+                      Not Verified
+                    </span>
+                    <span className={capacityBand === 1 ? 'font-semibold text-foreground' : ''}>
+                      Moderate
+                    </span>
+                    <span className={capacityBand === 2 ? 'font-semibold text-foreground' : ''}>
+                      High
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+
+              </div>
+
+              <div className="flex flex-col gap-5">
+                <div className="rounded-2xl border border-border p-5">
+                  <h3 className="font-lufga mb-4" style={{ fontWeight: 500, fontSize: 20, color: "#000000" }}>
+                    Personal Information
+                  </h3>
+                  <div className="space-y-3">
+                {/* The design opens Personal Information with the company.
+                    Stored as `business_name`; most accounts have not filled it
+                    in, so it reads as a dash rather than disappearing — a row
+                    that comes and goes makes two users' cards different shapes. */}
+                <div className="flex justify-between">
+                  <span style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Company Name</span>
+                  <span style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', textAlign: 'left' }}>{(profile as any)?.business_name || "-"}</span>
+                </div>
                 <div className="flex justify-between">
                   <span style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>First Name</span>
                   {isEditingInfo ? (
@@ -849,10 +848,32 @@ export default function AdminUserDetails() {
                   <span style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Birthday</span>
                   <span style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>{profile.birthday || "-"}</span>
                 </div>
-              </div>
-              <div className="space-y-3">
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h3 className="font-lufga" style={{ fontWeight: 500, fontSize: 20, color: "#000000" }}>
+                      Your Address
+                    </h3>
+                    {isEditingInfo ? (
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="ghost" onClick={() => setIsEditingInfo(false)} disabled={isSavingInfo}>
+                          Cancel
+                        </Button>
+                        <Button size="sm" onClick={saveInfo} disabled={isSavingInfo}>
+                          {isSavingInfo ? "Saving…" : "Save"}
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button variant="ghost" size="icon" onClick={openInfoEditor}>
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className="space-y-3">
                 <div className="flex justify-between">
-                  <span style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Address</span>
+                  <span style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Street</span>
                   {isEditingInfo ? (
                     <Input
                       value={infoForm.address}
@@ -911,13 +932,33 @@ export default function AdminUserDetails() {
                     <span style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', textAlign: 'left' }}>{profile.zip || "-"}</span>
                   )}
                 </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Kept as a panel rather than dropped, so the column the
+                  design gives it is accounted for rather than silently
+                  collapsing the row to two. */}
+              <div className="rounded-2xl border border-border p-5">
+                <h3 className="font-lufga mb-2" style={{ fontWeight: 500, fontSize: 20, color: "#000000" }}>
+                  Buying Profile &amp; Alerts
+                </h3>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  EX will notify you when new listings match your criteria.
+                </p>
+                <Button className="h-10 rounded-full bg-accent px-5 font-medium text-black hover:bg-accent/90" disabled>
+                  Coming Soon
+                </Button>
               </div>
             </div>
           </Card>
           )}
 
           {activeTab === "subscriptions" && (
-            <UserSubscriptionsPanel subscription={(profile as any)?.subscription ?? null} />
+            <UserSubscriptionsList
+              listings={(userListings as any[]) ?? []}
+              subscription={(profile as any)?.subscription ?? null}
+            />
           )}
 
           {/* How they pay lives under Billing, not on the overview. */}
@@ -1217,30 +1258,6 @@ export default function AdminUserDetails() {
             </div>
           </div>
 
-          {/* The full buying profile was taken out at the client's request.
-              The card stays as a placeholder so the space is accounted for
-              rather than silently disappearing from the layout. */}
-          <Card
-            className="p-6 bg-card border-border"
-            style={{
-              borderRadius: '20px',
-              background: '#FFFFFF',
-              boxShadow: '0px 3px 33px 0px #00000017',
-            }}
-          >
-            <h3
-              className="font-lufga mb-2"
-              style={{ fontWeight: 500, fontSize: '20px', lineHeight: '140%', color: '#000000' }}
-            >
-              Buying Profile &amp; Alerts
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              We will notify this user when new listings match their search criteria.
-            </p>
-            <span className="inline-flex rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-black">
-              Coming Soon
-            </span>
-          </Card>
             </>
           )}
 

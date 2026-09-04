@@ -2,7 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
-import { getChatListingImage, getChatListingTitle } from "@/lib/chatListing";
+import {
+  getChatListingDescription,
+  getChatListingImage,
+  getChatListingPrice,
+  getChatListingTitle,
+} from "@/lib/chatListing";
+import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 import { formatNumber } from "@/lib/formatNumber";
 
 /**
@@ -33,13 +39,38 @@ export const AccountSubscriptions = () => {
       const response = await apiClient.getSecureListings({ userId: user?.id, limit: 500 });
       const payload: any = response.data;
       const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
-      return rows.filter((row: any) => row?.userId === user?.id && row?.selectedPackage);
+      /*
+       * Paying, not merely having chosen.
+       *
+       * Every published listing carries a `selectedPackage`, so filtering on
+       * that put all of them on a page headed "Manage Your Subscriptions" —
+       * nine of eleven here sitting on MINIMUM, which costs nothing.
+       *
+       * `packageActive` alone is not the test either: the free package is
+       * switched on the moment it is picked, while a paid one only flips once
+       * Stripe confirms the payment. So both conditions, together.
+       */
+      return rows.filter(
+        (row: any) =>
+          row?.userId === user?.id &&
+          row?.selectedPackage &&
+          row.selectedPackage !== 'MINIMUM' &&
+          row.packageActive === true,
+      );
     },
     enabled: Boolean(user),
   });
 
   const planTitle = subscription?.plan?.title || subscription?.plan?.name || "Minimum";
   const planPrice = Number(subscription?.plan?.monthlyPrice ?? 0);
+  /**
+   * The free plan is not a subscription, so it does not belong on this page.
+   *
+   * The server marks it two ways — an `isFree` flag and a plan that costs
+   * nothing — and either is enough on its own; a member with no subscription
+   * row at all arrives as the free plan too.
+   */
+  const buyerPlanIsPaid = Boolean(subscription) && !subscription?.isFree && planPrice > 0;
 
   return (
     <div className="mt-6 rounded-2xl border border-[#E9EBF2] bg-white p-5">
@@ -51,33 +82,51 @@ export const AccountSubscriptions = () => {
       </h2>
 
       <div className="mt-4 flex flex-col gap-3">
-        {listings.map((listing: any) => (
-          <Row
-            key={listing.id}
-            image={getChatListingImage(listing)}
-            title={getChatListingTitle(listing) || "Your listing"}
-            description="Seller package for this listing. Manage the package or its add-ons."
-            badge={listing.packageActive ? "Active Subscription" : "Inactive"}
-            amount={`${String(listing.selectedPackage || "").toLowerCase()} package`}
-            onManage={() => navigate("/my-listings")}
-          />
-        ))}
+        {/* The listing as the member knows it — its own title, its own words,
+            its own price. This described the package instead: a sentence
+            written here rather than by the seller, and "minimum package" where
+            the asking price belongs. */}
+        {listings.map((listing: any) => {
+          const price = getChatListingPrice(listing);
+          const priceNumber = Number(String(price).replace(/[^0-9.\-]/g, ''));
 
-        <Row
-          title={`Buyer: ${planTitle} Plan`}
-          description="Manage your buyer subscription, change your billing cycle, or upgrade and downgrade your plan."
-          amount={planPrice > 0 ? `$${formatNumber(planPrice)} monthly` : "Free"}
-          onManage={() => navigate("/manage-subscription")}
-        />
+          return (
+            <Row
+              key={listing.id}
+              image={getChatListingImage(listing)}
+              title={getChatListingTitle(listing) || "Your listing"}
+              description={getChatListingDescription(listing)}
+              badge="Active Subscription"
+              amount={
+                Number.isFinite(priceNumber) && priceNumber > 0
+                  ? `${getListingCurrencySymbol(listing)}${formatNumber(priceNumber)}`
+                  : ""
+              }
+              onManage={() => navigate("/my-listings")}
+            />
+          );
+        })}
+
+        {buyerPlanIsPaid && (
+          <Row
+            title={`Buyer: ${planTitle} Plan`}
+            description="Manage your buyer subscription, change your billing cycle, or upgrade and downgrade your plan."
+            amount={`$${formatNumber(planPrice)} monthly`}
+            onManage={() => navigate("/manage-subscription")}
+          />
+        )}
       </div>
 
-      {listings.length === 0 && (
+      {/* Both halves can now be empty at once, and a heading with nothing
+          under it reads as a page that failed to load. */}
+      {listings.length === 0 && !buyerPlanIsPaid && (
         <p
           className="mt-4 mb-0 text-[12.5px] text-[#64748B]"
           style={{ fontFamily: 'Lufga' }}
         >
-          None of your listings carry a paid package yet. You choose one when you publish a
-          listing, and can change it from My Listings.
+          You have no active subscriptions. Seller packages are chosen when you publish a
+          listing and can be changed from My Listings; a buyer plan is chosen under Manage
+          Subscription.
         </p>
       )}
     </div>
@@ -126,18 +175,25 @@ const Row = ({
       >
         {title}
       </p>
-      <p
-        className="m-0 mt-0.5 text-[11.5px] leading-relaxed text-[#64748B]"
-        style={{ fontFamily: 'Lufga' }}
-      >
-        {description}
-      </p>
-      <p
-        className="m-0 mt-1 text-[13px] font-semibold text-[#0F172A]"
-        style={{ fontFamily: 'Lufga' }}
-      >
-        {amount}
-      </p>
+      {/* Both come off the seller's own answers now, and an answer can be
+          missing. An empty paragraph still takes its line and pushes the row
+          out of shape, so it is left out rather than rendered blank. */}
+      {description && (
+        <p
+          className="m-0 mt-0.5 line-clamp-2 text-[11.5px] leading-relaxed text-[#64748B]"
+          style={{ fontFamily: 'Lufga' }}
+        >
+          {description}
+        </p>
+      )}
+      {amount && (
+        <p
+          className="m-0 mt-1 text-[13px] font-semibold text-[#0F172A]"
+          style={{ fontFamily: 'Lufga' }}
+        >
+          {amount}
+        </p>
+      )}
     </div>
 
     <button

@@ -7,14 +7,29 @@
     <meta name="description" content="The most trusted marketplace for business acquisitions. Buy and sell companies securely with verified listings, escrow services, and seamless transactions." />
     <meta name="author" content="EX Marketplace" />
 
+    <!--
+      What a shared link looks like on WhatsApp, Facebook and the rest.
+
+      The image and the Twitter handle here were the starter template's, still
+      pointing at lovable.dev — so every listing anyone shared showed another
+      company's artwork and credited @Lovable. Better nothing than somebody
+      else's brand, so they are gone rather than guessed at.
+
+      To bring the picture back: put a 1200x630 image in `public/` and set
+      `og:image` to its full address, e.g.
+      https://your-domain.com/social-preview.png — crawlers do not reliably
+      follow a relative path. Add `twitter:site` when there is a handle, and
+      switch the card back to `summary_large_image`.
+
+      Note these are site-wide: every listing shares this one title and
+      description, because a crawler asking for /listing/123 receives this file
+      and nothing about that listing.
+    -->
     <meta property="og:title" content="EX - Buy & Sell Companies in 3 Simple Steps" />
     <meta property="og:description" content="The most trusted marketplace for business acquisitions. Discover verified company listings and complete deals securely." />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
 
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <meta name="twitter:card" content="summary" />
     
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="/favicon.png" />

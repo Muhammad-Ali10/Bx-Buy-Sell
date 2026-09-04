@@ -486,6 +486,17 @@ The owner sees this, so it saves a support ticket.`,
   const assignedMember = Array.isArray(teamMembers)
     ? teamMembers.find((m: any) => m.id === assignedFilter)
     : null;
+  /**
+   * Hold the place of a member the team list has not delivered yet.
+   *
+   * The filter can arrive already set to someone — the "Managed Listings" card
+   * opens this screen on that person — while the list is still being fetched.
+   * A Select whose value matches none of its options renders empty, so the
+   * panel would say nothing at all about what it is filtering by.
+   */
+  const teamMembersLoaded = Array.isArray(teamMembers);
+  const assignedFilterUnlisted =
+    assignedFilter !== "all" && assignedFilter !== "none" && !assignedMember;
   const assignedFilterLabel = assignedFilter === "none"
     ? "Not assigned"
     : (assignedMember?.full_name || assignedMember?.email || "Team member");
@@ -634,7 +645,12 @@ The owner sees this, so it saves a support ticket.`,
                         <SelectContent className="bg-background border-border">
                           <SelectItem value="all">Anyone</SelectItem>
                           <SelectItem value="none">Not assigned</SelectItem>
-                          {Array.isArray(teamMembers) && teamMembers.map((member: any) => (
+                          {assignedFilterUnlisted && (
+                            <SelectItem value={assignedFilter}>
+                              {teamMembersLoaded ? "Selected team member" : "Loading…"}
+                            </SelectItem>
+                          )}
+                          {teamMembersLoaded && teamMembers.map((member: any) => (
                             <SelectItem key={member.id} value={member.id}>
                               {member.full_name || member.email}
                             </SelectItem>

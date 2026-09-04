@@ -10,6 +10,42 @@ import { useAccountQuestions } from "@/hooks/useAccountQuestions";
 import { Facebook, Instagram, Twitter, Music, Pin, Linkedin, Youtube } from "lucide-react";
 import { toast } from "sonner";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
+import { isQuestionRequired } from "@/lib/questionRequired";
+import { sanitizeIntegerInput, sanitizeNumberInput } from "@/lib/numberInput";
+
+/**
+ * The platforms this step asks about, in the spelling each of them uses.
+ *
+ * Two things were wrong without this. Every URL question offered the same
+ * example — "https://instagram.com/yourname" — so the Twitter and TikTok
+ * fields both told the seller to enter an Instagram address. And the labels
+ * come from rows an admin typed, so one of them reads "instagram" beside a
+ * correctly capitalised "TikTok"; CSS `capitalize` cannot fix that pair, since
+ * it would turn TikTok into Tiktok.
+ */
+const PLATFORMS: { match: string; label: string; example: string }[] = [
+  { match: "instagram", label: "Instagram", example: "https://instagram.com/yourname" },
+  { match: "facebook", label: "Facebook", example: "https://facebook.com/yourpage" },
+  { match: "tiktok", label: "TikTok", example: "https://tiktok.com/@yourname" },
+  { match: "twitter", label: "Twitter", example: "https://twitter.com/yourname" },
+  { match: "youtube", label: "YouTube", example: "https://youtube.com/@yourchannel" },
+  { match: "linkedin", label: "LinkedIn", example: "https://linkedin.com/company/yourcompany" },
+  { match: "pinterest", label: "Pinterest", example: "https://pinterest.com/yourname" },
+  { match: "amazon", label: "Amazon", example: "https://amazon.com/shops/yourstore" },
+  { match: "snapchat", label: "Snapchat", example: "https://snapchat.com/add/yourname" },
+];
+
+const platformFor = (text: string) => {
+  const lower = (text || "").toLowerCase();
+  return PLATFORMS.find((platform) => lower.includes(platform.match)) || null;
+};
+
+/** The platform's own spelling where we know it, otherwise what the admin wrote. */
+const questionLabel = (text: string) => platformFor(text)?.label ?? text;
+
+/** An example for this platform, or a neutral one when it is not a platform. */
+const urlPlaceholder = (text: string) =>
+  platformFor(text)?.example ?? "https://example.com/yourname";
 
 interface AccountsStepProps {
   formData?: any;
@@ -64,7 +100,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
 
     // Required account questions (admin-marked) must be answered.
     questions.forEach((question: any) => {
-      if (question?.required === true) {
+      if (isQuestionRequired(question)) {
         const ans = questionAnswers[question.id];
         const empty =
           !ans ||
@@ -150,7 +186,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
             inputMode="url"
             value={value}
             onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
-            placeholder="https://instagram.com/yourname"
+            placeholder={urlPlaceholder(question.question)}
             className="bg-muted/50"
           />
         );
@@ -168,9 +204,15 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
       case "NUMBER":
         return (
           <Input
-            type="number"
+            type="text"
+            inputMode="decimal"
             value={value}
-            onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
+            onChange={(e) =>
+              setQuestionAnswers({
+                ...questionAnswers,
+                [question.id]: sanitizeNumberInput(e.target.value),
+              })
+            }
             placeholder="Enter a number"
             className="bg-muted/50"
           />
@@ -284,7 +326,8 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
       ...prev,
       [platform]: {
         ...prev[platform],
-        followers: value
+        // A follower count is a whole number; nothing else belongs in it.
+        followers: sanitizeIntegerInput(value)
       }
     }));
   };
@@ -331,7 +374,8 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
                   <div className="space-y-2">
                     <Label className="text-sm text-muted-foreground">Followers</Label>
                     <Input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
                       value={formData[account.platform]?.followers || ""}
                       onChange={(e) => handleFollowersChange(account.platform, e.target.value)}
                       placeholder="1000"
@@ -353,7 +397,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
             {questions.map((question: any) => (
               <div key={question.id} className="space-y-2">
                 <Label className="text-base font-semibold">
-                  {question.question}
+                  {questionLabel(question.question)}
                 </Label>
                 {renderQuestionField(question)}
               </div>
