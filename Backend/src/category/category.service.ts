@@ -30,27 +30,43 @@ export class CategoryService {
    * matches on that name — so the name is what gets counted and returned.
    */
   async getTrending(limit = 4) {
-    const rows = await this.prisma.listingCategory.findMany({
-      where: {
-        listing: {
-          status: 'PUBLISH',
-          ...notDeleted(),
+    const [rows, categories] = await Promise.all([
+      this.prisma.listingCategory.findMany({
+        where: {
+          listing: {
+            status: 'PUBLISH',
+            ...notDeleted(),
+          },
         },
-      },
-      select: { name: true },
-    });
+        select: { name: true },
+      }),
+      this.prisma.category.findMany({ select: { name: true } }),
+    ]);
+
+    /**
+     * Only a name an administrator has put on the category list may trend.
+     *
+     * Counting alone is not enough. Sellers type this field, so it holds
+     * whatever they typed — "naeeem bhai" sat on three published listings,
+     * level with Fashion and Tech, and a fourth would have carried someone's
+     * note onto the home page with nobody the wiser. Named patterns cannot
+     * catch that; only asking what the category list actually contains can.
+     *
+     * The rubbish check stays, on this side of the comparison: the list has
+     * collected "string" and "undefined" rows of its own over time.
+     */
+    const allowed = new Set(
+      categories
+        .map((category) => String(category.name || '').trim())
+        .filter((name) => name && !/^(undefined|string|null)$/i.test(name)),
+    );
 
     const counts = new Map<string, number>();
     for (const row of rows) {
+      // Matched exactly, because the listings filter compares exactly too — a
+      // topic that differed by so much as a capital would open an empty page.
       const name = String(row.name || '').trim();
-      // The same rubbish the category list has picked up over time; a topic
-      // called "undefined" on the home page would be worse than none at all.
-      if (!name || /^(undefined|string|null)$/i.test(name)) continue;
-      // Some listings stored the category's id instead of its name. Until that
-      // data is cleaned up, a raw uuid must never surface as a topic.
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name)) {
-        continue;
-      }
+      if (!allowed.has(name)) continue;
       counts.set(name, (counts.get(name) ?? 0) + 1);
     }
 

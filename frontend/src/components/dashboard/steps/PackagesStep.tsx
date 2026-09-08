@@ -43,6 +43,7 @@ import {
   type PackageSelection,
 } from "@/lib/packagePricing";
 import { useBrandQuestions } from "@/hooks/useBrandQuestions";
+import { useListingCategoryId } from "@/hooks/useListingCategoryId";
 import { useStatisticQuestions } from "@/hooks/useStatisticQuestions";
 import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
@@ -65,6 +66,15 @@ interface PackagesStepProps {
   resumePublishNonce?: number;
   /** After a successful save, where to send the user (edit flow defaults to listing detail via parent). */
   afterSuccessRedirect?: "my-listings" | "listing-detail";
+  /**
+   * Open a particular step.
+   *
+   * Publishing is the first time the server sees the whole listing, so a field
+   * it refuses is a field several steps back. The seller was told on this page
+   * that a domain was wrong and left here, with no way to tell which of the
+   * eleven steps to reopen.
+   */
+  onGoToStep?: (step: string) => void;
 }
 
 export const PackagesStep = ({
@@ -76,6 +86,7 @@ export const PackagesStep = ({
   onGuestAuthOpenChange,
   resumePublishNonce = 0,
   afterSuccessRedirect = "my-listings",
+  onGoToStep,
 }: PackagesStepProps) => {
   const [selectedPackage, setSelectedPackage] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -105,14 +116,16 @@ export const PackagesStep = ({
   const [termsOpen, setTermsOpen] = useState(false);
 
   const { data: plans, isLoading: plansLoading } = usePlans();
-  const { data: brandQuestions } = useBrandQuestions();
-  const { data: statisticQuestions } = useStatisticQuestions();
-  const { data: productQuestions } = useProductQuestions();
-  const { data: managementQuestions } = useManagementQuestions();
-  const { data: adQuestions } = useAdInformationQuestions();
-  const { data: handoverQuestions } = useHandoverQuestions();
+  // The seller is asked their own category's questions, not everybody's.
+  const categoryId = useListingCategoryId(formData);
+  const { data: brandQuestions } = useBrandQuestions(categoryId);
+  const { data: statisticQuestions } = useStatisticQuestions(categoryId);
+  const { data: productQuestions } = useProductQuestions(categoryId);
+  const { data: managementQuestions } = useManagementQuestions(categoryId);
+  const { data: adQuestions } = useAdInformationQuestions(categoryId);
+  const { data: handoverQuestions } = useHandoverQuestions(categoryId);
   const { data: socialAccounts } = useAccounts();
-  const { data: accountQuestions } = useAccountQuestions();
+  const { data: accountQuestions } = useAccountQuestions(categoryId);
 
   // Mirrors handleSubmit, which returns the saved listing id for the checkout flow.
   const handleSubmitRef = useRef<
@@ -536,15 +549,16 @@ export const PackagesStep = ({
         console.error(`Failed to ${listingId ? 'update' : 'create'} listing:`, response.error);
         const errorMessage = response.error || "Failed to create listing";
         toast.error(errorMessage);
-        
-        // If it's a validation error, show more details
-        if (typeof errorMessage === 'string' && errorMessage.includes('_errors')) {
-          try {
-            const errorObj = JSON.parse(errorMessage);
-            console.error("Validation errors:", errorObj);
-          } catch (e) {
-            // Not JSON, just show the error as is
-          }
+
+        /*
+         * Take the seller to the field, not just to the complaint.
+         *
+         * The domain lives on Brand Information, nine steps back from here, and
+         * being told about it on the last page with no way to reach it is how a
+         * listing gets abandoned.
+         */
+        if (typeof errorMessage === "string" && /valid domain/i.test(errorMessage)) {
+          onGoToStep?.("brand-information");
         }
       }
     } catch (error) {

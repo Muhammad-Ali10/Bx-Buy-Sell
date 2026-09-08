@@ -15,6 +15,10 @@ interface ManagementQuestion {
   answer_type: string;
   option?: string[];
   required?: boolean | null;
+  /** Help for the seller, shown under the field while the listing is written. */
+  hint?: string | null;
+  /** Help for the buyer, shown as the ⓘ beside this figure on the ad. */
+  publicHint?: string | null;
 }
 
 interface EditManagementQuestionDialogProps {
@@ -36,6 +40,7 @@ const QUESTION_TYPES = [
 export const EditManagementQuestionDialog = ({ open, onOpenChange, question }: EditManagementQuestionDialogProps) => {
   const [questionText, setQuestionText] = useState("");
   const [hintText, setHintText] = useState("");
+  const [publicHint, setPublicHint] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
   const [required, setRequired] = useState(true);
@@ -47,6 +52,8 @@ export const EditManagementQuestionDialog = ({ open, onOpenChange, question }: E
       setQuestionType(question.answer_type);
       setOptions(question.option && Array.isArray(question.option) ? question.option.join(", ") : "");
       setRequired(question.required !== false);
+      setHintText(question.hint || "");
+      setPublicHint(question.publicHint || "");
     }
   }, [question]);
 
@@ -67,6 +74,8 @@ export const EditManagementQuestionDialog = ({ open, onOpenChange, question }: E
         answer_type: questionType,
         options: optionsArray,
         required,
+        hint: hintText.trim(),
+        publicHint: publicHint.trim(),
       },
       {
         onSuccess: () => {
@@ -103,11 +112,20 @@ export const EditManagementQuestionDialog = ({ open, onOpenChange, question }: E
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-black">Hint Text Field</Label>
+            <Label className="text-sm font-medium text-black">Create Listing Text Hint</Label>
             <Textarea
               value={hintText}
               onChange={(e) => setHintText(e.target.value)}
               placeholder="Enter hint text to help users understand this question..."
+              className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-black">Public Text Hint</Label>
+            <Textarea
+              value={publicHint}
+              onChange={(e) => setPublicHint(e.target.value)}
+              placeholder="Shown to buyers beside this figure on the published ad."
               className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
             />
           </div>

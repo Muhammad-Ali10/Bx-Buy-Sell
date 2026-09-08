@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, useEffect, useRef, useCallback } from "react"
 import { toast } from "sonner";
 import {
   cacheAdminFinancialsTemplate,
+  calculateNetProfitForColumn,
   fetchAdminFinancialsTemplate,
   notifyAdminFinancialsTemplateUpdated,
   parseFinancialAdminApiRecord,
@@ -9,6 +10,7 @@ import {
   GROSS_REVENUE_ROW,
   REVENUE_ROW,
   type AdminFinancialsTemplate,
+  displayColumnLabel,
 } from "@/lib/financialTableUtils";
 import { apiClient } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -19,6 +21,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Search, Pencil, Trash2, MoreVertical, Facebook, Instagram, Twitter, Music, Pin, Linkedin, Youtube } from "lucide-react";
 import {
   DropdownMenu,
@@ -28,6 +37,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
 import { useCategories } from "@/hooks/useCategories";
+import { useReorderQuestions } from "@/hooks/useReorderQuestions";
+import {
+  SortableQuestionList,
+  SortableQuestionRow,
+} from "@/components/admin/content/SortableQuestionList";
 import { useBrandQuestions } from "@/hooks/useBrandQuestions";
 import { useStatisticQuestions } from "@/hooks/useStatisticQuestions";
 import { useProductQuestions } from "@/hooks/useProductQuestions";
@@ -157,6 +171,21 @@ const syncFinancialGrid = (
   return synced;
 };
 
+/**
+ * The tabs whose contents belong to one category.
+ *
+ * Tools, Financials, the social platform list and Plans are the marketplace's
+ * own settings — they are the same whatever a seller sells — so the category
+ * picker has nothing to say about them and does not appear there.
+ */
+const QUESTION_TABS = [
+  'brand-info',
+  'additional-infos',
+  'accounts',
+  'ad-informations',
+  'handover',
+];
+
 const AdminContentManagement = () => {
   const { user } = useAuth();
   const getTypeLabel = (type: string) => {
@@ -246,7 +275,6 @@ const AdminContentManagement = () => {
   // Financials table state
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingRowLabel, setEditingRowLabel] = useState<string | null>(null);
-  const [editingColLabel, setEditingColLabel] = useState<string | null>(null);
   const [rowLabels, setRowLabels] = useState<string[]>([
     REVENUE_ROW,
     "Net Revenue",
@@ -363,7 +391,6 @@ const AdminContentManagement = () => {
         toast.success("Financial table saved");
       }
       setEditingRowLabel(null);
-      setEditingColLabel(null);
     }
     setIsEditMode(!isEditMode);
   };
@@ -408,52 +435,14 @@ const AdminContentManagement = () => {
     }
   };
 
-  // Handle column label edit (label only — keep stable column key for data)
-  const handleColLabelEdit = (colKey: string, newLabel: string) => {
-    const trimmed = newLabel.trim();
-    const targetCol = columnLabels.find((col) => col.key === colKey);
-    if (!trimmed || !targetCol) {
-      setEditingColLabel(null);
-      return;
-    }
-    if (
-      columnLabels.some(
-        (col) => col.key !== colKey && col.label.toLowerCase() === trimmed.toLowerCase(),
-      )
-    ) {
-      toast.error("A column with this name already exists");
-      setEditingColLabel(null);
-      return;
-    }
-
-    setColumnLabels((prev) =>
-      prev.map((col) =>
-        col.key === colKey ? { ...col, label: trimmed, labelCustomized: true } : col,
-      ),
-    );
-    setEditingColLabel(null);
-  };
-
-  // Handle column delete
-  const handleColDelete = (colKey: string) => {
-    if (columnLabels.length <= 1 || columnLabels.find((col) => col.key === colKey)?.isToday) {
-      return;
-    }
-    const nextCols = columnLabels.filter((col) => col.key !== colKey);
-    setColumnLabels(nextCols);
-    setFinancialData((prev) => {
-      const newData: Record<string, Record<string, string>> = {};
-      Object.keys(prev).forEach((rowKey) => {
-        newData[rowKey] = { ...prev[rowKey] };
-        delete newData[rowKey][colKey];
-      });
-      return syncFinancialGrid(rowLabels, nextCols, newData);
-    });
-    if (editingColLabel === colKey) {
-      setEditingColLabel(null);
-    }
-  };
-
+  /*
+   * The columns are not the admin's to name or remove.
+   *
+   * A heading here is the calendar year its figures belong to, worked out from
+   * the listing itself. Renaming one used to be allowed, and a template whose
+   * headings had been shifted a year is what put the sellers' figures under
+   * the wrong years in the first place. The template still supplies the rows.
+   */
   // Handle add new row
   const handleAddRow = () => {
     if (!isEditMode) return;
@@ -475,27 +464,64 @@ const AdminContentManagement = () => {
     );
   };
 
-  // Handle add new column
-  const handleAddColumn = () => {
-    if (!isEditMode) return;
-
-    const newColKey = `col-${Date.now()}`;
-    const newColLabel = `Column ${columnLabels.length + 1}`;
-    const nextCols = [...columnLabels, { key: newColKey, label: newColLabel }];
-    setColumnLabels(nextCols);
-    setFinancialData((prev) => syncFinancialGrid(rowLabels, nextCols, prev));
-  };
   
   const { data: categories, isLoading, error: categoriesError } = useCategories({ nocache: true });
-  const { data: brandQuestions, isLoading: questionsLoading, error: brandQuestionsError } = useBrandQuestions();
-  const { data: statisticQuestions, isLoading: statisticQuestionsLoading, error: statisticQuestionsError } = useStatisticQuestions();
-  const { data: productQuestions, isLoading: productQuestionsLoading, error: productQuestionsError } = useProductQuestions();
-  const { data: managementQuestions, isLoading: managementQuestionsLoading, error: managementQuestionsError } = useManagementQuestions();
-  const { data: adInformationQuestions, isLoading: adInformationQuestionsLoading, error: adInformationQuestionsError } = useAdInformationQuestions();
-  const { data: handoverQuestions, isLoading: handoverQuestionsLoading, error: handoverQuestionsError } = useHandoverQuestions();
+
+  /**
+   * The category whose questions are on screen.
+   *
+   * There used to be one set of questions for the whole marketplace, so an
+   * e-commerce seller and a plumber were asked the same things. Each category
+   * now owns its set, and this is the one being edited — every question list
+   * below, and every dialog that adds to one, is about this category and no
+   * other.
+   */
+  const [questionCategoryId, setQuestionCategoryId] = useState<string>("");
+
+  /*
+   * Saving a step's order, one hook per list.
+   *
+   * Each is given the query key of the list it arranges, so the list re-reads
+   * itself once the order is in — and puts itself back where it was if the
+   * save fails.
+   */
+  /**
+   * The name of the category on screen.
+   *
+   * The picker sits at the top and scrolls away, so an administrator arranging
+   * a list halfway down the page had no way of telling which category they
+   * were arranging — the panel opens on the first one, and changes made there
+   * do not show up for a seller who picked any other. Every heading says which
+   * category it is about.
+   */
+  const questionCategoryName =
+    (Array.isArray(categories) ? (categories as any[]) : []).find(
+      (category) => String(category?.id) === questionCategoryId,
+    )?.name ?? "";
+
+  const reorderBrand = useReorderQuestions(["brand-questions"]);
+  const reorderStatistic = useReorderQuestions(["statistic-questions"]);
+  const reorderProduct = useReorderQuestions(["product-questions"]);
+  const reorderManagement = useReorderQuestions(["management-questions"]);
+  const reorderAccount = useReorderQuestions(["account-questions"]);
+  const reorderAdInformation = useReorderQuestions(["ad-information-questions"]);
+
+  // Land on the first category rather than on nothing, so the screen opens
+  // with something to look at instead of an empty prompt.
+  useEffect(() => {
+    if (!questionCategoryId && Array.isArray(categories) && categories.length) {
+      setQuestionCategoryId(String((categories[0] as any).id));
+    }
+  }, [categories, questionCategoryId]);
+  const { data: brandQuestions, isLoading: questionsLoading, error: brandQuestionsError } = useBrandQuestions(questionCategoryId || undefined);
+  const { data: statisticQuestions, isLoading: statisticQuestionsLoading, error: statisticQuestionsError } = useStatisticQuestions(questionCategoryId || undefined);
+  const { data: productQuestions, isLoading: productQuestionsLoading, error: productQuestionsError } = useProductQuestions(questionCategoryId || undefined);
+  const { data: managementQuestions, isLoading: managementQuestionsLoading, error: managementQuestionsError } = useManagementQuestions(questionCategoryId || undefined);
+  const { data: adInformationQuestions, isLoading: adInformationQuestionsLoading, error: adInformationQuestionsError } = useAdInformationQuestions(questionCategoryId || undefined);
+  const { data: handoverQuestions, isLoading: handoverQuestionsLoading, error: handoverQuestionsError } = useHandoverQuestions(questionCategoryId || undefined);
   const { data: tools, isLoading: toolsLoading, error: toolsError } = useTools();
   const { data: accounts, isLoading: accountsLoading, error: accountsError } = useAccounts();
-  const { data: accountQuestions, isLoading: accountQuestionsLoading, error: accountQuestionsError } = useAccountQuestions();
+  const { data: accountQuestions, isLoading: accountQuestionsLoading, error: accountQuestionsError } = useAccountQuestions(questionCategoryId || undefined);
   const { data: plans, isLoading: plansLoading, error: plansError } = usePlans();
   const location = useLocation();
   const navigate = useNavigate();
@@ -553,7 +579,42 @@ const AdminContentManagement = () => {
 
         <div className="p-8 space-y-6">
           <h1 className="text-2xl font-bold text-white mb-6">Content Management</h1>
-            
+
+            {/* Which category's questions are being edited.
+                Sits above the tab rather than inside each one, because the same
+                choice governs Brand Information, Additional Infos, Account
+                Questions, Ad Informations and Handovers alike — a picker
+                repeated five times would read as five separate settings. */}
+            {QUESTION_TABS.includes(activeTab) && (
+              <div className="mb-6 rounded-2xl border border-border bg-card p-4 sm:p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold text-foreground">Questions for</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Every question on this tab belongs to the category chosen
+                      here. Sellers are asked only the questions of the category
+                      they pick.
+                    </p>
+                  </div>
+                  <Select
+                    value={questionCategoryId}
+                    onValueChange={setQuestionCategoryId}
+                  >
+                    <SelectTrigger className="w-full sm:w-[280px]">
+                      <SelectValue placeholder="Select a category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Array.isArray(categories) ? categories : []).map((category: any) => (
+                        <SelectItem key={category.id} value={String(category.id)}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
             {/* Category Section */}
             {activeTab === 'category' && (
               <div className="space-y-6 animate-fade-in">
@@ -712,7 +773,14 @@ const AdminContentManagement = () => {
                 </div>
 
                 <div className="bg-card rounded-2xl p-4 sm:p-6 lg:p-8 border border-border">
-                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">Added Brand Information Questions</h3>
+                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">
+                    Added Brand Information Questions
+                    {questionCategoryName && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        — {questionCategoryName}
+                      </span>
+                    )}
+                  </h3>
                   
                   {questionsLoading ? (
                     <div className="text-muted-foreground text-sm sm:text-base">Loading questions...</div>
@@ -723,11 +791,17 @@ const AdminContentManagement = () => {
                     </div>
                   ) : brandQuestions && Array.isArray(brandQuestions) && brandQuestions.length > 0 ? (
                     <div className="space-y-3 sm:space-y-4">
-                      {brandQuestions.map((question: any) => {
+                      <SortableQuestionList
+                        items={brandQuestions}
+                        onReorder={(ordered) =>
+                          reorderBrand.mutate(ordered.map((q, index) => ({ id: q.id, position: index })))
+                        }
+                      >
+                        {brandQuestions.map((question: any) => {
                         return (
+                        <SortableQuestionRow key={question.id} id={question.id}>
                         <div
-                          key={question.id}
-                          className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4"
+                                                    className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4"
                         >
                           <div className="flex-1 min-w-0">
                             <h4 className="text-black font-semibold text-base sm:text-lg mb-1 break-words">{question.question}</h4>
@@ -757,8 +831,10 @@ const AdminContentManagement = () => {
                             </Button>
                           </div>
                         </div>
+                        </SortableQuestionRow>
                         );
                       })}
+                      </SortableQuestionList>
                     </div>
                   ) : (
                     <div className="text-muted-foreground text-center py-8 sm:py-12 text-sm sm:text-base">
@@ -925,19 +1001,13 @@ const AdminContentManagement = () => {
                 }));
               };
 
-              const calculateNetProfit = (col: string) => {
-                let total = 0;
-                rows.forEach(row => {
-                  const value = parseFloat(financialData[row]?.[col] || "0");
-                  // Check if row is a revenue row (contains "Revenue" in name)
-                  if (row.toLowerCase().includes("revenue")) {
-                    total += value;
-                  } else {
-                    total -= value;
-                  }
-                });
-                return total.toFixed(2);
-              };
+              // Shared with the seller's form and the listing page, so the
+              // template previews the same arithmetic the other two run.
+              const calculateNetProfit = (col: string) =>
+                calculateNetProfitForColumn(
+                  { financialData, rowLabels: rows },
+                  col,
+                ).toFixed(2);
 
               const columnWidth = isMobile ? 130 : isTablet ? 150 : 180;
 
@@ -1000,91 +1070,36 @@ const AdminContentManagement = () => {
                           Timeframe
                         </span>
                       </div>
+                      {/* Headings are the calendar's, not the administrator's.
+                          They were editable, and renaming one changed the
+                          label while the figures stayed filed under the old
+                          key — which is how a seller's 2024 column came to be
+                          stored as 2023 and its figures were lost. The four
+                          columns are derived from the year now, so there is
+                          nothing here to rename, delete or add. */}
                       {columns.map((col) => (
-                        <div 
+                        <div
                           key={col.key}
-                          className="flex items-center justify-center relative group"
+                          className="flex items-center justify-center relative"
                           style={{
                             width: `${columnWidth}px`,
                             height: '100%',
                             border: isMobile ? '1.5px solid rgba(255, 255, 255, 1)' : '2.66px solid rgba(255, 255, 255, 1)',
                           }}
                         >
-                          {editingColLabel === col.key ? (
-                            <Input
-                              defaultValue={col.label}
-                              onBlur={(e) => handleColLabelEdit(col.key, e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  handleColLabelEdit(col.key, e.currentTarget.value);
-                                } else if (e.key === 'Escape') {
-                                  setEditingColLabel(null);
-                                }
-                              }}
-                              autoFocus
-                              className="w-full text-center font-lufga text-black bg-transparent border-2 border-black/30 px-1"
-                              style={{
-                                fontWeight: 700,
-                                fontSize: isMobile ? '12px' : isTablet ? '14px' : '16px',
-                              }}
-                            />
-                          ) : (
-                            <>
-                              <span 
-                                className="font-lufga text-black cursor-pointer text-center px-1"
-                                style={{
-                                  fontWeight: 700,
-                                  fontSize: isMobile ? '12px' : isTablet ? '14px' : '16px',
-                                  lineHeight: '100%',
-                                  letterSpacing: '0%',
-                                }}
-                                onDoubleClick={() => isEditMode && setEditingColLabel(col.key)}
-                              >
-                                {col.label}
-                              </span>
-                              {isEditMode && (
-                                <div className="absolute top-1 right-1 flex gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => setEditingColLabel(col.key)}
-                                    className="h-6 w-6 p-0 text-black hover:bg-black/20"
-                                  >
-                                    <Pencil className="h-3 w-3" />
-                                  </Button>
-                                  {!col.isToday && (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => handleColDelete(col.key)}
-                                      className="h-6 w-6 p-0 text-red-600 hover:bg-red-600/20"
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  )}
-                                </div>
-                              )}
-                            </>
-                          )}
+                          <span
+                            className="font-lufga text-black text-center px-1"
+                            style={{
+                              fontWeight: 700,
+                              fontSize: isMobile ? '12px' : isTablet ? '14px' : '16px',
+                              lineHeight: '100%',
+                              letterSpacing: '0%',
+                            }}
+                          >
+                            {displayColumnLabel(col)}
+                          </span>
                         </div>
                       ))}
-                      {isEditMode && (
-                        <div 
-                          className="flex items-center justify-center"
-                          style={{
-                            width: `${columnWidth}px`,
-                            height: '100%',
-                            border: isMobile ? '1.5px solid rgba(255, 255, 255, 1)' : '2.66px solid rgba(255, 255, 255, 1)',
-                          }}
-                        >
-                          <Button
-                            onClick={handleAddColumn}
-                            className="bg-accent hover:bg-accent/90 text-black font-semibold h-6 sm:h-8 px-2 sm:px-4 text-xs sm:text-sm"
-                          >
-                            + Add
-                          </Button>
-                        </div>
-                      )}
                     </div>
 
                     {/* Data Rows */}
@@ -1386,16 +1401,29 @@ const AdminContentManagement = () => {
                       </div>
 
                       <div className="bg-card rounded-2xl p-4 sm:p-6 lg:p-8 border border-border">
-                        <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">Added Statistic Questions</h3>
+                        <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">
+                    Added Statistic Questions
+                    {questionCategoryName && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        — {questionCategoryName}
+                      </span>
+                    )}
+                  </h3>
                         
                         {statisticQuestionsLoading ? (
                           <div className="text-muted-foreground text-sm sm:text-base">Loading questions...</div>
                         ) : statisticQuestions && Array.isArray(statisticQuestions) && statisticQuestions.length > 0 ? (
                           <div className="space-y-3 sm:space-y-4">
-                            {statisticQuestions.map((question: any) => (
+                            <SortableQuestionList
+                              items={statisticQuestions}
+                              onReorder={(ordered) =>
+                                reorderStatistic.mutate(ordered.map((q, index) => ({ id: q.id, position: index })))
+                              }
+                            >
+                              {statisticQuestions.map((question: any) => (
+                              <SortableQuestionRow key={question.id} id={question.id}>
                               <div
-                                key={question.id}
-                                className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4"
+                                                                className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4"
                               >
                                 <div className="flex-1 min-w-0">
                                   <h4 className="text-black font-semibold text-base sm:text-lg mb-1 break-words">{question.question}</h4>
@@ -1425,7 +1453,9 @@ const AdminContentManagement = () => {
                                   </Button>
                                 </div>
                               </div>
+                              </SortableQuestionRow>
                             ))}
+                            </SortableQuestionList>
                           </div>
                         ) : (
                           <div className="text-muted-foreground text-center py-8 sm:py-12 text-sm sm:text-base">
@@ -1448,16 +1478,29 @@ const AdminContentManagement = () => {
                       </div>
 
                       <div className="bg-card rounded-2xl p-4 sm:p-6 lg:p-8 border border-border">
-                        <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">Added Product Questions</h3>
+                        <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">
+                    Added Product Questions
+                    {questionCategoryName && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        — {questionCategoryName}
+                      </span>
+                    )}
+                  </h3>
                         
                         {productQuestionsLoading ? (
                           <div className="text-muted-foreground text-sm sm:text-base">Loading questions...</div>
                         ) : productQuestions && Array.isArray(productQuestions) && productQuestions.length > 0 ? (
                           <div className="space-y-3 sm:space-y-4">
-                            {productQuestions.map((question: any) => (
+                            <SortableQuestionList
+                              items={productQuestions}
+                              onReorder={(ordered) =>
+                                reorderProduct.mutate(ordered.map((q, index) => ({ id: q.id, position: index })))
+                              }
+                            >
+                              {productQuestions.map((question: any) => (
+                              <SortableQuestionRow key={question.id} id={question.id}>
                               <div
-                                key={question.id}
-                                className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4"
+                                                                className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4"
                               >
                                 <div className="flex-1 min-w-0">
                                   <h4 className="text-black font-semibold text-base sm:text-lg mb-1 break-words">{question.question}</h4>
@@ -1487,7 +1530,9 @@ const AdminContentManagement = () => {
                                   </Button>
                                 </div>
                               </div>
+                              </SortableQuestionRow>
                             ))}
+                            </SortableQuestionList>
                           </div>
                         ) : (
                           <div className="text-muted-foreground text-center py-8 sm:py-12 text-sm sm:text-base">
@@ -1510,16 +1555,29 @@ const AdminContentManagement = () => {
                       </div>
 
                       <div className="bg-card rounded-2xl p-4 sm:p-6 lg:p-8 border border-border">
-                        <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">Added Management Questions</h3>
+                        <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">
+                    Added Management Questions
+                    {questionCategoryName && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        — {questionCategoryName}
+                      </span>
+                    )}
+                  </h3>
                         
                         {managementQuestionsLoading ? (
                           <div className="text-muted-foreground text-sm sm:text-base">Loading questions...</div>
                         ) : managementQuestions && Array.isArray(managementQuestions) && managementQuestions.length > 0 ? (
                           <div className="space-y-3 sm:space-y-4">
-                            {managementQuestions.map((question: any) => (
+                            <SortableQuestionList
+                              items={managementQuestions}
+                              onReorder={(ordered) =>
+                                reorderManagement.mutate(ordered.map((q, index) => ({ id: q.id, position: index })))
+                              }
+                            >
+                              {managementQuestions.map((question: any) => (
+                              <SortableQuestionRow key={question.id} id={question.id}>
                               <div
-                                key={question.id}
-                                className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4"
+                                                                className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4"
                               >
                                 <div className="flex-1 min-w-0">
                                   <h4 className="text-black font-semibold text-base sm:text-lg mb-1 break-words">{question.question}</h4>
@@ -1549,7 +1607,9 @@ const AdminContentManagement = () => {
                                   </Button>
                                 </div>
                               </div>
+                              </SortableQuestionRow>
                             ))}
+                            </SortableQuestionList>
                           </div>
                         ) : (
                           <div className="text-muted-foreground text-center py-8 sm:py-12 text-sm sm:text-base">
@@ -1653,7 +1713,14 @@ const AdminContentManagement = () => {
                 </div>
 
                 <div className="bg-card rounded-2xl p-4 sm:p-6 lg:p-8 border border-border">
-                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">Added Account Questions</h3>
+                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">
+                    Added Account Questions
+                    {questionCategoryName && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        — {questionCategoryName}
+                      </span>
+                    )}
+                  </h3>
                   
                   {accountQuestionsLoading ? (
                     <div className="text-muted-foreground text-sm sm:text-base">Loading questions...</div>
@@ -1664,11 +1731,17 @@ const AdminContentManagement = () => {
                     </div>
                   ) : accountQuestions && accountQuestions.length > 0 ? (
                     <div className="space-y-3 sm:space-y-4">
-                      {accountQuestions.map((question: any) => {
+                      <SortableQuestionList
+                        items={accountQuestions}
+                        onReorder={(ordered) =>
+                          reorderAccount.mutate(ordered.map((q, index) => ({ id: q.id, position: index })))
+                        }
+                      >
+                        {accountQuestions.map((question: any) => {
                         return (
+                          <SortableQuestionRow key={question.id} id={question.id}>
                           <div
-                            key={question.id}
-                            className="bg-white rounded-xl p-4 sm:p-6 border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 hover:border-accent/50 transition-colors"
+                                                        className="bg-white rounded-xl p-4 sm:p-6 border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 hover:border-accent/50 transition-colors"
                           >
                             <div className="flex-1 min-w-0">
                               <h4 className="text-sm sm:text-base font-medium text-foreground break-words">
@@ -1702,8 +1775,10 @@ const AdminContentManagement = () => {
                               </div>
                             </div>
                           </div>
+                          </SortableQuestionRow>
                         );
                       })}
+                      </SortableQuestionList>
                     </div>
                   ) : (
                     <div className="text-center py-8 sm:py-12 text-muted-foreground text-sm sm:text-base">
@@ -1728,7 +1803,14 @@ const AdminContentManagement = () => {
                 </div>
 
                 <div className="bg-card rounded-2xl p-4 sm:p-6 lg:p-8 border border-border">
-                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">Added Ad Information Questions</h3>
+                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">
+                    Added Ad Information Questions
+                    {questionCategoryName && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        — {questionCategoryName}
+                      </span>
+                    )}
+                  </h3>
                   
                   {adInformationQuestionsLoading ? (
                     <div className="text-muted-foreground text-sm sm:text-base">Loading questions...</div>
@@ -1739,11 +1821,17 @@ const AdminContentManagement = () => {
                     </div>
                   ) : adInformationQuestions && adInformationQuestions.length > 0 ? (
                     <div className="space-y-3 sm:space-y-4">
-                      {adInformationQuestions.map((question: any) => {
+                      <SortableQuestionList
+                        items={adInformationQuestions}
+                        onReorder={(ordered) =>
+                          reorderAdInformation.mutate(ordered.map((q, index) => ({ id: q.id, position: index })))
+                        }
+                      >
+                        {adInformationQuestions.map((question: any) => {
                         return (
+                          <SortableQuestionRow key={question.id} id={question.id}>
                           <div
-                            key={question.id}
-                            className="bg-white rounded-xl p-4 sm:p-6 border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 hover:border-accent/50 transition-colors"
+                                                        className="bg-white rounded-xl p-4 sm:p-6 border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 hover:border-accent/50 transition-colors"
                           >
                             <div className="flex-1 min-w-0">
                               <h4 className="text-sm sm:text-base font-medium text-foreground break-words">
@@ -1777,8 +1865,10 @@ const AdminContentManagement = () => {
                               </div>
                             </div>
                           </div>
+                          </SortableQuestionRow>
                         );
                       })}
+                      </SortableQuestionList>
                     </div>
                   ) : (
                     <div className="text-center py-8 sm:py-12 text-muted-foreground text-sm sm:text-base">
@@ -1815,7 +1905,14 @@ const AdminContentManagement = () => {
                 </div>
 
                 <div className="bg-card rounded-2xl p-4 sm:p-6 lg:p-8 border border-border">
-                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">Added Handovers Questions</h3>
+                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">
+                    Added Handovers Questions
+                    {questionCategoryName && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        — {questionCategoryName}
+                      </span>
+                    )}
+                  </h3>
                   
                   {handoverQuestionsLoading ? (
                     <div className="text-muted-foreground text-sm sm:text-base">Loading questions...</div>
@@ -2014,7 +2111,7 @@ const AdminContentManagement = () => {
           categoryId={selectedCategory?.id || null}
           categoryName={selectedCategory?.name || ""}
         />
-        <AddBrandQuestionDialog open={addQuestionOpen} onOpenChange={setAddQuestionOpen} />
+        <AddBrandQuestionDialog open={addQuestionOpen} onOpenChange={setAddQuestionOpen} categoryId={questionCategoryId} />
         <EditBrandQuestionDialog
           open={editQuestionOpen}
           onOpenChange={setEditQuestionOpen}
@@ -2038,7 +2135,7 @@ const AdminContentManagement = () => {
           toolId={selectedTool?.id || null}
           toolName={selectedTool?.name || ""}
         />
-        <AddStatisticQuestionDialog open={addStatisticQuestionOpen} onOpenChange={setAddStatisticQuestionOpen} />
+        <AddStatisticQuestionDialog open={addStatisticQuestionOpen} onOpenChange={setAddStatisticQuestionOpen} categoryId={questionCategoryId} />
         <EditStatisticQuestionDialog
           open={editStatisticQuestionOpen}
           onOpenChange={setEditStatisticQuestionOpen}
@@ -2050,7 +2147,7 @@ const AdminContentManagement = () => {
           questionId={selectedStatisticQuestion?.id || null}
           questionText={selectedStatisticQuestion?.question || ""}
         />
-        <AddProductQuestionDialog open={addProductQuestionOpen} onOpenChange={setAddProductQuestionOpen} />
+        <AddProductQuestionDialog open={addProductQuestionOpen} onOpenChange={setAddProductQuestionOpen} categoryId={questionCategoryId} />
         <EditProductQuestionDialog
           open={editProductQuestionOpen}
           onOpenChange={setEditProductQuestionOpen}
@@ -2062,7 +2159,7 @@ const AdminContentManagement = () => {
           questionId={selectedProductQuestion?.id || null}
           questionText={selectedProductQuestion?.question || ""}
         />
-        <AddManagementQuestionDialog open={addManagementQuestionOpen} onOpenChange={setAddManagementQuestionOpen} />
+        <AddManagementQuestionDialog open={addManagementQuestionOpen} onOpenChange={setAddManagementQuestionOpen} categoryId={questionCategoryId} />
         <EditManagementQuestionDialog
           open={editManagementQuestionOpen}
           onOpenChange={setEditManagementQuestionOpen}
@@ -2086,7 +2183,7 @@ const AdminContentManagement = () => {
           accountId={selectedAccount?.id || null}
           accountPlatform={selectedAccount?.platform || ""}
         />
-        <AddAccountQuestionDialog open={addAccountQuestionOpen} onOpenChange={setAddAccountQuestionOpen} />
+        <AddAccountQuestionDialog open={addAccountQuestionOpen} onOpenChange={setAddAccountQuestionOpen} categoryId={questionCategoryId} />
         <EditAccountQuestionDialog
           open={editAccountQuestionOpen}
           onOpenChange={setEditAccountQuestionOpen}
@@ -2098,7 +2195,7 @@ const AdminContentManagement = () => {
           questionId={selectedAccountQuestion?.id || null}
           questionText={selectedAccountQuestion?.question || ""}
         />
-        <AddAdInformationQuestionDialog open={addAdInformationQuestionOpen} onOpenChange={setAddAdInformationQuestionOpen} />
+        <AddAdInformationQuestionDialog open={addAdInformationQuestionOpen} onOpenChange={setAddAdInformationQuestionOpen} categoryId={questionCategoryId} />
         <EditAdInformationQuestionDialog
           open={editAdInformationQuestionOpen}
           onOpenChange={setEditAdInformationQuestionOpen}
@@ -2110,7 +2207,7 @@ const AdminContentManagement = () => {
           questionId={selectedAdInformationQuestion?.id || null}
           questionText={selectedAdInformationQuestion?.question || ""}
         />
-        <AddHandoverQuestionDialog open={addHandoverQuestionOpen} onOpenChange={setAddHandoverQuestionOpen} />
+        <AddHandoverQuestionDialog open={addHandoverQuestionOpen} onOpenChange={setAddHandoverQuestionOpen} categoryId={questionCategoryId} />
         <EditHandoverQuestionDialog
           open={editHandoverQuestionOpen}
           onOpenChange={setEditHandoverQuestionOpen}

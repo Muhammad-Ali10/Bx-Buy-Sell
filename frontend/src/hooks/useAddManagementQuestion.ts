@@ -10,7 +10,7 @@ export const useAddManagementQuestion = () => {
       question: string;
       answer_type: string;
       options?: string[];
-      required?: boolean | null;
+      required?: boolean | null; categoryId?: string | null; hint?: string | null; publicHint?: string | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -25,6 +25,9 @@ export const useAddManagementQuestion = () => {
         answer_type: mappedAnswerType,
         answer_for: "MANAGEMENT",
         required: data.required,
+        categoryId: data.categoryId,
+        hint: data.hint,
+        publicHint: data.publicHint,
       };
       
       // Only include options if provided and not empty

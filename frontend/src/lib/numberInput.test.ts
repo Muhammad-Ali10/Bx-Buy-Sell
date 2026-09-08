@@ -10,13 +10,13 @@ import { clampPercent, sanitizeIntegerInput, sanitizeNumberInput } from "./numbe
 describe("sanitizeNumberInput", () => {
   it("keeps a plain number", () => {
     expect(sanitizeNumberInput("1200")).toBe("1200");
-    expect(sanitizeNumberInput("49.99")).toBe("49.99");
   });
 
   it("strips what a number field used to accept", () => {
     expect(sanitizeNumberInput("1e5")).toBe("15");
     expect(sanitizeNumberInput("-500")).toBe("500");
     expect(sanitizeNumberInput("+500")).toBe("500");
+    expect(sanitizeNumberInput("`500")).toBe("500");
   });
 
   it("strips pasted text and symbols", () => {
@@ -25,9 +25,18 @@ describe("sanitizeNumberInput", () => {
     expect(sanitizeNumberInput("١٢٣")).toBe("");
   });
 
-  it("allows one decimal point and no more", () => {
-    expect(sanitizeNumberInput("1.2.3")).toBe("1.23");
-    expect(sanitizeNumberInput("...5")).toBe(".5");
+  /*
+   * The decimal point goes too.
+   *
+   * It used to be allowed, so that a price could carry cents. The client asked
+   * for it removed along with the rest: a field that requires a number takes
+   * digits and nothing else. A price is entered in whole units now.
+   */
+  it("strips the decimal point", () => {
+    expect(sanitizeNumberInput("49.99")).toBe("4999");
+    expect(sanitizeNumberInput("1.2.3")).toBe("123");
+    expect(sanitizeNumberInput("...5")).toBe("5");
+    expect(sanitizeNumberInput(".")).toBe("");
   });
 
   it("survives empty and rubbish input", () => {
@@ -44,6 +53,12 @@ describe("sanitizeIntegerInput", () => {
     expect(sanitizeIntegerInput("12.5")).toBe("125");
     expect(sanitizeIntegerInput("-3")).toBe("3");
     expect(sanitizeIntegerInput("1k followers")).toBe("1");
+  });
+
+  it("is the same rule the other fields run", () => {
+    for (const raw of ["49.99", "-3", "+7", "`5", "1e5", "$1,200"]) {
+      expect(sanitizeIntegerInput(raw)).toBe(sanitizeNumberInput(raw));
+    }
   });
 });
 

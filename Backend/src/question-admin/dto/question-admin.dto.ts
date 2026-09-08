@@ -27,6 +27,14 @@ export const QuestionAdminSchema = z.object({
   dependsOnQuestionId: z.string().nullish(),
   dependsOnValue: z.string().nullish(),
   required: z.boolean().nullish(),
+  // Which category's set this question belongs to. Zod drops keys it does not
+  // know, so without this the field would vanish between the dialog and the
+  // database and every question would be saved category-less.
+  categoryId: z.string().nullish(),
+  // Two pieces of help, and they go to different people: `hint` to the seller
+  // filling the form, `publicHint` to the buyer reading the finished ad.
+  hint: z.string().nullish(),
+  publicHint: z.string().nullish(),
 }).superRefine((data, ctx) => {
   if (data.answer_type === 'SELECT' || data.answer_type === 'CHECKBOX') {
     if (!data.options || data.options.length < 2) {
@@ -51,6 +59,11 @@ export const UpdateQuestionAdminSchema = z.object({
   dependsOnQuestionId: z.string().nullish(),
   dependsOnValue: z.string().nullish(),
   required: z.boolean().nullish(),
+  categoryId: z.string().nullish(),
+  // Two pieces of help, and they go to different people: `hint` to the seller
+  // filling the form, `publicHint` to the buyer reading the finished ad.
+  hint: z.string().nullish(),
+  publicHint: z.string().nullish(),
 }).superRefine((data, ctx) => {
   if ((data.answer_type === 'SELECT' || data.answer_type === 'CHECKBOX') && data.options !== undefined && data.options.length < 2) {
     ctx.addIssue({

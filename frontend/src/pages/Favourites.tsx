@@ -90,9 +90,7 @@ const Favourites = () => {
 
       <div className="flex-1 min-w-0 md:w-auto lg:ml-[240px] xl:ml-[280px]">
         {/* Header - Shared across all tabs */}
-        <Header sidebarOffset />
-        {/* Clears the fixed bar floating above. */}
-        <div className="h-20 sm:h-24" />
+        <Header inColumn dark />
 
         {/* Main Content */}
         <main className="px-4 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-6 md:py-8">

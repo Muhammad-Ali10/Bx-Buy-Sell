@@ -6,16 +6,27 @@ export interface BrandQuestion {
   question: string;
   answer_type: string;
   answer_for: string;
+  /** Help for the seller, shown under the field while the listing is written. */
+  hint?: string | null;
+
   option: any[];
   created_at: string;
   updated_at: string;
 }
 
-export const useBrandQuestions = () => {
+/**
+ * The BRAND questions for one category.
+ *
+ * Every category used to share one set. Passing no category asks for the
+ * set that belongs to none — the originals, which is what this returned
+ * before categories existed and what a caller that has not been told about
+ * them still gets.
+ */
+export const useBrandQuestions = (categoryId?: string) => {
   return useQuery({
-    queryKey: ["brand-questions"],
+    queryKey: ["brand-questions", categoryId ?? null],
     queryFn: async () => {
-      const response = await apiClient.getAdminQuestionsByType("BRAND");
+      const response = await apiClient.getAdminQuestionsByType("BRAND", categoryId);
       console.log('Brand Questions API Response:', response);
       
       if (!response.success) {

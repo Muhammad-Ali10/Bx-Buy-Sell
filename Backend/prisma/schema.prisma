@@ -686,8 +686,45 @@ model AdminQuestion {
   // Whether the seller must answer this question. Null = legacy behaviour
   // (each step keeps its current default), so existing questions are unchanged.
   required            Boolean?
+  /// The category this question belongs to, as a `Category.id`.
+  ///
+  /// One set of questions used to serve every category, so an e-commerce
+  /// seller and a plumber were asked the same things. Each category now owns
+  /// its own set.
+  ///
+  /// Null means the question belongs to no category. Those are the originals:
+  /// they are what a new category is seeded from, and no seller is shown them
+  /// once the wizard asks by category. Kept as a scalar rather than a relation
+  /// because `Category` has nothing to say about questions in return.
+  categoryId          String?
+  /// Help for the seller, shown under the field while the listing is written.
+  ///
+  /// The dialog has had a box for this for a long time; nothing ever read it
+  /// back or wrote it down, so whatever an administrator typed was discarded
+  /// when the dialog closed.
+  hint                String?
+  /// Help for the buyer, shown as the ⓘ beside the figure on the published ad.
+  ///
+  /// Those tooltips were sentences written into the page. This is the same
+  /// text, kept where an administrator can edit it. Left empty, the page keeps
+  /// the wording it already had.
+  publicHint          String?
+  /// Where this question sits in its step, smallest first.
+  ///
+  /// There was no such field: the list came back in whatever order the
+  /// database happened to hold it, which looked like an order and was not one —
+  /// nothing guaranteed it, and nobody could change it. Ordering is per
+  /// category, because the questions are.
+  ///
+  /// Null on a question written before this existed, or by a caller that does
+  /// not set it; those sort after the numbered ones, by age, so nothing jumps
+  /// about until somebody arranges it.
+  position            Int?
   created_at          DateTime   @default(now())
   updated_at          DateTime   @updatedAt
+
+  @@index([categoryId])
+  @@index([answer_for, categoryId])
 }
 
 model AdminSocialAccount {

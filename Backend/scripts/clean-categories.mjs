@@ -1,11 +1,19 @@
 /**
  * Report — and optionally repair — the state of the category data.
  *
- *   node scripts/clean-categories.mjs           # show what is wrong
- *   node scripts/clean-categories.mjs --apply   # actually change it
+ *   node scripts/clean-categories.mjs                        # show what is wrong
+ *   node scripts/clean-categories.mjs --add "Tech,Fashion"   # name what to add
+ *   node scripts/clean-categories.mjs --add "..." --apply    # actually change it
  *
  * Nothing is written without `--apply`. Run it without the flag first and read
  * the plan; every line says exactly which rows it would touch.
+ *
+ * Deletions the script decides on its own — a duplicate row and a row called
+ * "undefined" are wrong whoever is asked. Additions it does not: a name only
+ * becomes a category because someone says it is one, so a missing name is
+ * listed and left alone unless `--add` names it. It used to add anything two
+ * listings shared, which was enough to make "naeeem bhai" — a note somebody
+ * typed into the field — an official category offered to every buyer.
  *
  * The thing to understand before reading the output: a listing does not point
  * at a category row. It stores the category's *name* as text, and the filter
@@ -19,6 +27,14 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes('--apply');
+
+/** Names the operator has confirmed are real categories: --add "Tech,Fashion" */
+const ADD = new Set(
+  (process.argv[process.argv.indexOf('--add') + 1] || '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean),
+);
 
 const JUNK = /^(undefined|string|null|aaaa|test)$/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,13 +68,13 @@ const run = async () => {
     .sort((a, b) => b[1] - a[1]);
   if (!missing.length) console.log('  none');
   for (const [name, count] of missing) {
-    // A name several sellers chose is a real category. A name one listing uses
-    // is as likely to be a typo or somebody's own name — "Sneha" is in here —
-    // and putting that in the dropdown for every buyer is worse than leaving
-    // it. One listing is a judgement call, so it goes to a person.
-    if (count < 2) {
-      console.log(`  ${name.padEnd(22)} ${count} listing  → only one; a person should decide`);
-      plan.manual.push(`"${name}" is used by 1 listing — real category, or a mistake?`);
+    // How many listings share a name says nothing about whether it belongs in
+    // the dropdown: three of them carried "naeeem bhai", all from the same two
+    // test accounts. So the count is reported and the decision is the
+    // operator's — only a name passed to `--add` is added.
+    if (!ADD.has(name)) {
+      console.log(`  ${name.padEnd(22)} ${count} listing(s)  → not added; pass --add "${name}" if it is real`);
+      plan.manual.push(`"${name}" is used by ${count} listing(s) — real category, or a mistake?`);
       continue;
     }
     console.log(`  ${name.padEnd(22)} ${count} listing(s)  → add to the category list`);

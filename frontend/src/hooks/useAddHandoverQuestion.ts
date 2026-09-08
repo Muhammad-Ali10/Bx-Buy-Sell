@@ -6,7 +6,7 @@ export const useAddHandoverQuestion = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { question: string; answer_type: string; options?: string[]; required?: boolean | null }) => {
+    mutationFn: async (data: { question: string; answer_type: string; options?: string[]; required?: boolean | null; categoryId?: string | null; hint?: string | null; }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
         'YESNO': 'BOOLEAN',
@@ -27,6 +27,8 @@ export const useAddHandoverQuestion = () => {
         answer_for: "HANDOVER",
         options: data.options || [],
         required: data.required,
+        categoryId: data.categoryId,
+        hint: data.hint,
       });
 
       if (!response.success) {

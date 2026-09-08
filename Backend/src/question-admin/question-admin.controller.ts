@@ -1,4 +1,4 @@
-import { Controller, Param, Patch, Get, Post, Delete, Body } from '@nestjs/common';
+import { Controller, Param, Patch, Get, Post, Delete, Body, Query } from '@nestjs/common';
 import { Roles } from 'common/decorator/roles.decorator';
 import { Public } from 'common/decorator/public.decorator';
 import { QuestionAdminService } from './question-admin.service';
@@ -17,9 +17,19 @@ export class QuestionAdminController {
     }
     @Public()
     @Get('type/:type')
-    findAllWithType(@Param('type') type: string) {
-        return this.questionAdminService.findAllWithType(type);
+    findAllWithType(
+        @Param('type') type: string,
+        @Query('category') category?: string,
+    ) {
+        return this.questionAdminService.findAllWithType(type, category);
     }
+    // Above `@Patch(':id')`, or "reorder" is read as a question id.
+    @Roles(['ADMIN', 'MONITER'])
+    @Patch('reorder')
+    reorder(@Body() body: { items: { id: string; position: number }[] }) {
+        return this.questionAdminService.reorder(body?.items ?? []);
+    }
+
     @Public()
     @Get(':id')
     findOne(@Param('id') id: string) {

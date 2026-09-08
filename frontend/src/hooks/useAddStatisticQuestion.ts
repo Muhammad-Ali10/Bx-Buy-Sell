@@ -10,7 +10,7 @@ export const useAddStatisticQuestion = () => {
       question: string;
       answer_type: string;
       options?: string[];
-      required?: boolean | null;
+      required?: boolean | null; categoryId?: string | null; hint?: string | null; publicHint?: string | null;
     }) => {
       const response = await apiClient.createAdminQuestion({
         question: data.question,
@@ -18,6 +18,9 @@ export const useAddStatisticQuestion = () => {
         answer_for: "STATISTIC",
         options: data.options || [],
         required: data.required,
+        categoryId: data.categoryId,
+        hint: data.hint,
+        publicHint: data.publicHint,
       });
 
       if (!response.success) {

@@ -38,7 +38,7 @@ interface Notification {
 
 interface NotificationDropdownProps {
   userId?: string;
-  variant?: "light" | "dark";
+  variant?: "light" | "dark" | "glass" | "glassDark";
   customStyle?: boolean; // For custom circular background styling
 }
 
@@ -246,9 +246,13 @@ export const NotificationDropdown = ({ userId, variant = "dark", customStyle = f
           className={cn(
             "relative rounded-full flex items-center justify-center transition-colors",
             customStyle ? "" : (
-              variant === "light" && !isListingDetailPage
+              variant === "glassDark"
+                ? "h-10 w-10 sm:h-[52px] sm:w-[52px] text-white"
+                : variant === "glass" || isListingDetailPage
+                ? "h-10 w-10 sm:h-[52px] sm:w-[52px] text-black"
+                : variant === "light"
                 ? "w-8 h-8 sm:w-10 sm:h-10 bg-[#FFFFFF0D] text-white hover:bg-[#D3FC50] hover:text-black" 
-                : variant === "dark" || isListingDetailPage
+                : variant === "dark"
                 ? "text-black hover:bg-muted"
                 : "w-8 h-8 sm:w-10 sm:h-10 bg-[#FFFFFF0D] text-white hover:bg-[#D3FC50] hover:text-black"
             )
@@ -259,14 +263,11 @@ export const NotificationDropdown = ({ userId, variant = "dark", customStyle = f
             borderRadius: '22px',
             padding: '10px',
             backgroundColor: 'rgba(250, 250, 250, 1)',
-          } : (isListingDetailPage ? {
-            width: '52px',
-            height: '52px',
+          } : variant === "glassDark" ? {
             borderRadius: '28px',
-            paddingTop: '15px',
-            paddingRight: '16px',
-            paddingBottom: '15px',
-            paddingLeft: '16px',
+            background: 'rgba(255, 255, 255, 0.12)'
+          } : (variant === "glass" || isListingDetailPage ? {
+            borderRadius: '28px',
             background: 'rgba(0, 0, 0, 0.1)'
           } : {})}
         >
@@ -275,7 +276,7 @@ export const NotificationDropdown = ({ userId, variant = "dark", customStyle = f
           ) : (
             <Bell 
               className="w-5 h-5 sm:w-6 sm:h-6" 
-              style={isListingDetailPage ? { color: 'rgba(0, 0, 0, 1)' } : {}}
+              style={variant === "glassDark" ? { color: 'rgba(255, 255, 255, 1)' } : variant === "glass" || isListingDetailPage ? { color: 'rgba(0, 0, 0, 1)' } : {}}
             />
           )}
           {unreadCount > 0 && (

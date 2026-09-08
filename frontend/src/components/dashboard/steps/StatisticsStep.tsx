@@ -93,7 +93,7 @@ export const StatisticsStep = ({ onNext, onBack }: StatisticsStepProps) => {
              `type="number"` let "e", a leading minus and pasted words through. */
           <Input
             type="text"
-            inputMode="decimal"
+            inputMode="numeric"
             value={value}
             onChange={(e) =>
               setFormData({ ...formData, [question.id]: sanitizeNumberInput(e.target.value) })

@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useMatch, useNavigate } from "react-router-dom";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
-import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
-import { DashboardGuestBar } from "@/components/dashboard/DashboardGuestBar";
+import Header from "@/components/Header";
 import { GuestListingAuthDialog } from "@/components/dashboard/GuestListingAuthDialog";
 import { Button } from "@/components/ui/button";
 import { CategoryStep } from "@/components/dashboard/steps/CategoryStep";
@@ -246,29 +245,22 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
         return true;
       };
 
-      // Same secure listing fetch as ListingDetail when authenticated
-      const [
-        listingResponse,
-        brandQuestionsRes,
-        statisticQuestionsRes,
-        productQuestionsRes,
-        managementQuestionsRes,
-        adQuestionsRes,
-        handoverQuestionsRes,
-        accountsRes,
-        accountQuestionsRes,
-      ] = await Promise.all([
+      /*
+       * Two waves, not one.
+       *
+       * The questions belong to a category and the category is written on the
+       * listing, so the listing has to arrive before there is anything to ask
+       * for. Fetching them together, as this did, could only ever fetch the
+       * wrong ones: the saved answers below are matched back to the questions
+       * they were written against, and matching them against another
+       * category's set would leave the seller looking at an empty form.
+       */
+      const [listingResponse, accountsRes, categoriesRes] = await Promise.all([
         apiClient.getSecureListingById(id),
-        apiClient.getAdminQuestionsByType("BRAND"),
-        apiClient.getAdminQuestionsByType("STATISTIC"),
-        apiClient.getAdminQuestionsByType("PRODUCT"),
-        apiClient.getAdminQuestionsByType("MANAGEMENT"),
-        apiClient.getAdminQuestionsByType("ADVERTISMENT"),
-        apiClient.getAdminQuestionsByType("HANDOVER"),
         apiClient.getSocialAccounts(),
-        apiClient.getAdminQuestionsByType("SOCIAL"),
+        apiClient.getCategories(),
       ]);
-      
+
       if (!listingResponse.success || !listingResponse.data) {
         hasLoadedListingRef.current = false;
         loadedListingIdRef.current = null;
@@ -276,6 +268,40 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
         navigate("/my-listings");
         return;
       }
+
+      // A listing records its category by name; the questions are keyed by id.
+      const categoryList = Array.isArray(categoriesRes?.data)
+        ? (categoriesRes.data as any[])
+        : [];
+      const firstCategory = ((listingResponse.data as any)?.category ?? [])[0];
+      const categoryLabel = String(
+        firstCategory?.name ?? firstCategory?.category?.name ?? "",
+      ).trim();
+      const editCategoryId =
+        categoryList.find((c: any) => String(c?.id) === categoryLabel)?.id ??
+        categoryList.find(
+          (c: any) =>
+            String(c?.name ?? "").trim().toLowerCase() ===
+            categoryLabel.toLowerCase(),
+        )?.id;
+
+      const [
+        brandQuestionsRes,
+        statisticQuestionsRes,
+        productQuestionsRes,
+        managementQuestionsRes,
+        adQuestionsRes,
+        handoverQuestionsRes,
+        accountQuestionsRes,
+      ] = await Promise.all([
+        apiClient.getAdminQuestionsByType("BRAND", editCategoryId),
+        apiClient.getAdminQuestionsByType("STATISTIC", editCategoryId),
+        apiClient.getAdminQuestionsByType("PRODUCT", editCategoryId),
+        apiClient.getAdminQuestionsByType("MANAGEMENT", editCategoryId),
+        apiClient.getAdminQuestionsByType("ADVERTISMENT", editCategoryId),
+        apiClient.getAdminQuestionsByType("HANDOVER", editCategoryId),
+        apiClient.getAdminQuestionsByType("SOCIAL", editCategoryId),
+      ]);
       
       // Type the listing properly to avoid TypeScript errors
       const listing = listingResponse.data as any;
@@ -690,6 +716,7 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
             onGuestAuthOpenChange={setGuestAuthOpen}
             resumePublishNonce={resumePublishNonce}
             afterSuccessRedirect={isEditMode ? "listing-detail" : "my-listings"}
+            onGoToStep={(step) => setActiveStep(step as DashboardStep)}
           />
         );
       default:
@@ -722,32 +749,23 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
       <DashboardSidebar activeStep={activeStep} onStepChange={handleStepChange} isMobile={false} />
       
       <div className="flex-1 flex flex-col w-full overflow-hidden">
-        {/* Mobile Header with Hamburger Menu */}
-        <div className="md:hidden border-b border-border bg-background sticky top-0 z-40">
-          <div className="flex items-center gap-3 px-4 py-3">
+        <Header inColumn dark sidebarFrom="md" />
+
+        {/* The wizard's own step menu, kept below the site bar.
+            The bar carries the site's links, not the listing steps, and the
+            step sidebar is hidden under `md` — so without this there is no way
+            to reach Category, Financials and the rest on a phone. */}
+        <div className="md:hidden">
+          <div className="flex items-center gap-3 border-b border-border bg-background px-4 py-3">
             <DashboardSidebar activeStep={activeStep} onStepChange={handleStepChange} isMobile={true} />
             <h1 className="text-lg font-semibold shrink-0">
               {isEditMode ? "Edit Listing" : "Create Listing"}
             </h1>
-            {isGuestCreateFlow && (
-              <div className="ml-auto flex items-center gap-2">
-                <Button variant="outline" size="sm" asChild>
-                  <Link to="/login">Log in</Link>
-                </Button>
-                <Button size="sm" variant="accent" asChild>
-                  <Link to="/register">Sign up</Link>
-                </Button>
-              </div>
-            )}
           </div>
         </div>
-        
-        {/* Desktop Header */}
-        <div className="hidden md:block">
-          {isGuestCreateFlow ? <DashboardGuestBar /> : user ? <DashboardHeader user={user} /> : null}
-        </div>
-        
-        {/* Main Content */}
+
+        {/* Main Content. The bar sits in this column rather than floating over
+            it, so no padding is needed to clear it. */}
         <main className="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto">
           {renderStep()}
         </main>

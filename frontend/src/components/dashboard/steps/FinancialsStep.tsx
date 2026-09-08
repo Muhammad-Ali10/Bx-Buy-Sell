@@ -5,11 +5,13 @@ import { Input } from "@/components/ui/input";
 import { CurrencySelect, getCurrencySymbol } from "@/components/CurrencySelect";
 import { toast } from "sonner";
 import {
+  calculateNetProfitForColumn,
   displayRowLabel,
   GROSS_REVENUE_ROW,
   OVERALL_COSTS_ROW,
   REVENUE_ROW,
   FINANCIALS_TEMPLATE_UPDATED_EVENT,
+  displayColumnLabel,
   fetchAdminFinancialsTemplate,
   loadAdminFinancialsTemplate,
   mergeFinancialCellValues,
@@ -18,12 +20,14 @@ import {
   syncFinancialGrid,
   type AdminFinancialsTemplate,
   type FinancialColumn,
+  realignFinancialTable,
   resolveFinancialColumns,
   financialsReminder,
   coversFullYear,
   coverageLabel,
 } from "@/lib/financialTableUtils";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
+import { sanitizeNumberInput } from "@/lib/numberInput";
 
 interface FinancialsStepProps {
   formData?: any;
@@ -45,22 +49,9 @@ const getTodayDate = () => {
 const CURRENT_YEAR = new Date().getFullYear();
 
 /** Only digits and a single decimal point (blocks + - ` e and other symbols). */
-const sanitizeNumber = (raw: string): string => {
-  let v = raw.replace(/[^0-9.]/g, "");
-  const dot = v.indexOf(".");
-  if (dot !== -1) {
-    v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "");
-  }
-  return v;
-};
-
-/** "Forecast 2025" -> "Forecast <current year>" (unless the label was customized). */
-const displayColumnLabel = (col: FinancialColumn): string => {
-  if (!col.labelCustomized && /^Forecast\s+\d{4}$/.test(col.label)) {
-    return `Forecast ${CURRENT_YEAR}`;
-  }
-  return col.label;
-};
+// The same rule the rest of the wizard runs, rather than a second copy of it
+// here — this one still allowed a decimal point after the shared one stopped.
+const sanitizeNumber = sanitizeNumberInput;
 
 const isoToDmy = (iso: string): string => {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -160,16 +151,18 @@ const buildInitialTableState = (isEditListing: boolean) => {
   const adminTemplate = loadAdminFinancialsTemplate();
   if (adminTemplate) {
     const rows = normalizeRowLabels(adminTemplate.rowLabels);
+    // Re-resolved on open: a table saved before the seller closed off last
+    // year should now be showing the next window, one saved in an older build
+    // has no year or date on its columns at all, and one saved under the old
+    // keys has its figures carried across to the year they belong to.
+    const realigned = realignFinancialTable(
+      adminTemplate.columnLabels,
+      adminTemplate.financialData,
+    );
     return {
       rowLabels: rows,
-      // Re-resolved on open: a table saved before the seller closed off last
-      // year should now be showing the next window, and one saved in an older
-      // build has no year or date on its columns at all.
-      columnLabels: resolveFinancialColumns(
-        adminTemplate.columnLabels,
-        adminTemplate.financialData,
-      ),
-      financialData: adminTemplate.financialData,
+      columnLabels: realigned.columns,
+      financialData: realigned.financialData,
       fromAdmin: true,
     };
   }
@@ -251,7 +244,11 @@ export const FinancialsStep = ({
    */
   const setColumnDataThrough = (key: string, dmy: string) => {
     setColumnLabels((prev) =>
-      prev.map((col) => (col.key === key ? { ...col, dataThrough: dmy } : col)),
+      prev.map((col) =>
+        // Marked as the seller's, so re-opening the listing does not work it
+        // out again and overwrite what they typed.
+        col.key === key ? { ...col, dataThrough: dmy, dateCustomized: true } : col,
+      ),
     );
   };
 
@@ -416,27 +413,11 @@ export const FinancialsStep = ({
     }));
   };
 
-  // Calculate Net Profit for a column
-  const calculateNetProfit = (col: string) => {
-    if (financialType === "simple") {
-      const gross = parseFloat(financialData[REVENUE_ROW]?.[col] || financialData[GROSS_REVENUE_ROW]?.[col] || "0");
-      const costs = parseFloat(financialData[OVERALL_COSTS_ROW]?.[col] || "0");
-      // Keep full precision; rounding happens at display time (in the shown currency).
-      return String(gross - costs);
-    }
-    let total = 0;
-    rowLabels.forEach((row) => {
-      if (row === OVERALL_COSTS_ROW) return;
-      const value = parseFloat(financialData[row]?.[col] || "0");
-      if (row.toLowerCase().includes("revenue")) {
-        total += value;
-      } else {
-        total -= value;
-      }
-    });
-    // Keep full precision; rounding happens at display time (in the shown currency).
-    return String(total);
-  };
+  // Calculate Net Profit for a column. Shared with the listing page so the
+  // seller is shown the same figure the buyer will be.
+  // Keep full precision; rounding happens at display time (in the shown currency).
+  const calculateNetProfit = (col: string) =>
+    String(calculateNetProfitForColumn({ financialData, rowLabels, financialType }, col));
 
   const visibleDataRows =
     financialType === "simple"
@@ -517,6 +498,20 @@ export const FinancialsStep = ({
     const n = parseFloat(typed || "");
     if (Number.isNaN(n)) return "";
     return String(n / conversionRate);
+  };
+  /**
+   * A stored figure as a whole number, which is all this field now takes.
+   *
+   * Converted amounts are held to full precision — a listing in euros stores
+   * 1161.9408595341315 behind a round €1,000 — and 16 cells already hold one.
+   * Shown raw in a field that strips the decimal point, the seller's next
+   * keystroke would turn it into 11619408595341315. Rounding on the way out
+   * means what is in the box is always something they could have typed.
+   */
+  const asWholeUnits = (stored: string): string => {
+    const n = parseFloat(stored || "");
+    if (Number.isNaN(n)) return "";
+    return String(Math.round(n));
   };
 
   return (
@@ -905,20 +900,20 @@ export const FinancialsStep = ({
                       <span style={{ fontFamily: 'Lufga', fontSize: '12px', color: textColor, opacity: 0.55 }}>{currencySymbol}</span>
                       <Input
                         type="text"
-                        inputMode="decimal"
+                        inputMode="numeric"
                         value={
                           isBaseCurrency
-                            ? financialData[row]?.[col.key] || ""
+                            ? asWholeUnits(financialData[row]?.[col.key] || "")
                             : editingCell && editingCell.row === row && editingCell.col === col.key
                               ? editingCell.value
-                              : usdToDisplay(financialData[row]?.[col.key] || "")
+                              : asWholeUnits(usdToDisplay(financialData[row]?.[col.key] || ""))
                         }
                         onFocus={() => {
                           if (!isBaseCurrency) {
                             setEditingCell({
                               row,
                               col: col.key,
-                              value: usdToDisplay(financialData[row]?.[col.key] || ""),
+                              value: asWholeUnits(usdToDisplay(financialData[row]?.[col.key] || "")),
                             });
                           }
                         }}

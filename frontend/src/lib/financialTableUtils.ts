@@ -46,6 +46,16 @@ export type FinancialColumn = {
   /** Older listings marked the year-to-date column this way. */
   isToday?: boolean;
   labelCustomized?: boolean;
+  /**
+   * Set when the seller entered this date themselves.
+   *
+   * Without it there is no telling a date somebody chose from one that was
+   * filled in for them. The admin template stores its year-to-date column as
+   * the literal string "08.06.2026" — the day it happened to be saved — and
+   * every listing seeded from it inherited that date and kept showing it
+   * months later. A date nobody claimed is worked out afresh each time.
+   */
+  dateCustomized?: boolean;
 };
 
 const DMY = /^(\d{2})\.(\d{2})\.(\d{4})$/;
@@ -69,6 +79,40 @@ export const lastDayOf = (year: number): string => "31.12." + year;
 export const coversFullYear = (dataThrough: unknown): boolean => {
   const parts = parseDmy(dataThrough);
   return Boolean(parts && parts.day === 31 && parts.month === 12);
+};
+
+/**
+ * The label a column should be drawn with.
+ *
+ * Two of the four are written by the calendar rather than by a person, and
+ * both were freezing. A forecast kept the year it was created in. The
+ * year-to-date column kept the day the template was first saved — a table set
+ * up in June still headed that column 08.06.2026 in September, and an
+ * administrator who had never touched it had no way to tell it was stale.
+ *
+ * Neither is stored fresh. Both are worked out at the moment they are drawn,
+ * so the header is right again tomorrow without anybody saving anything.
+ *
+ * A label somebody typed is theirs, and is returned exactly as it is — that is
+ * what `labelCustomized` records, and it is checked before anything else.
+ */
+export const displayColumnLabel = (col: FinancialColumn): string => {
+  if (col?.labelCustomized) return col.label;
+  if (col?.kind === "ytd" || col?.isToday || col?.key === "today") {
+    /*
+     * The column's own date — today until the seller sets one.
+     *
+     * This used to return today outright, so the heading and the coverage
+     * line beneath it named two different days: the heading always said today
+     * while the line underneath still read the date the listing had inherited
+     * from the admin template.
+     */
+    return col?.dataThrough || formatDmy(new Date());
+  }
+  if (/^Forecast\s+\d{4}$/.test(String(col?.label ?? ""))) {
+    return `Forecast ${col?.year ?? new Date().getFullYear()}`;
+  }
+  return col?.label ?? "";
 };
 
 /**
@@ -105,6 +149,15 @@ export const normalizeFinancialColumns = (
 
     if (col?.year && col?.kind) return col;
 
+    /*
+     * A date stored in its own right beats one read off the heading.
+     *
+     * The heading is where the old template kept the date, so it is only ever
+     * a fallback. A column that carries `dataThrough` has been given one
+     * deliberately, and reading the label over it threw that away.
+     */
+    const stated = parseDmy(col?.dataThrough) ? String(col!.dataThrough) : null;
+
     const isForecast = /forecast/i.test(label) || /forecast/i.test(key);
     const asDate = parseDmy(label);
     const isYtd = Boolean(col?.isToday) || key === "today" || (!isForecast && Boolean(asDate));
@@ -112,7 +165,7 @@ export const normalizeFinancialColumns = (
     if (isForecast) {
       const digits = (label.match(/\d{4}/) || key.match(/\d{4}/) || [])[0];
       const year = Number(digits) || new Date().getFullYear();
-      return { ...col, year, kind: "forecast" as const, dataThrough: lastDayOf(year) };
+      return { ...col, year, kind: "forecast" as const, dataThrough: stated ?? lastDayOf(year) };
     }
 
     if (isYtd) {
@@ -121,18 +174,31 @@ export const normalizeFinancialColumns = (
         ...col,
         year,
         kind: "ytd" as const,
-        dataThrough: asDate ? label : formatDmy(new Date()),
+        // A date sitting in the heading is where the old template kept it; it
+        // says when that table was saved, not what any seller decided.
+        dataThrough: stated ?? (asDate ? label : formatDmy(new Date())),
+        dateCustomized: col?.dateCustomized ?? false,
       };
     }
 
-    const yearDigits = (key.match(/^(\d{4})$/) || label.match(/^(\d{4})$/) || [])[1];
+    /*
+     * The heading wins over the key.
+     *
+     * These two disagree in every table saved before the keys were derived
+     * from the year: an administrator renaming a heading from 2023 to 2024
+     * changed the label and left the key alone, and the key was read first —
+     * so the column a seller filled in as 2024 was taken for 2023, and its
+     * figures were matched to the wrong year. What the seller saw is what the
+     * figures are about, and that is the label.
+     */
+    const yearDigits = (label.match(/^(\d{4})$/) || key.match(/^(\d{4})$/) || [])[1];
     const year = Number(yearDigits) || undefined;
     return {
       ...col,
       ...(year ? { year } : {}),
       kind: "actual" as const,
       // A plain year column has always meant the whole year.
-      dataThrough: year ? lastDayOf(year) : col?.dataThrough,
+      dataThrough: stated ?? (year ? lastDayOf(year) : col?.dataThrough),
     };
   });
 };
@@ -211,8 +277,14 @@ export const buildFinancialColumns = (
   ];
 };
 
-/** True when a column has at least one figure in it. */
-const columnHasFigures = (
+/**
+ * True when a column has at least one figure in it.
+ *
+ * Exported because the listing page needs the same distinction: a column
+ * nobody filled in and a column whose figures cancel out both come to zero,
+ * and only the first of the two is a blank.
+ */
+export const columnHasFigures = (
   data: Record<string, Record<string, string>> | undefined,
   key: string,
 ): boolean => {
@@ -259,7 +331,17 @@ export const resolveFinancialColumns = (
   // A table nobody has started yet begins in the current calendar year.
   if (storedYtdYear === null) return buildFinancialColumns(today.getFullYear(), today);
 
-  const ytdYear = isYtdYearComplete(normalized, data) ? storedYtdYear + 1 : storedYtdYear;
+  /*
+   * Never past the calendar.
+   *
+   * Closing off a year advances the window, but a seller who enters full-year
+   * figures in August and sets 31.12 would otherwise be handed a "year to
+   * date" for a year that has not started — and `buildFinancialColumns`, asked
+   * for a future year, dates it 31 December, which reads as a completed one.
+   * The window waits for the calendar to catch up.
+   */
+  const advanced = isYtdYearComplete(normalized, data) ? storedYtdYear + 1 : storedYtdYear;
+  const ytdYear = Math.min(advanced, today.getFullYear());
   const fresh = buildFinancialColumns(ytdYear, today);
 
   return fresh.map((col) => {
@@ -280,13 +362,181 @@ export const resolveFinancialColumns = (
 
     if (!previous) return col;
 
+    /*
+     * The year decides the key and the heading — not what the column used to
+     * be called.
+     *
+     * This carried the stored key and a customised label forward, so a heading
+     * renamed in the admin from 2023 to 2024 left the figures filed under
+     * 2023: the form showed "2024" and the listing page, resolving by key,
+     * read a different column and dropped the oldest one. A seller's 200,000
+     * simply vanished. Only the date the figures run to is the seller's to
+     * keep; `realignFinancialTable` moves the figures onto the new key.
+     */
+    /*
+     * The date is the listing's, and only the seller writes it.
+     *
+     * Carrying every stored date forward is what kept a listing showing
+     * 08.06.2026 in September: that date came from the admin template, not
+     * from the seller, and nothing distinguished the two. A date is kept when
+     * the seller set it, and when it closes the year off — 31 December is
+     * always a decision, and it is what moves the window on, so it can never
+     * be thrown away. Anything else is worked out again now.
+     */
+    const sellersOwn =
+      previous.dateCustomized || coversFullYear(previous.dataThrough);
+
     return {
       ...col,
-      key: previous.key || col.key,
-      dataThrough: previous.dataThrough ?? col.dataThrough,
-      ...(previous.labelCustomized ? { label: previous.label, labelCustomized: true } : {}),
+      ...(sellersOwn
+        ? { dataThrough: previous.dataThrough, dateCustomized: previous.dateCustomized }
+        : {}),
     };
   });
+};
+
+/**
+ * Do the stored headings describe one consistent set of years?
+ *
+ * Two closed years, the year those run up to, and a forecast for it. A table
+ * saved by the current form always does. The hardcoded template never did:
+ * its two "closed" years were fixed at 2023 and 2024 while the year-to-date
+ * column carried whatever date the listing was created on.
+ */
+const yearsAreConsistent = (columns: FinancialColumn[]): boolean => {
+  const ytdYear = columns.find((col) => col.kind === "ytd")?.year;
+  // Nothing to check against; treat the years at face value.
+  if (!ytdYear) return true;
+  return columns.every((col) => {
+    if (!col.year) return true;
+    if (col.kind === "actual") return col.year === ytdYear - 1 || col.year === ytdYear - 2;
+    return col.year === ytdYear;
+  });
+};
+
+/**
+ * The columns to show and the figures filed under them.
+ *
+ * A column's key is derived from its year now, so a table stored under the old
+ * keys has its figures moved across at the same time — otherwise correcting
+ * the key would be what loses the data. Old and new are matched by year and
+ * kind, which is the only thing about a column that means anything.
+ */
+export const realignFinancialTable = (
+  stored: FinancialColumn[] | undefined | null,
+  data: Record<string, Record<string, string>> | undefined,
+  today: Date = new Date(),
+): { columns: FinancialColumn[]; financialData: Record<string, Record<string, string>> } => {
+  const columns = resolveFinancialColumns(stored, data, today);
+  const previous = normalizeFinancialColumns(stored);
+
+  const moved = new Map<string, string>();
+  const claimed = new Set<string>();
+
+  if (yearsAreConsistent(previous)) {
+    for (const col of columns) {
+      /*
+       * One old column each.
+       *
+       * Without the claim, a year that has both a year-to-date column and a
+       * forecast could match the same old column twice, and the second win
+       * overwrote the first — the figures for the year so far were carried
+       * into the forecast column and the year to date came out empty.
+       */
+      const match =
+        previous.find(
+          (old) => old.year === col.year && old.kind === col.kind && !claimed.has(old.key),
+        ) ?? previous.find((old) => old.year === col.year && !claimed.has(old.key));
+      if (!match?.key) continue;
+      claimed.add(match.key);
+      if (match.key !== col.key) moved.set(match.key, col.key);
+    }
+  } else {
+    /*
+     * A table from before the columns meant anything.
+     *
+     * The old template hardcoded its headings, so a listing made in 2026 was
+     * given "2023", "2024", the date that day, and "Forecast 2025" — a set of
+     * years that never described the same business. Matching those headings
+     * against real years drops the oldest column and shifts the rest a year to
+     * the left, which is worse than not reading them at all.
+     *
+     * For these the slot is the only thing that ever carried meaning: the
+     * seller was filling in two closed years, the year so far and a forecast,
+     * whatever the headings above them said. So they are taken in order. The
+     * years are a reading of what the seller meant, not a record of what they
+     * were told — which is why it applies only where the stored years are
+     * already self-contradictory, and never to a table that adds up.
+     */
+    for (let i = 0; i < Math.min(previous.length, columns.length); i++) {
+      const from = previous[i]?.key;
+      const to = columns[i]?.key;
+      if (from && to && from !== to) moved.set(from, to);
+    }
+  }
+
+  if (moved.size === 0) {
+    return { columns, financialData: data ?? {} };
+  }
+
+  const financialData: Record<string, Record<string, string>> = {};
+  for (const [row, cells] of Object.entries(data ?? {})) {
+    const next: Record<string, string> = {};
+    for (const [key, value] of Object.entries(cells ?? {})) {
+      next[moved.get(key) ?? key] = value;
+    }
+    financialData[row] = next;
+  }
+
+  return { columns, financialData };
+};
+
+/** A P&L table in whichever shape it happens to be stored. */
+export type FinancialTableLike = {
+  financialData?: Record<string, Record<string, unknown>> | null;
+  rowLabels?: string[] | null;
+  financialType?: string | null;
+};
+
+/** Reads a cell as a number. An empty or unparseable cell counts as nothing. */
+const cellNumber = (value: unknown): number => {
+  const parsed = parseFloat(String(value ?? "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** The rows that feed the Net Profit sum, in the order the table lists them. */
+const profitRows = (table: FinancialTableLike | null | undefined): string[] => {
+  const labels = Array.isArray(table?.rowLabels) ? table!.rowLabels! : [];
+  if (labels.length) return labels.filter((row) => row !== OVERALL_COSTS_ROW);
+  return Object.keys(table?.financialData ?? {}).filter((row) => row !== OVERALL_COSTS_ROW);
+};
+
+/**
+ * Net Profit for one column.
+ *
+ * Shared so the seller's editor, the admin template and the listing page all
+ * add up in the same way. The listing page had its own copy, and it was still
+ * reading the figures under the keys they were saved with while the rows
+ * around it had already moved onto their calendar years — so every column but
+ * one showed a dash.
+ */
+export const calculateNetProfitForColumn = (
+  table: FinancialTableLike | null | undefined,
+  colKey: string,
+): number => {
+  const data = table?.financialData ?? {};
+  if (table?.financialType === "simple") {
+    const gross = cellNumber(data[REVENUE_ROW]?.[colKey] ?? data[GROSS_REVENUE_ROW]?.[colKey]);
+    return gross - cellNumber(data[OVERALL_COSTS_ROW]?.[colKey]);
+  }
+
+  let total = 0;
+  for (const row of profitRows(table)) {
+    const value = cellNumber(data[row]?.[colKey]);
+    if (row.toLowerCase().includes("revenue")) total += value;
+    else total -= value;
+  }
+  return total;
 };
 
 /**

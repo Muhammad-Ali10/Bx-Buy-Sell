@@ -12,9 +12,15 @@ import { X } from "lucide-react";
 interface AddAdInformationQuestionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * The category this question is being written for. Questions belong to one
+   * category now, and a question saved without one joins no set and is shown
+   * to nobody.
+   */
+  categoryId?: string | null;
 }
 
-export const AddAdInformationQuestionDialog = ({ open, onOpenChange }: AddAdInformationQuestionDialogProps) => {
+export const AddAdInformationQuestionDialog = ({ open, onOpenChange, categoryId }: AddAdInformationQuestionDialogProps) => {
   const [question, setQuestion] = useState("");
   const [answerType, setAnswerType] = useState("TEXT");
   const [options, setOptions] = useState("");
@@ -53,7 +59,7 @@ export const AddAdInformationQuestionDialog = ({ open, onOpenChange }: AddAdInfo
     }
 
     addQuestion.mutate(
-      { question: trimmedQuestion, answer_type: answerType, options: optionsArray, required },
+      { question: trimmedQuestion, answer_type: answerType, options: optionsArray, required, categoryId },
       {
         onSuccess: () => {
           setQuestion("");

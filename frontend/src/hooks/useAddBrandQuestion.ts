@@ -6,7 +6,7 @@ export const useAddBrandQuestion = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { question: string; answer_type: string; option?: string[]; required?: boolean | null }) => {
+    mutationFn: async (data: { question: string; answer_type: string; option?: string[]; required?: boolean | null; categoryId?: string | null; hint?: string | null; }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
         'YESNO': 'BOOLEAN',
@@ -29,6 +29,8 @@ export const useAddBrandQuestion = () => {
         answer_for: "BRAND",
         option: data.option || [],
         required: data.required,
+        categoryId: data.categoryId,
+        hint: data.hint,
       });
 
       if (!response.success) {

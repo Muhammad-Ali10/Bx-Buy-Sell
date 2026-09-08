@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { hintPlaceholder, QuestionHint } from "@/components/dashboard/QuestionHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,45 +8,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useAccountQuestions } from "@/hooks/useAccountQuestions";
+import { useListingCategoryId } from "@/hooks/useListingCategoryId";
 import { Facebook, Instagram, Twitter, Music, Pin, Linkedin, Youtube } from "lucide-react";
 import { toast } from "sonner";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 import { isQuestionRequired } from "@/lib/questionRequired";
 import { sanitizeIntegerInput, sanitizeNumberInput } from "@/lib/numberInput";
-
-/**
- * The platforms this step asks about, in the spelling each of them uses.
- *
- * Two things were wrong without this. Every URL question offered the same
- * example — "https://instagram.com/yourname" — so the Twitter and TikTok
- * fields both told the seller to enter an Instagram address. And the labels
- * come from rows an admin typed, so one of them reads "instagram" beside a
- * correctly capitalised "TikTok"; CSS `capitalize` cannot fix that pair, since
- * it would turn TikTok into Tiktok.
- */
-const PLATFORMS: { match: string; label: string; example: string }[] = [
-  { match: "instagram", label: "Instagram", example: "https://instagram.com/yourname" },
-  { match: "facebook", label: "Facebook", example: "https://facebook.com/yourpage" },
-  { match: "tiktok", label: "TikTok", example: "https://tiktok.com/@yourname" },
-  { match: "twitter", label: "Twitter", example: "https://twitter.com/yourname" },
-  { match: "youtube", label: "YouTube", example: "https://youtube.com/@yourchannel" },
-  { match: "linkedin", label: "LinkedIn", example: "https://linkedin.com/company/yourcompany" },
-  { match: "pinterest", label: "Pinterest", example: "https://pinterest.com/yourname" },
-  { match: "amazon", label: "Amazon", example: "https://amazon.com/shops/yourstore" },
-  { match: "snapchat", label: "Snapchat", example: "https://snapchat.com/add/yourname" },
-];
-
-const platformFor = (text: string) => {
-  const lower = (text || "").toLowerCase();
-  return PLATFORMS.find((platform) => lower.includes(platform.match)) || null;
-};
-
-/** The platform's own spelling where we know it, otherwise what the admin wrote. */
-const questionLabel = (text: string) => platformFor(text)?.label ?? text;
-
-/** An example for this platform, or a neutral one when it is not a platform. */
-const urlPlaceholder = (text: string) =>
-  platformFor(text)?.example ?? "https://example.com/yourname";
+import {
+  checkLinkAnswer,
+  linkPlaceholder,
+  normalizeLinkAnswer,
+  platformFor,
+  platformLabel,
+} from "@/lib/socialLinks";
 
 interface AccountsStepProps {
   formData?: any;
@@ -56,7 +31,9 @@ interface AccountsStepProps {
 
 export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersist }: AccountsStepProps) => {
   const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
-  const { data: questions = [], isLoading: questionsLoading } = useAccountQuestions();
+  // The seller is asked their own category's questions, not everybody's.
+  const categoryId = useListingCategoryId(parentFormData);
+  const { data: questions = [], isLoading: questionsLoading } = useAccountQuestions(categoryId);
   const [formData, setFormData] = useState<Record<string, { url: string; followers: string }>>(() => {
     if (parentFormData?.socialAccounts) {
       const initial: Record<string, { url: string; followers: string }> = {};
@@ -98,15 +75,29 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
   const validateForm = (): { isValid: boolean; errors: string[] } => {
     const errors: string[] = [];
 
-    // Required account questions (admin-marked) must be answered.
     questions.forEach((question: any) => {
+      const ans = questionAnswers[question.id];
+
+      // Required account questions (admin-marked) must be answered.
       if (isQuestionRequired(question)) {
-        const ans = questionAnswers[question.id];
         const empty =
           !ans ||
           (typeof ans === "string" && ans.trim() === "") ||
           (Array.isArray(ans) && ans.length === 0);
         if (empty) errors.push(`${question.question} is required`);
+      }
+
+      /*
+       * A question the admin set to Link has to come back a link.
+       *
+       * This loop only ever asked whether a required answer was empty, so
+       * `sssssssssssssssss` passed under Instagram and a youtube.com address
+       * passed under Facebook — half the account links already saved point at
+       * a different site than the field they sit in.
+       */
+      if (question.answer_type === "URL") {
+        const problem = checkLinkAnswer(ans, question.question);
+        if (problem) errors.push(problem);
       }
     });
 
@@ -159,9 +150,20 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
         followers: parseInt(formData[platform].followers) || 0,
       };
     });
+    // A handle is saved as the address it stands for, so what a buyer clicks
+    // is a link rather than a name they have to go and look up.
+    const normalizedAnswers: Record<string, any> = { ...questionAnswers };
+    questions.forEach((question: any) => {
+      if (question.answer_type !== "URL") return;
+      normalizedAnswers[question.id] = normalizeLinkAnswer(
+        normalizedAnswers[question.id],
+        question.question,
+      );
+    });
+
     onNext({ 
       socialAccounts: accountsData,
-      socialAccountQuestions: questionAnswers 
+      socialAccountQuestions: normalizedAnswers 
     });
   };
 
@@ -174,7 +176,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
           <Input
             value={value}
             onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
-            placeholder="Enter your answer"
+            placeholder={hintPlaceholder(question, "Enter your answer")}
             className="bg-muted/50"
           />
         );
@@ -186,7 +188,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
             inputMode="url"
             value={value}
             onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
-            placeholder={urlPlaceholder(question.question)}
+            placeholder={hintPlaceholder(question, linkPlaceholder(question.question))}
             className="bg-muted/50"
           />
         );
@@ -196,7 +198,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
           <Textarea
             value={value}
             onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
-            placeholder="Enter your answer"
+            placeholder={hintPlaceholder(question, "Enter your answer")}
             className="bg-muted/50 min-h-[100px]"
           />
         );
@@ -205,7 +207,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
         return (
           <Input
             type="text"
-            inputMode="decimal"
+            inputMode="numeric"
             value={value}
             onChange={(e) =>
               setQuestionAnswers({
@@ -213,7 +215,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
                 [question.id]: sanitizeNumberInput(e.target.value),
               })
             }
-            placeholder="Enter a number"
+            placeholder={hintPlaceholder(question, "Enter a number")}
             className="bg-muted/50"
           />
         );
@@ -233,7 +235,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
         return (
           <Select value={value} onValueChange={(val) => setQuestionAnswers({ ...questionAnswers, [question.id]: val })}>
             <SelectTrigger className="bg-muted/50">
-              <SelectValue placeholder="Select an option" />
+              <SelectValue placeholder={hintPlaceholder(question, "Select an option")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="Yes">Yes</SelectItem>
@@ -246,7 +248,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
         return (
           <Select value={value} onValueChange={(val) => setQuestionAnswers({ ...questionAnswers, [question.id]: val })}>
             <SelectTrigger className="bg-muted/50">
-              <SelectValue placeholder="Select an option" />
+              <SelectValue placeholder={hintPlaceholder(question, "Select an option")} />
             </SelectTrigger>
             <SelectContent>
               {question.option && Array.isArray(question.option) && question.option.length > 0 ? (
@@ -291,7 +293,7 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
           <Input
             value={value}
             onChange={(e) => setQuestionAnswers({ ...questionAnswers, [question.id]: e.target.value })}
-            placeholder="Enter your answer"
+            placeholder={hintPlaceholder(question, "Enter your answer")}
             className="bg-muted/50"
           />
         );
@@ -397,8 +399,9 @@ export const AccountsStep = ({ formData: parentFormData, onNext, onBack, onPersi
             {questions.map((question: any) => (
               <div key={question.id} className="space-y-2">
                 <Label className="text-base font-semibold">
-                  {questionLabel(question.question)}
+                  {platformLabel(question.question)}
                 </Label>
+                <QuestionHint question={question} />
                 {renderQuestionField(question)}
               </div>
             ))}

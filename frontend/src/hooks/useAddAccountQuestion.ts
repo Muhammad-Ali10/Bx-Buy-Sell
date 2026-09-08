@@ -10,7 +10,7 @@ export const useAddAccountQuestion = () => {
       question: string;
       answer_type: string;
       options?: string[];
-      required?: boolean | null;
+      required?: boolean | null; categoryId?: string | null; hint?: string | null;
     }) => {
       const response = await apiClient.createAdminQuestion({
         question: data.question,
@@ -18,6 +18,8 @@ export const useAddAccountQuestion = () => {
         answer_for: "SOCIAL",
         options: data.options || [],
         required: data.required,
+        categoryId: data.categoryId,
+        hint: data.hint,
       });
 
       if (!response.success) {

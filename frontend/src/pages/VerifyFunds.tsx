@@ -41,11 +41,10 @@ const VerifyFunds = () => {
 
       {/* The sidebar is fixed, so it takes no width in this row: without a
           margin of its own the page starts at x=0 and the first 240px of every
-          heading disappears behind it. `Header` already offsets itself through
-          `sidebarOffset`, which is why only the body needed this. */}
+          heading disappears behind it. The bar sits inside this column, so the
+          same margin places it too. */}
       <div className="flex-1 min-w-0 md:w-auto lg:ml-[240px] xl:ml-[280px]">
-        <Header sidebarOffset />
-        <div className="h-20 sm:h-24" />
+        <Header inColumn dark />
 
         <main className="px-4 pb-10 sm:px-6 lg:px-10">
           <div className="mx-auto w-full max-w-5xl">

@@ -1,0 +1,121 @@
+[
+  {
+    "id": "33ddc51d-4643-45e6-893f-12fabfd4a84e",
+    "name": "string",
+    "image_path": "string",
+    "created_at": "2025-09-15T05:39:38.093Z",
+    "updated_at": "2025-09-15T05:39:38.093Z"
+  },
+  {
+    "id": "99520665-b0d9-4a65-803d-05357eeaf1c3",
+    "name": "string",
+    "image_path": "string",
+    "created_at": "2025-09-15T05:39:50.564Z",
+    "updated_at": "2025-09-15T05:39:50.564Z"
+  },
+  {
+    "id": "913bd944-f522-421e-94c0-0ae55e40f71c",
+    "name": "undefined",
+    "image_path": "undefined",
+    "created_at": "2025-09-15T07:57:25.629Z",
+    "updated_at": "2025-09-15T07:57:25.629Z"
+  },
+  {
+    "id": "440c623f-0eb9-468e-af66-8dcdd12e2611",
+    "name": "undefined",
+    "image_path": "undefined",
+    "created_at": "2025-09-15T07:59:45.209Z",
+    "updated_at": "2025-09-15T07:59:45.209Z"
+  },
+  {
+    "id": "a97ad01d-93f0-4e0a-a115-c16c9e4aea7c",
+    "name": "undefined",
+    "image_path": "undefined",
+    "created_at": "2025-09-15T07:59:50.924Z",
+    "updated_at": "2025-09-15T07:59:50.924Z"
+  },
+  {
+    "id": "a6634d80-69fa-49fa-9127-1d7047634e6a",
+    "name": "E-Commerce",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1758870786/uxzlqkv65m3laej6dfzs.png",
+    "created_at": "2025-09-26T07:13:07.754Z",
+    "updated_at": "2025-09-26T07:13:07.754Z"
+  },
+  {
+    "id": "5ce66e4d-cd7b-4900-8ec3-d6c6ca8917e9",
+    "name": "E-Commerce",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1758870800/z7zyukh0if3zcdm39pbk.png",
+    "created_at": "2025-09-26T07:13:21.326Z",
+    "updated_at": "2025-09-26T07:13:21.326Z"
+  },
+  {
+    "id": "67b4520a-6f0d-4ff6-b9d5-ce5d3cec6b6b",
+    "name": "E-Commerce",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1758870816/xik34ysw3nr1rdkgxvpl.png",
+    "created_at": "2025-09-26T07:13:37.388Z",
+    "updated_at": "2025-09-26T07:13:37.388Z"
+  },
+  {
+    "id": "ef6cc0aa-8cce-4469-92e1-a693fc381f13",
+    "name": "Software",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1758871328/ulk8p9c9nfx7o3pz79bl.png",
+    "created_at": "2025-09-26T07:22:08.960Z",
+    "updated_at": "2025-09-26T07:22:08.960Z"
+  },
+  {
+    "id": "47160175-61f8-43e1-9eef-57a2b4459e20",
+    "name": "Service Business",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1759307169/goararo3hll8s1hcdyew.png",
+    "created_at": "2025-10-01T08:26:09.944Z",
+    "updated_at": "2025-10-01T08:26:09.944Z"
+  },
+  {
+    "id": "9931cd66-bec5-45da-adac-713a11e0b902",
+    "name": "Other",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1762000953/p1cjmdgtvinrvoxuxeb3.png",
+    "created_at": "2025-11-01T12:42:35.573Z",
+    "updated_at": "2026-01-22T21:39:09.184Z"
+  },
+  {
+    "id": "b448a1d5-10fd-48d1-bed9-8be81b352206",
+    "name": "AI - Artificial Intelligence",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1764229085/ak8ts2uzq99blh00xe5a.jpg",
+    "created_at": "2025-11-27T07:38:06.546Z",
+    "updated_at": "2026-08-26T13:01:56.101Z"
+  },
+  {
+    "id": "fbfb047e-2f8d-4728-ac13-b677da47d361",
+    "name": "Pioneers",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1764229086/agjzzpgnd6uvs2vkt5bb.jpg",
+    "created_at": "2025-11-27T07:38:07.906Z",
+    "updated_at": "2026-08-26T13:00:41.105Z"
+  },
+  {
+    "id": "54d221cb-791b-42ef-8802-234ed5dece76",
+    "name": "Blog",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1764229087/uhhdhv7ejk0mkkvbpzg0.jpg",
+    "created_at": "2025-11-27T07:38:08.419Z",
+    "updated_at": "2026-05-13T21:26:08.480Z"
+  },
+  {
+    "id": "c8966608-95ab-4425-95ca-a60abd5f8b66",
+    "name": "Blog",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1764229087/ccq5tdxam0c3jeezengp.jpg",
+    "created_at": "2025-11-27T07:38:08.438Z",
+    "updated_at": "2026-05-13T21:25:52.667Z"
+  },
+  {
+    "id": "be023eb0-1732-4091-8d3c-935e5caaadcf",
+    "name": "Marketplace",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1764229087/kcktrun6xn6w2y96seey.jpg",
+    "created_at": "2025-11-27T07:38:08.453Z",
+    "updated_at": "2026-05-13T21:24:55.131Z"
+  },
+  {
+    "id": "13a71afb-1ee2-41f6-8453-93c07e03c26c",
+    "name": "Marketplace",
+    "image_path": "https://res.cloudinary.com/dd6y5nwsi/image/upload/v1764229086/iczfbrmjc73lucjzgntl.jpg",
+    "created_at": "2025-11-27T07:38:10.679Z",
+    "updated_at": "2026-05-11T21:15:04.948Z"
+  }
+]

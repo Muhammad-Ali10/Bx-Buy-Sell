@@ -12,7 +12,7 @@ export const useAddProductQuestion = () => {
       options?: string[];
       dependsOnQuestionId?: string | null;
       dependsOnValue?: string | null;
-      required?: boolean | null;
+      required?: boolean | null; categoryId?: string | null; hint?: string | null; publicHint?: string | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -29,6 +29,9 @@ export const useAddProductQuestion = () => {
         dependsOnQuestionId: data.dependsOnQuestionId,
         dependsOnValue: data.dependsOnValue,
         required: data.required,
+        categoryId: data.categoryId,
+        hint: data.hint,
+        publicHint: data.publicHint,
       });
 
       if (!response.success) {

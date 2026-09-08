@@ -19,6 +19,10 @@ jest.mock("@/hooks/useAdInformationQuestions", () => ({ useAdInformationQuestion
 jest.mock("@/hooks/useHandoverQuestions", () => ({ useHandoverQuestions: () => ({ data: [] }) }));
 jest.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ data: [] }) }));
 jest.mock("@/hooks/useAccountQuestions", () => ({ useAccountQuestions: () => ({ data: [] }) }));
+// The step asks which category the listing is in so the questions it checks
+// are that category's. Without this the hook reaches for React Query, which
+// this test deliberately does not set up.
+jest.mock("@/hooks/useListingCategoryId", () => ({ useListingCategoryId: () => undefined }));
 
 jest.mock("@/lib/api", () => ({
   apiClient: {

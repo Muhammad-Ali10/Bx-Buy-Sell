@@ -6,16 +6,27 @@ export interface AccountQuestion {
   question: string;
   answer_type: string;
   answer_for: string;
+  /** Help for the seller, shown under the field while the listing is written. */
+  hint?: string | null;
+
   option: any[];
   created_at: string;
   updated_at: string;
 }
 
-export const useAccountQuestions = () => {
+/**
+ * The SOCIAL questions for one category.
+ *
+ * Every category used to share one set. Passing no category asks for the
+ * set that belongs to none — the originals, which is what this returned
+ * before categories existed and what a caller that has not been told about
+ * them still gets.
+ */
+export const useAccountQuestions = (categoryId?: string) => {
   return useQuery({
-    queryKey: ["account-questions"],
+    queryKey: ["account-questions", categoryId ?? null],
     queryFn: async () => {
-      const response = await apiClient.getAdminQuestionsByType("SOCIAL");
+      const response = await apiClient.getAdminQuestionsByType("SOCIAL", categoryId);
       console.log('Account Questions API Response:', response);
       
       if (!response.success) {

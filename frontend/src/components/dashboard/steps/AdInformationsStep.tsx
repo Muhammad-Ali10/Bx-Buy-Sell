@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { hintPlaceholder, QuestionHint } from "@/components/dashboard/QuestionHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Upload, X, Paperclip, ImageIcon, Loader2 } from "lucide-react";
 import { useAdInformationQuestions } from "@/hooks/useAdInformationQuestions";
+import { useListingCategoryId } from "@/hooks/useListingCategoryId";
 import { toast } from "sonner";
 import { uploadMultipleToCloudinary } from "@/lib/cloudinary";
 import { fileNameFromUrl, parseMediaUrls } from "@/lib/mediaUtils";
@@ -89,7 +91,9 @@ const getFieldConfig = (question: any): FieldConfig => {
 const toUrlArray = parseMediaUrls;
 
 export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, onPersist }: AdInformationsStepProps) => {
-  const { data: questions, isLoading } = useAdInformationQuestions();
+  // The seller is asked their own category's questions, not everybody's.
+  const categoryId = useListingCategoryId(parentFormData);
+  const { data: questions, isLoading } = useAdInformationQuestions(categoryId);
   const [formData, setFormData] = useState<Record<string, any>>(parentFormData || {});
   const [uploadingFiles, setUploadingFiles] = useState<Record<string, boolean>>({});
   const currencySymbol = getFormCurrencySymbol(formData);
@@ -249,6 +253,7 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
               <div key={question.id} className="space-y-2">
                 <div className="flex items-center justify-between gap-4">
                   <label className="text-sm font-medium text-foreground">{question.question}</label>
+                  <QuestionHint question={question} />
                   {cfg.showCounter && cfg.maxLength && (
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
                       {textValue.length}/{cfg.maxLength} characters
@@ -397,7 +402,7 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                         minus through. */}
                     <Input
                       type="text"
-                      inputMode="decimal"
+                      inputMode="numeric"
                       placeholder="0"
                       value={textValue}
                       onChange={(e) =>
@@ -410,7 +415,7 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
 
                 {cfg.kind === "title" && (
                   <Input
-                    placeholder={cfg.placeholder}
+                    placeholder={hintPlaceholder(question, cfg.placeholder)}
                     value={textValue}
                     maxLength={cfg.maxLength}
                     onChange={(e) => handleInputChange(question.id, e.target.value)}
@@ -420,7 +425,7 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
 
                 {cfg.kind === "textarea" && (
                   <Textarea
-                    placeholder={cfg.placeholder}
+                    placeholder={hintPlaceholder(question, cfg.placeholder)}
                     value={textValue}
                     maxLength={cfg.maxLength}
                     onChange={(e) => handleInputChange(question.id, e.target.value)}

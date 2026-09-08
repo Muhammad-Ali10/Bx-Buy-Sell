@@ -6,6 +6,11 @@ export interface ProductQuestion {
   question: string;
   answer_type: string;
   answer_for: string;
+  /** Help for the seller, shown under the field while the listing is written. */
+  hint?: string | null;
+  /** Help for the buyer, shown as the ⓘ beside this figure on the ad. */
+  publicHint?: string | null;
+
   option?: string[];
   dependsOnQuestionId?: string | null;
   dependsOnValue?: string | null;
@@ -13,11 +18,19 @@ export interface ProductQuestion {
   updated_at: string;
 }
 
-export const useProductQuestions = () => {
+/**
+ * The PRODUCT questions for one category.
+ *
+ * Every category used to share one set. Passing no category asks for the
+ * set that belongs to none — the originals, which is what this returned
+ * before categories existed and what a caller that has not been told about
+ * them still gets.
+ */
+export const useProductQuestions = (categoryId?: string) => {
   return useQuery({
-    queryKey: ["product-questions"],
+    queryKey: ["product-questions", categoryId ?? null],
     queryFn: async () => {
-      const response = await apiClient.getAdminQuestionsByType("PRODUCT");
+      const response = await apiClient.getAdminQuestionsByType("PRODUCT", categoryId);
       console.log('Product Questions API Response:', response);
       
       if (!response.success) {

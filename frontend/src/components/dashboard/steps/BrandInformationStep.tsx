@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { hintPlaceholder, QuestionHint } from "@/components/dashboard/QuestionHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -6,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useBrandQuestions } from "@/hooks/useBrandQuestions";
+import { useListingCategoryId } from "@/hooks/useListingCategoryId";
 import { toast } from "sonner";
 import FlagIcon from "@/components/FlagIcon";
 import { CountrySelect } from "@/components/CountrySelect";
@@ -18,6 +20,7 @@ import {
   normalizeDomain,
 } from "@/lib/domainUtils";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
+import { checkLinkAnswer, linkPlaceholder, normalizeLinkAnswer } from "@/lib/socialLinks";
 import { sanitizeNumberInput } from "@/lib/numberInput";
 
 interface BrandInformationStepProps {
@@ -28,7 +31,9 @@ interface BrandInformationStepProps {
 }
 
 export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack, onPersist }: BrandInformationStepProps) => {
-  const { data: questions = [], isLoading } = useBrandQuestions();
+  // The seller is asked their own category's questions, not everybody's.
+  const categoryId = useListingCategoryId(parentFormData);
+  const { data: questions = [], isLoading } = useBrandQuestions(categoryId);
   const [formData, setFormData] = useState<Record<string, any>>(parentFormData || {});
   usePersistOnUnmount(onPersist, () => formData);
 
@@ -69,15 +74,14 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
           errors.push(DOMAIN_VALIDATION_MESSAGE);
         }
       } else if (question.answer_type === "URL" && value) {
-        const urlValue = typeof value === "string" ? value : String(value);
-        const withProtocol = /^https?:\/\//i.test(urlValue.trim())
-          ? urlValue.trim()
-          : `https://${urlValue.trim()}`;
-        try {
-          new URL(withProtocol);
-        } catch {
-          errors.push(`${question.question} must be a valid URL`);
-        }
+        /*
+         * The same rule the account links run.
+         *
+         * This was `new URL()`, which is not a check: "ssssss" is a valid
+         * hostname, so `https://ssssss` parses and the answer was accepted.
+         */
+        const problem = checkLinkAnswer(value, question.question);
+        if (problem) errors.push(problem);
       }
     });
     
@@ -102,11 +106,19 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
     
     const normalizedFormData = { ...formData };
     questions.forEach((question: any) => {
-      if (!isDomainQuestion(question.question)) return;
-
       const value = normalizedFormData[question.id];
-      if (typeof value === "string" && value.trim() && isValidDomain(value)) {
-        normalizedFormData[question.id] = normalizeDomain(value);
+
+      if (isDomainQuestion(question.question)) {
+        if (typeof value === "string" && value.trim() && isValidDomain(value)) {
+          normalizedFormData[question.id] = normalizeDomain(value);
+        }
+        return;
+      }
+
+      // A Link answer is stored the same way a domain is, so what is saved is
+      // something a buyer can click rather than whatever they happened to type.
+      if (question.answer_type === "URL") {
+        normalizedFormData[question.id] = normalizeLinkAnswer(value, question.question);
       }
     });
 
@@ -139,11 +151,10 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
             <Input
               value={value}
               onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
-              placeholder={
-                isDomainQuestion(question.question)
-                  ? "www.example.com"
-                  : "Enter your answer"
-              }
+              placeholder={hintPlaceholder(
+                question,
+                isDomainQuestion(question.question) ? "www.example.com" : "Enter your answer",
+              )}
               className="bg-muted/50"
               style={isAddressField && value ? { paddingRight: '40px' } : {}}
             />
@@ -160,12 +171,12 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
         return (
           <Input
             type="text"
-            inputMode="decimal"
+            inputMode="numeric"
             value={value}
             onChange={(e) =>
               setFormData({ ...formData, [question.id]: sanitizeNumberInput(e.target.value) })
             }
-            placeholder="Enter a number"
+            placeholder={hintPlaceholder(question, "Enter a number")}
             className="bg-muted/50"
           />
         );
@@ -175,7 +186,7 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
           <Textarea
             value={value}
             onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
-            placeholder="Enter your answer"
+            placeholder={hintPlaceholder(question, "Enter your answer")}
             className="bg-muted/50 min-h-[100px]"
           />
         );
@@ -194,11 +205,12 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
             type="text"
             value={value}
             onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
-            placeholder={
+            placeholder={hintPlaceholder(
+              question,
               isDomainQuestion(question.question)
                 ? "www.example.com"
-                : "Enter link here"
-            }
+                : linkPlaceholder(question.question),
+            )}
             className="bg-muted/50 border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none"
             style={{
               outline: "none",
@@ -211,7 +223,7 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
         return (
           <Select value={value} onValueChange={(val) => setFormData({ ...formData, [question.id]: val })}>
             <SelectTrigger className="bg-muted/50">
-              <SelectValue placeholder="Select an option" />
+              <SelectValue placeholder={hintPlaceholder(question, "Select an option")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="yes">Yes</SelectItem>
@@ -224,7 +236,7 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
         return (
           <Select value={value} onValueChange={(val) => setFormData({ ...formData, [question.id]: val })}>
             <SelectTrigger className="bg-muted/50">
-              <SelectValue placeholder="Select an option" />
+              <SelectValue placeholder={hintPlaceholder(question, "Select an option")} />
             </SelectTrigger>
             <SelectContent>
               {question.option && Array.isArray(question.option) && question.option.map((opt: string, idx: number) => (
@@ -271,7 +283,7 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
           <Input
             value={value}
             onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
-            placeholder="Enter your answer"
+            placeholder={hintPlaceholder(question, "Enter your answer")}
             className="bg-muted/50"
           />
         );
@@ -303,6 +315,7 @@ export const BrandInformationStep = ({ formData: parentFormData, onNext, onBack,
               <Label className="text-sm sm:text-base font-semibold">
                 {question.question === "Domains" ? "Domain" : question.question}
               </Label>
+              <QuestionHint question={question} />
               {renderField(question)}
             </div>
           ))

@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
+import { hintPlaceholder, QuestionHint } from "@/components/dashboard/QuestionHint";
+import { sanitizeNumberInput } from "@/lib/numberInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { useHandoverQuestions } from "@/hooks/useHandoverQuestions";
+import { useListingCategoryId } from "@/hooks/useListingCategoryId";
 import { toast } from "sonner";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
 
@@ -29,7 +32,9 @@ const checkboxSelectionToArray = (v: unknown): string[] => {
 };
 
 export const HandoverStep = ({ formData: parentFormData, onNext, onPersist }: HandoverStepProps) => {
-  const { data: questions, isLoading } = useHandoverQuestions();
+  // The seller is asked their own category's questions, not everybody's.
+  const categoryId = useListingCategoryId(parentFormData);
+  const { data: questions, isLoading } = useHandoverQuestions(categoryId);
   const [formData, setFormData] = useState<Record<string, any>>(parentFormData || {});
   usePersistOnUnmount(onPersist, () => formData);
 
@@ -215,6 +220,7 @@ const isYes = (value: unknown) => String(value ?? '').trim().toLowerCase() === '
                 <Label className="text-base md:text-lg font-semibold text-foreground block">
                   {question.question}
                 </Label>
+                <QuestionHint question={question} />
 
                 {isCheckboxLike && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
@@ -270,19 +276,16 @@ const isYes = (value: unknown) => String(value ?? '').trim().toLowerCase() === '
                 )}
 
                 {isNumber && (
-                  /* Digits and nothing else.
-                     `type="number"` sounds like it does this and does not: a
-                     browser accepts "e" (1e5 is a number), a leading minus, a
-                     decimal point, and whatever is pasted in. Stripping on the
-                     way in is the only version that holds. `inputMode` still
-                     brings up the number keypad on a phone. */
+                  /* Digits and nothing else — see `sanitizeNumberInput`,
+                     which every other step runs too. This step had its own
+                     copy of the rule written inline. */
                   <Input
                     type="text"
                     inputMode="numeric"
                     placeholder="0"
                     value={formData[question.id] || ""}
                     onChange={(e) =>
-                      handleInputChange(question.id, e.target.value.replace(/\D/g, ""))
+                      handleInputChange(question.id, sanitizeNumberInput(e.target.value))
                     }
                     className="w-full h-14 rounded-xl bg-background"
                   />
@@ -290,7 +293,7 @@ const isYes = (value: unknown) => String(value ?? '').trim().toLowerCase() === '
 
                 {isText && (
                   <Textarea
-                    placeholder="Enter your answer"
+                    placeholder={hintPlaceholder(question, "Enter your answer")}
                     value={formData[question.id] || ""}
                     onChange={(e) => handleInputChange(question.id, e.target.value)}
                     className="w-full rounded-xl bg-background min-h-24"

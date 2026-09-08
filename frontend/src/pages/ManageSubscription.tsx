@@ -236,7 +236,7 @@ const ManageSubscription = () => {
       <main className="flex-1 bg-white">
         {/* Three stacked panels, as the design has them: the subscription
             itself, then the figures, then the pitch. */}
-        <div className="mx-auto max-w-[1000px] px-4 py-8 sm:px-6 sm:py-12">
+        <div className="mx-auto max-w-[1000px] px-4 pt-24 pb-8 sm:px-6 sm:pt-28 sm:pb-12">
           <div className="rounded-2xl bg-[#FAFAFA] px-5 py-8 sm:px-10 sm:py-10">
           <h1
             className="text-center text-[22px] font-semibold uppercase text-[#0F172A] sm:text-[28px]"

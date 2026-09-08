@@ -11,7 +11,7 @@ export const useUpdateAccountQuestion = () => {
       question: string;
       answer_type: string;
       options?: string[];
-      required?: boolean | null;
+      required?: boolean | null; hint?: string | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -25,6 +25,7 @@ export const useUpdateAccountQuestion = () => {
         answer_type: mappedAnswerType,
         answer_for: "SOCIAL",
         required: data.required ?? null,
+        hint: data.hint,
       };
 
       // Add options if provided

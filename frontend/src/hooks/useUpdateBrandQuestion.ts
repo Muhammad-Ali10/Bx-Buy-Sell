@@ -11,7 +11,7 @@ export const useUpdateBrandQuestion = () => {
       question: string;
       answer_type: string;
       option?: string[];
-      required?: boolean | null;
+      required?: boolean | null; hint?: string | null;
     }) => {
       console.log('🔄 Updating brand question:', data);
       
@@ -30,6 +30,7 @@ export const useUpdateBrandQuestion = () => {
         answer_type: mappedAnswerType,
         answer_for: "BRAND" as const,
         required: data.required ?? null,
+        hint: data.hint,
       };
       
       // Add options if provided

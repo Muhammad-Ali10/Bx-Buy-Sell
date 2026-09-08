@@ -12,6 +12,12 @@ import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 interface AddStatisticQuestionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * The category this question is being written for. Questions belong to one
+   * category now, and a question saved without one joins no set and is shown
+   * to nobody.
+   */
+  categoryId?: string | null;
 }
 
 const QUESTION_TYPES = [
@@ -23,9 +29,10 @@ const QUESTION_TYPES = [
   { value: "TEXTAREA", label: "Text Area" },
 ];
 
-export const AddStatisticQuestionDialog = ({ open, onOpenChange }: AddStatisticQuestionDialogProps) => {
+export const AddStatisticQuestionDialog = ({ open, onOpenChange, categoryId }: AddStatisticQuestionDialogProps) => {
   const [question, setQuestion] = useState("");
   const [hintText, setHintText] = useState("");
+  const [publicHint, setPublicHint] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
   const [required, setRequired] = useState(true);
@@ -50,6 +57,9 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange }: AddStatisticQ
         answer_type: questionType,
         options: optionsArray,
         required,
+        categoryId,
+        hint: hintText.trim(),
+        publicHint: publicHint.trim(),
       },
       {
         onSuccess: () => {
@@ -90,11 +100,20 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange }: AddStatisticQ
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-black">Hint Text Field</Label>
+            <Label className="text-sm font-medium text-black">Create Listing Text Hint</Label>
             <Textarea
               value={hintText}
               onChange={(e) => setHintText(e.target.value)}
               placeholder="Enter the percentage of visitors who make a purchase out of the total number of visitors."
+              className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-black">Public Text Hint</Label>
+            <Textarea
+              value={publicHint}
+              onChange={(e) => setPublicHint(e.target.value)}
+              placeholder="Shown to buyers beside this figure on the published ad."
               className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
             />
           </div>

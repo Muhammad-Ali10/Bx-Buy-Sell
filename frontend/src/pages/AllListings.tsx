@@ -197,6 +197,25 @@ const NotificationButtonWithCount = ({ userId }: { userId: string }) => {
   );
 };
 
+/**
+ * A "min-max" query parameter, or the default when it is missing or malformed.
+ *
+ * The search bar on the home page hands its filters over through the URL, so
+ * whatever arrives here was typed into an address bar as easily as it was
+ * built by a button — a range that does not parse, or runs backwards, is
+ * ignored rather than allowed to hide every listing.
+ */
+const rangeFromParam = (
+  raw: string | null,
+  fallback: [number, number],
+): [number, number] => {
+  const parts = String(raw ?? '').split('-');
+  if (parts.length !== 2) return fallback;
+  const [min, max] = parts.map(Number);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) return fallback;
+  return [min, max];
+};
+
 const AllListings = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -280,12 +299,12 @@ const AllListings = () => {
     search: searchParams.get('search') || "",
     niche: searchParams.get('category') || "all",
     revenueGenerating: "all",
-    priceRange: [0, PRICE_MAX], // Default to show all price ranges (matches slider max)
-    businessLocation: "all",
+    priceRange: rangeFromParam(searchParams.get('price'), [0, PRICE_MAX]),
+    businessLocation: searchParams.get('location') || "all",
     advancedFilters: {
       targetCountry: "all",
       targetCountryPercentage: 50,
-      ageRange: [0, AGE_MAX], // Default to show all ages (matches slider max)
+      ageRange: rangeFromParam(searchParams.get('age'), [0, AGE_MAX]),
       monthlyRevenue: [0, MONEY_MAX], // Default to show all revenue ranges (matches slider max)
       monthlyProfit: [0, MONEY_MAX], // Default to show all profit ranges (matches slider max)
       monthlyPageviews: [0, 1000000], // Default to show all pageview ranges (matches slider max)
@@ -310,6 +329,19 @@ const AllListings = () => {
     }
     if (filters.search) {
       params.set('search', filters.search);
+    }
+    if (filters.businessLocation !== "all") {
+      params.set('location', filters.businessLocation);
+    }
+    // Only when narrowed. A range at its full width filters nothing, and
+    // writing it would put noise in every link the user copies.
+    const { priceRange } = filters;
+    if (priceRange[0] !== 0 || priceRange[1] !== PRICE_MAX) {
+      params.set('price', `${priceRange[0]}-${priceRange[1]}`);
+    }
+    const { ageRange } = filters.advancedFilters;
+    if (ageRange[0] !== 0 || ageRange[1] !== AGE_MAX) {
+      params.set('age', `${ageRange[0]}-${ageRange[1]}`);
     }
     setSearchParams(params, { replace: true });
     setCurrentPage(1); // Reset to first page when filters change
@@ -930,9 +962,11 @@ const AllListings = () => {
 
           {/* Right Content Area */}
           <div className="flex-1 min-w-0 flex flex-col">
-            {/* Shared transparent bar, same as the rest of the portal. */}
-            <Header sidebarOffset />
-            <div className="h-20 sm:h-24" />
+            {/* Shared transparent bar, same as the rest of the portal. It
+                sits in this column rather than floating over the viewport, so
+                it lines up with the content instead of overhanging the black
+                frame — and needs no spacer under it to push the page clear. */}
+            <Header inColumn dark />
             
             {/* Main Content Area - White Background */}
             <div className="flex-1 bg-white min-w-0 p-5 md:px-2 lg:px-4 md:py-4 lg:py-8 w-full">

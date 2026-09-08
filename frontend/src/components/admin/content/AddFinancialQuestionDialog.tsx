@@ -88,7 +88,7 @@ export const AddFinancialQuestionDialog = ({ open, onOpenChange }: AddFinancialQ
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-black">Hint Text Field</Label>
+            <Label className="text-sm font-medium text-black">Create Listing Text Hint</Label>
             <Textarea
               value={hintText}
               onChange={(e) => setHintText(e.target.value)}

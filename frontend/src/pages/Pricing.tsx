@@ -93,7 +93,10 @@ const Pricing = () => {
     <div className="min-h-screen bg-background">
       <Header />
       
-      <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-20">
+      {/* The bar floats over the page, so the top padding has to clear it —
+          92px on a desktop, 64px on a phone. It used to be short of that and
+          the heading sat behind a solid blue bar that hid the overlap. */}
+      <main className="container mx-auto px-4 sm:px-6 lg:px-8 pt-24 sm:pt-28 pb-12 sm:pb-16 lg:pb-20">
         <div className="text-center mb-12">
           <h1
             style={{

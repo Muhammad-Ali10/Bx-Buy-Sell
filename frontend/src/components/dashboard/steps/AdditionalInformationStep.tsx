@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { hintPlaceholder, QuestionHint } from "@/components/dashboard/QuestionHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { ImageIcon, X, Loader2 } from "lucide-react";
 import { useStatisticQuestions } from "@/hooks/useStatisticQuestions";
+import { useListingCategoryId } from "@/hooks/useListingCategoryId";
 import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
 import { toast } from "sonner";
@@ -45,9 +47,11 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
   }, [defaultTab]);
 
   // Fetch questions for each tab
-  const { data: statisticQuestions = [], isLoading: statisticsLoading } = useStatisticQuestions();
-  const { data: productQuestions = [], isLoading: productsLoading } = useProductQuestions();
-  const { data: managementQuestions = [], isLoading: managementLoading } = useManagementQuestions();
+  // The seller is asked their own category's questions, not everybody's.
+  const categoryId = useListingCategoryId(parentFormData);
+  const { data: statisticQuestions = [], isLoading: statisticsLoading } = useStatisticQuestions(categoryId);
+  const { data: productQuestions = [], isLoading: productsLoading } = useProductQuestions(categoryId);
+  const { data: managementQuestions = [], isLoading: managementLoading } = useManagementQuestions(categoryId);
 
   const [formData, setFormData] = useState<Record<string, any>>(parentFormData || {});
   const [uploadingFiles, setUploadingFiles] = useState<Record<string, boolean>>({});
@@ -464,7 +468,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                   <div style={{ display: "flex", alignItems: "center", gap: "2px", width: "100%" }}>
                     <Input
                       type="text"
-                      inputMode="decimal"
+                      inputMode="numeric"
                       value={row?.percent || ""}
                       onChange={(e) => {
                         const val = clampPercent(sanitizeNumberInput(e.target.value));
@@ -602,7 +606,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
           <Input
             value={value}
             onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
-            placeholder="Enter your answer"
+            placeholder={hintPlaceholder(question, "Enter your answer")}
             className="bg-background h-11 sm:h-12 border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none"
             style={{
               outline: "none",
@@ -634,14 +638,14 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             )}
             <Input
               type="text"
-              inputMode="decimal"
+              inputMode="numeric"
               value={value}
               onChange={(e) => {
                 let v = sanitizeNumberInput(e.target.value);
                 if (affix.prefix === "%") v = clampPercent(v);
                 setFormData({ ...formData, [question.id]: v });
               }}
-              placeholder="Enter a number"
+              placeholder={hintPlaceholder(question, "Enter a number")}
               className="h-11 sm:h-12 border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none"
               style={{
                 background: "rgba(250, 250, 250, 1)",
@@ -661,7 +665,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
           <Textarea
             value={value}
             onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
-            placeholder="Enter your answer"
+            placeholder={hintPlaceholder(question, "Enter your answer")}
             className="bg-background min-h-[120px] border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none resize-y"
             style={{
               outline: "none",
@@ -719,7 +723,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
         return (
           <Select value={value} onValueChange={(val) => setFormData({ ...formData, [question.id]: val })}>
             <SelectTrigger className="bg-background h-11 sm:h-12 border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none">
-              <SelectValue placeholder="Select an option" />
+              <SelectValue placeholder={hintPlaceholder(question, "Select an option")} />
             </SelectTrigger>
             <SelectContent>
               {question.option && Array.isArray(question.option) && question.option.map((opt: string, idx: number) => (
@@ -898,7 +902,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
           <Input
             value={value}
             onChange={(e) => setFormData({ ...formData, [question.id]: e.target.value })}
-            placeholder="Enter your answer"
+            placeholder={hintPlaceholder(question, "Enter your answer")}
             className="bg-background border-border h-11 sm:h-12 focus:ring-2 focus:ring-accent focus:border-accent"
           />
         );
@@ -932,6 +936,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                       {question.question}
                     </Label>
                   )}
+                  <QuestionHint question={question} />
                   {renderField(question)}
                 </div>
               );
@@ -961,6 +966,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                       {question.question}
                     </Label>
                   )}
+                  <QuestionHint question={question} />
                   {renderField(question)}
                 </div>
               );
@@ -990,6 +996,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                       {question.question}
                     </Label>
                   )}
+                  <QuestionHint question={question} />
                   {renderField(question)}
                 </div>
               );

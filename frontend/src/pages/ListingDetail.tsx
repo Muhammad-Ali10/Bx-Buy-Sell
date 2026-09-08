@@ -28,9 +28,13 @@ import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious
 import ListingCard from "@/components/ListingCard";
 import { calculateBusinessAgeFromListing, formatListingBusinessAge } from "@/lib/dateUtils";
 import {
+  calculateNetProfitForColumn,
+  columnHasFigures,
   computeListingFinancialMetrics,
   getMultipleRating,
+  OVERALL_COSTS_ROW,
   type MultipleKind,
+  realignFinancialTable,
   resolveFinancialColumns,
   coversFullYear,
   coverageLabel,
@@ -113,6 +117,10 @@ import FileTypeIcon from "@/components/FileTypeIcon";
 import ListingImage from "@/components/ListingImage";
 import ExIcon from "@/assets/Ex icon.svg";
 import { getCurrencySymbol } from "@/components/CurrencySelect";
+import { useListingCategoryId } from "@/hooks/useListingCategoryId";
+import { useStatisticQuestions } from "@/hooks/useStatisticQuestions";
+import { useProductQuestions } from "@/hooks/useProductQuestions";
+import { useManagementQuestions } from "@/hooks/useManagementQuestions";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 import RequestIcon from "@/assets/request.svg";
 import DateIcon from "@/assets/date.svg";
@@ -585,6 +593,76 @@ const resolveSectionAnswers = (
     }
 
     out[spec.key] = answer;
+  }
+
+  return out;
+};
+
+/** The cards each section shows, and the wording that finds their question. */
+const STATISTIC_SPECS = [
+    { key: 'conversionRate', match: ['conversion rate', 'conversion'] },
+    { key: 'refundRate', match: ['refund rate', 'refund'] },
+    { key: 'returningCustomers', match: ['returning customer', 'returning', 'repeat'] },
+    { key: 'customerType', match: ['customer type'] },
+    { key: 'avgOrderValue', match: ['average order value', 'average order', 'aov', 'order value'] },
+    { key: 'emailSubscribers', match: ['e-mail subscriber', 'email subscriber', 'subscriber'] },
+    { key: 'customerBase', match: ['customer base', 'total customer', 'customers'] },
+    { key: 'pageViews', match: ['page views', 'traffic', 'views'] },
+] as const as { key: string; match: string[] }[];
+
+const MANAGEMENT_SPECS = [
+    { key: 'freelancers', match: ['freelancer', 'freelance'] },
+    { key: 'employees', match: ['employee', 'staff', 'team member'] },
+    // "How many hours you invest per week?" is the real wording; the old
+    // 'hours per week' never matched it, so this card was always blank.
+    { key: 'ceoTime', match: ['ceo time', 'owner time', 'time is required', 'hours you invest', 'per week', 'per day', 'daily'] },
+] as const as { key: string; match: string[] }[];
+
+const PRODUCT_SPECS = [
+    // Most specific first. 'inventory value' has to be tried before anything
+    // that merely says 'inventory', or it loses its question to another card.
+    { key: 'inventoryValue', match: ['inventory value', 'stock value', 'what is the inventory'] },
+    // The real wording is "Is it included in the price?" — with "the" in it,
+    // which is exactly what the old keyword missed.
+    { key: 'inventoryIncluded', match: ['included in the price', 'included in price', 'inventory included'] },
+    { key: 'hasInventory', match: ['do you have inventory', 'has inventory', 'seller has inventory', 'inventory', 'stock'] },
+    { key: 'numProducts', match: ['how many different products', 'number of product', 'product count', 'products'] },
+    { key: 'sellingModel', match: ['selling model', 'dropshipping', 'model'] },
+] as const as { key: string; match: string[] }[];
+
+/**
+ * The hint to print beside each card, in the administrator's words.
+ *
+ * These tooltips were sentences written into this page, so changing one meant
+ * changing the code. They are a field on the question now. The matching is the
+ * same as `resolveSectionAnswers` uses — a card finds its admin question by the
+ * same keywords it finds its answer by — so a figure and its explanation always
+ * describe the same question.
+ *
+ * A question with no hint yields null, and the caller keeps the sentence the
+ * page already had. Nothing goes blank because nobody has filled this in yet.
+ */
+const resolveSectionHints = (
+  questions: any[] | undefined,
+  specs: { key: string; match: string[] }[],
+): Record<string, string | null> => {
+  const rows = Array.isArray(questions) ? questions : [];
+  const claimed = new Set<number>();
+  const out: Record<string, string | null> = {};
+
+  for (const spec of specs) {
+    let hint: string | null = null;
+    outer: for (const term of spec.match) {
+      for (let i = 0; i < rows.length; i += 1) {
+        if (claimed.has(i)) continue;
+        if (String(rows[i]?.question || '').toLowerCase().includes(term)) {
+          claimed.add(i);
+          hint = String(rows[i]?.publicHint || '').trim() || null;
+          break outer;
+        }
+      }
+    }
+    out[spec.key] = hint;
   }
 
   return out;
@@ -2522,17 +2600,26 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
    * customers is one of the two statistics shown to visitors who have not
    * registered, while customer base is meant to stay locked.
    */
+  /*
+   * The administrator's wording for the ⓘ beside each figure.
+   *
+   * Questions belong to a category, so the hints do too — an e-commerce ad and
+   * a service ad can explain the same card differently. Where nothing has been
+   * written the sentences already in this page are used, so the tooltips read
+   * exactly as they did before anyone filled a hint in.
+   */
+  const listingCategoryId = useListingCategoryId({
+    category: listing?.category?.[0]?.name ?? '',
+  });
+  const { data: statisticAdminQuestions } = useStatisticQuestions(listingCategoryId);
+  const { data: productAdminQuestions } = useProductQuestions(listingCategoryId);
+  const { data: managementAdminQuestions } = useManagementQuestions(listingCategoryId);
+  const statisticHints = resolveSectionHints(statisticAdminQuestions, STATISTIC_SPECS);
+  const managementHints = resolveSectionHints(managementAdminQuestions, MANAGEMENT_SPECS);
+  const productHints = resolveSectionHints(productAdminQuestions, PRODUCT_SPECS);
+
   const statisticsMissing = missingValueLabel(listing?.statistics, unlockCtaText);
-  const statisticValues = resolveSectionAnswers(listing?.statistics, [
-    { key: 'conversionRate', match: ['conversion rate', 'conversion'] },
-    { key: 'refundRate', match: ['refund rate', 'refund'] },
-    { key: 'returningCustomers', match: ['returning customer', 'returning', 'repeat'] },
-    { key: 'customerType', match: ['customer type'] },
-    { key: 'avgOrderValue', match: ['average order value', 'average order', 'aov', 'order value'] },
-    { key: 'emailSubscribers', match: ['e-mail subscriber', 'email subscriber', 'subscriber'] },
-    { key: 'customerBase', match: ['customer base', 'total customer', 'customers'] },
-    { key: 'pageViews', match: ['page views', 'traffic', 'views'] },
-  ]);
+  const statisticValues = resolveSectionAnswers(listing?.statistics, STATISTIC_SPECS);
 
   const conversionRate = statisticValues.conversionRate || statisticsMissing;
   const refundRate = statisticValues.refundRate || statisticsMissing;
@@ -2720,30 +2807,14 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
 
   // Management. Order matters: the narrower phrasing gets first refusal.
   const managementMissing = missingValueLabel(listing?.managementQuestion, unlockCtaText);
-  const managementValues = resolveSectionAnswers(listing?.managementQuestion, [
-    { key: 'freelancers', match: ['freelancer', 'freelance'] },
-    { key: 'employees', match: ['employee', 'staff', 'team member'] },
-    // "How many hours you invest per week?" is the real wording; the old
-    // 'hours per week' never matched it, so this card was always blank.
-    { key: 'ceoTime', match: ['ceo time', 'owner time', 'time is required', 'hours you invest', 'per week', 'per day', 'daily'] },
-  ]);
+  const managementValues = resolveSectionAnswers(listing?.managementQuestion, MANAGEMENT_SPECS);
   const freelancers = managementValues.freelancers || managementMissing;
   const employees = managementValues.employees || managementMissing;
   const ceoTime = managementValues.ceoTime || managementMissing;
 
   // Products
   const productsMissing = missingValueLabel(listing?.productQuestion, unlockCtaText);
-  const productValues = resolveSectionAnswers(listing?.productQuestion, [
-    // Most specific first. 'inventory value' has to be tried before anything
-    // that merely says 'inventory', or it loses its question to another card.
-    { key: 'inventoryValue', match: ['inventory value', 'stock value', 'what is the inventory'] },
-    // The real wording is "Is it included in the price?" — with "the" in it,
-    // which is exactly what the old keyword missed.
-    { key: 'inventoryIncluded', match: ['included in the price', 'included in price', 'inventory included'] },
-    { key: 'hasInventory', match: ['do you have inventory', 'has inventory', 'seller has inventory', 'inventory', 'stock'] },
-    { key: 'numProducts', match: ['how many different products', 'number of product', 'product count', 'products'] },
-    { key: 'sellingModel', match: ['selling model', 'dropshipping', 'model'] },
-  ]);
+  const productValues = resolveSectionAnswers(listing?.productQuestion, PRODUCT_SPECS);
   const numProducts = productValues.numProducts || productsMissing;
   const sellingModel = productValues.sellingModel || productsMissing;
   const hasInventory = productValues.hasInventory || productsMissing;
@@ -2837,35 +2908,6 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
     console.warn('⚠️ No table financial data found. Available financials:', financials.map((f: any) => ({ name: f.name, type: f.type })));
   }
 
-  // Helper to format numbers for display
-  const OVERALL_COSTS_ROW = 'Overall Costs';
-
-  // Calculate Net Profit for a column (matches FinancialsStep.tsx)
-  const calculateNetProfitForColumn = (colKey: string, tableData: any): number => {
-    if (!tableData || !tableData.financialData) return 0;
-    const fd = tableData.financialData;
-    const isSimple = tableData.financialType === 'simple';
-
-    if (isSimple) {
-      const gross = parseFloat(fd['Revenue']?.[colKey] || '0');
-      const costs = parseFloat(fd[OVERALL_COSTS_ROW]?.[colKey] || '0');
-      return gross - costs;
-    }
-
-    const labels: string[] = Array.isArray(tableData.rowLabels) ? tableData.rowLabels : [];
-    let total = 0;
-    labels.forEach((rowLabel: string) => {
-      if (rowLabel === OVERALL_COSTS_ROW) return;
-      const value = parseFloat(fd[rowLabel]?.[colKey] || '0');
-      if (rowLabel.toLowerCase().includes('revenue')) {
-        total += value;
-      } else {
-        total -= value;
-      }
-    });
-    return total;
-  };
-
   // Default values if no table data
   const defaultRowLabels = [
     'Revenue',
@@ -2888,19 +2930,35 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
    * resolver — including the year and the date a part-year runs to, which an
    * older listing has not stored.
    */
-  const columnLabels = financialTableData?.columnLabels
-    ? resolveFinancialColumns(
+  const realignedTable = financialTableData?.columnLabels
+    ? realignFinancialTable(
         financialTableData.columnLabels,
         financialTableData.financialData,
       )
-    : defaultColumnLabels;
+    : null;
+  const columnLabels = realignedTable ? realignedTable.columns : defaultColumnLabels;
   const financialData = (() => {
-    const fd = financialTableData?.financialData || {};
+    // The figures as the resolver files them, so a listing saved under the old
+    // keys is read from the year each figure belongs to rather than from the
+    // slot it happened to sit in.
+    const fd = realignedTable?.financialData || financialTableData?.financialData || {};
     if (fd['Gross Revenue'] && !fd['Revenue']) {
       return { ...fd, Revenue: fd['Gross Revenue'] };
     }
     return fd;
   })();
+  /*
+   * One table for the rows and for the Net Profit beneath them.
+   *
+   * They were reading two different objects — the rows the realigned figures,
+   * the sum the figures as stored — so the sum looked for keys that no longer
+   * existed and came back empty in every column but one.
+   */
+  const profitLossTable = {
+    ...financialTableData,
+    financialData,
+    rowLabels,
+  };
   const profitLossDisplayMode =
     financialTableData?.financialType === 'simple' ? 'simple' : 'detailed';
   const profitLossVisibleRows =
@@ -4178,7 +4236,9 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                       </span>
                     </div>
                     {columnLabels.map((col) => {
-                      const cellValue = financialData[row]?.[col.key] || '';
+                      // `?? ''` so a saved 0 survives to the cell; `|| ''`
+                      // turned it back into a blank on the way out.
+                      const cellValue = financialData[row]?.[col.key] ?? '';
                       return (
                         <div
                           key={col.key}
@@ -4207,7 +4267,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                               textAlign: 'center',
                             }}
                           >
-                            {cellValue ? formatNumber(cellValue) : '-'}
+                            {String(cellValue).trim() !== '' ? formatNumber(cellValue) : '-'}
                           </span>
                         </div>
                       );
@@ -4251,7 +4311,10 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                   </span>
                 </div>
                 {columnLabels.map((col) => {
-                  const profit = calculateNetProfitForColumn(col.key, financialTableData);
+                  const profit = calculateNetProfitForColumn(profitLossTable, col.key);
+                  // A column nobody filled in shows a dash; a column that adds
+                  // up to nothing shows the nothing it adds up to.
+                  const hasFigures = columnHasFigures(financialData, col.key);
                   return (
                     <div
                       key={col.key}
@@ -4280,7 +4343,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                           textAlign: 'center',
                         }}
                       >
-                        {profit !== 0 ? formatNumber(profit) : '-'}
+                        {hasFigures ? formatNumber(profit) : '-'}
                       </span>
                     </div>
                   );
@@ -4330,38 +4393,38 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
               label="Returning customers"
               value={returningCustomers}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="The share of customers who bought more than once."
+              info={statisticHints.returningCustomers || "The share of customers who bought more than once."}
             />
             <ProgressMetricCard
               label="Refund Rate"
               value={refundRate}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="The share of orders that were refunded."
+              info={statisticHints.refundRate || "The share of orders that were refunded."}
             />
             <ProgressMetricCard
               label="Conversion Rate"
               value={conversionRate}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="The share of visitors who complete a purchase."
+              info={statisticHints.conversionRate || "The share of visitors who complete a purchase."}
             />
             <CustomerTypeCard
               segments={customerTypeSegments}
               locked={customerTypeLocked}
               unlockLabel={customerTypeRaw ?? unlockCtaText}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="How the customer base splits between business (B2B) and consumer (B2C) buyers."
+              info={statisticHints.customerType || "How the customer base splits between business (B2B) and consumer (B2C) buyers."}
             />
             <MetricCard
               label="Average order value"
               value={withCurrencySymbol(avgOrderValue, listingCurrencySymbol)}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="The average amount a customer spends per order."
+              info={statisticHints.avgOrderValue || "The average amount a customer spends per order."}
             />
             <MetricCard
               label="Customer base"
               value={customerBase}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="The total number of customers the business has served."
+              info={statisticHints.customerBase || "The total number of customers the business has served."}
               valuePrefix={
                 <img src={CustomerIcon} alt="" style={{ width: '26px', height: '26px' }} />
               }
@@ -4701,7 +4764,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                 customWidth={isMobile ? "100%" : "570.5px"}
                 customHeight="124.01px"
                 onUnlockClick={handleUpgradeUnlockClick}
-                info="How many distinct products the business sells."
+                info={productHints.numProducts || "How many distinct products the business sells."}
               />
               <MetricCard
                 label="Selling Model"
@@ -4709,7 +4772,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                 customWidth={isMobile ? "100%" : "570.5px"}
                 customHeight="124.01px"
                 onUnlockClick={handleUpgradeUnlockClick}
-                info="How orders are fulfilled — for example own fulfillment, dropshipping or print on demand."
+                info={productHints.sellingModel || "How orders are fulfilled — for example own fulfillment, dropshipping or print on demand."}
               />
             </div>
 
@@ -4719,19 +4782,19 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                 label="Seller has inventory?"
                 value={hasInventory}
                 onUnlockClick={handleUpgradeUnlockClick}
-                info="Whether the seller currently holds stock that comes with the business."
+                info={productHints.hasInventory || "Whether the seller currently holds stock that comes with the business."}
               />
               <MetricCard
                 label="Inventory Value"
                 value={withCurrencySymbol(inventoryValue, listingCurrencySymbol)}
                 onUnlockClick={handleUpgradeUnlockClick}
-                info="What the stock currently in hand is worth."
+                info={productHints.inventoryValue || "What the stock currently in hand is worth."}
               />
               <MetricCard
                 label="Is it included in the price?"
                 value={inventoryIncluded}
                 onUnlockClick={handleUpgradeUnlockClick}
-                info="Whether the inventory value is part of the asking price or charged on top of it."
+                info={productHints.inventoryIncluded || "Whether the inventory value is part of the asking price or charged on top of it."}
               />
             </div>
           </div>
@@ -4774,19 +4837,19 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
               label="Freelancers"
               value={freelancers}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="How many freelancers the business works with regularly."
+              info={managementHints.freelancers || "How many freelancers the business works with regularly."}
             />
             <MetricCard
               label="Employees"
               value={employees}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="How many people the business employs."
+              info={managementHints.employees || "How many people the business employs."}
             />
             <MetricCard
               label="Owner Hours per Week"
               value={ceoTime}
               onUnlockClick={handleUpgradeUnlockClick}
-              info="How many hours a week the current owner spends running the business."
+              info={managementHints.ceoTime || "How many hours a week the current owner spends running the business."}
             />
           </div>
         </div>

@@ -12,6 +12,12 @@ import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
 interface AddAccountQuestionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * The category this question is being written for. Questions belong to one
+   * category now, and a question saved without one joins no set and is shown
+   * to nobody.
+   */
+  categoryId?: string | null;
 }
 
 const QUESTION_TYPES = [
@@ -25,7 +31,7 @@ const QUESTION_TYPES = [
   { value: "TEXTAREA", label: "Text Area" },
 ];
 
-export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuestionDialogProps) => {
+export const AddAccountQuestionDialog = ({ open, onOpenChange, categoryId }: AddAccountQuestionDialogProps) => {
   const [question, setQuestion] = useState("");
   const [hintText, setHintText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
@@ -53,6 +59,7 @@ export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuest
         answer_type: questionType,
         options: optionsArray,
         required,
+        categoryId,
       },
       {
         onSuccess: () => {
@@ -93,7 +100,7 @@ export const AddAccountQuestionDialog = ({ open, onOpenChange }: AddAccountQuest
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-black">Hint Text Field</Label>
+            <Label className="text-sm font-medium text-black">Create Listing Text Hint</Label>
             <Textarea
               value={hintText}
               onChange={(e) => setHintText(e.target.value)}

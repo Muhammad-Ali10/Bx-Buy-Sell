@@ -6,16 +6,27 @@ export interface AdInformationQuestion {
   question: string;
   answer_type: string;
   answer_for: string;
+  /** Help for the seller, shown under the field while the listing is written. */
+  hint?: string | null;
+
   option: any[];
   created_at: string;
   updated_at: string;
 }
 
-export const useAdInformationQuestions = () => {
+/**
+ * The ADVERTISMENT questions for one category.
+ *
+ * Every category used to share one set. Passing no category asks for the
+ * set that belongs to none — the originals, which is what this returned
+ * before categories existed and what a caller that has not been told about
+ * them still gets.
+ */
+export const useAdInformationQuestions = (categoryId?: string) => {
   return useQuery({
-    queryKey: ["ad-information-questions"],
+    queryKey: ["ad-information-questions", categoryId ?? null],
     queryFn: async () => {
-      const response = await apiClient.getAdminQuestionsByType("ADVERTISMENT");
+      const response = await apiClient.getAdminQuestionsByType("ADVERTISMENT", categoryId);
       console.log('Ad Information Questions API Response:', response);
       
       if (!response.success) {

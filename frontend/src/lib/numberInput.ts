@@ -13,24 +13,31 @@
  *
  * Nothing here accepts a minus. None of these questions has a meaning below
  * zero — a customer count, a number of months, an order value, a follower
- * count. Losses live in the financial grid, which is a different component and
- * keeps its own rules.
+ * count. Losses live in the financial grid, which subtracts its cost rows
+ * rather than being given a negative.
+ *
+ * Nor a decimal point. It was allowed at first, on the reasoning that a price
+ * or a rate can be fractional — but the client asked for it gone as well: a
+ * field that requires a number takes digits and nothing else. So a price is
+ * entered in whole units. This is the one rule here that costs something, and
+ * it was asked for knowing that.
  */
 
-/** Digits and at most one decimal point: "12.5" survives, "1e5-a.b" becomes "15.". */
-export const sanitizeNumberInput = (raw: string): string => {
-  let value = String(raw ?? "").replace(/[^0-9.]/g, "");
-  const dot = value.indexOf(".");
-  if (dot !== -1) {
-    // Everything after the first point keeps its digits and loses its points.
-    value = value.slice(0, dot + 1) + value.slice(dot + 1).replace(/\./g, "");
-  }
-  return value;
-};
-
-/** Digits only, for quantities that cannot be fractional — months, counts. */
-export const sanitizeIntegerInput = (raw: string): string =>
+/**
+ * Digits, and nothing else.
+ *
+ * "49.99" becomes "4999", "1e5-a.b" becomes "15", "$1,200" becomes "1200".
+ */
+export const sanitizeNumberInput = (raw: string): string =>
   String(raw ?? "").replace(/\D/g, "");
+
+/**
+ * The same rule, under the name the counting fields call it by.
+ *
+ * Kept as its own export because the two used to differ — this one never
+ * accepted a decimal point — and the call sites still say which they mean.
+ */
+export const sanitizeIntegerInput = sanitizeNumberInput;
 
 /** A percentage cannot exceed 100. */
 export const clampPercent = (value: string): string => {

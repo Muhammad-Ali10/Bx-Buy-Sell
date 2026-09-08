@@ -11,6 +11,12 @@ import { toast } from "sonner";
 interface AddBrandQuestionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * The category this question is being written for. Questions belong to one
+   * category now, and a question saved without one joins no set and is shown
+   * to nobody.
+   */
+  categoryId?: string | null;
 }
 
 const QUESTION_TYPES = [
@@ -23,7 +29,7 @@ const QUESTION_TYPES = [
   { value: "URL", label: "Link" },
 ];
 
-export const AddBrandQuestionDialog = ({ open, onOpenChange }: AddBrandQuestionDialogProps) => {
+export const AddBrandQuestionDialog = ({ open, onOpenChange, categoryId }: AddBrandQuestionDialogProps) => {
   const [question, setQuestion] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState(""); // Options field - always visible
@@ -65,6 +71,7 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange }: AddBrandQuestionD
         answer_type: questionType,
         option: optionsArray.length > 0 ? optionsArray : [],
         required,
+        categoryId,
       },
       {
         onSuccess: () => {

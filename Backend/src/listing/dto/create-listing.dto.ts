@@ -7,6 +7,10 @@ import {
   isDomainQuestion,
   isValidDomain,
 } from 'common/util/domain.util';
+import {
+  checkLinkAnswer,
+  getLinkAnswerForValidation,
+} from 'common/util/social-link.util';
 
 // Brand
 export const Brand = z.object({
@@ -79,15 +83,39 @@ export const Question = z
     option: z.array(z.string().min(2)).optional(),
   })
   .superRefine((data, ctx) => {
-    if (!isDomainQuestion(data.question)) return;
+    if (isDomainQuestion(data.question)) {
+      const domainAnswer = getDomainAnswerForValidation(data.answer);
+      if (!domainAnswer) return;
 
-    const domainAnswer = getDomainAnswerForValidation(data.answer);
-    if (!domainAnswer) return;
+      if (!isValidDomain(domainAnswer)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: DOMAIN_VALIDATION_MESSAGE,
+          path: ['answer'],
+        });
+      }
+      return;
+    }
 
-    if (!isValidDomain(domainAnswer)) {
+    /*
+     * A Link question has to come back a link, and the right one.
+     *
+     * Nothing here checked a Link answer at all, so the API accepted
+     * `sssssssssssssssss` under Instagram and a youtube.com address under
+     * Facebook — which is how half the account links already stored came to
+     * point at a different site than the field holding them. The browser
+     * checks this too, but a draft or a direct call never passes through it.
+     */
+    if (data.answer_type !== 'URL') return;
+
+    const linkAnswer = getLinkAnswerForValidation(data.answer);
+    if (!linkAnswer) return;
+
+    const problem = checkLinkAnswer(linkAnswer, data.question);
+    if (problem) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: DOMAIN_VALIDATION_MESSAGE,
+        message: problem,
         path: ['answer'],
       });
     }

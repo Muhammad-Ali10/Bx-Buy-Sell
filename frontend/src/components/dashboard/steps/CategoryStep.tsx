@@ -59,11 +59,29 @@ export const CategoryStep = ({ formData, onNext, onPersist }: CategoryStepProps)
     setSelectedCategory(rawStr);
   }, [formData?.category, categories]);
 
+  /**
+   * Says so when the questions ahead are about to change.
+   *
+   * Each category asks its own questions now, so moving between them swaps the
+   * rest of the form. Answers already given are not touched — they stay in the
+   * listing, and coming back to this category brings them back — but a seller
+   * who watched a step empty itself without being told would reasonably think
+   * their work had been thrown away.
+   */
+  const warnIfQuestionsChange = (nextCategoryId: string) => {
+    const previous = String(formData?.category ?? "").trim();
+    if (!previous || previous === nextCategoryId) return;
+    toast.info("This category asks different questions.", {
+      description: "Your existing answers stay saved.",
+    });
+  };
+
   const handleCategorySelect = (categoryId: string) => {
     if (!categoryId) {
       toast.error("Please select a category");
       return;
     }
+    warnIfQuestionsChange(categoryId);
     setSelectedCategory(categoryId);
     setTimeout(() => {
       onNext({ category: categoryId });
@@ -75,6 +93,7 @@ export const CategoryStep = ({ formData, onNext, onPersist }: CategoryStepProps)
       toast.error("Please select a category to continue");
       return;
     }
+    warnIfQuestionsChange(selectedCategory);
     onNext({ category: selectedCategory });
   };
 

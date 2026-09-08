@@ -258,20 +258,38 @@ class ApiClient {
           return withSpaces.charAt(0).toUpperCase() + withSpaces.slice(1);
         };
 
+        /*
+         * Zod nests as deep as the data does, so this has to walk.
+         *
+         * It used to look one level down and no further. A listing's answers
+         * sit at `brand.0.answer`, three levels in, so nothing was found, the
+         * whole error object was stringified instead, and a seller was shown
+         * `{"_errors":[],"brand":{"0":{...}}}` as the reason they could not
+         * publish. Array indices are dropped from the label — "Brand: Enter a
+         * valid domain" reads better than "Brand 0 answer".
+         */
         const extractZodErrors = (payload: any): string | null => {
           if (!payload || typeof payload !== 'object') return null;
           const messages: string[] = [];
-          if (Array.isArray(payload._errors) && payload._errors.length > 0) {
-            messages.push(payload._errors.join(', '));
-          }
-          Object.entries(payload).forEach(([key, value]) => {
-            if (key === '_errors' || !value || typeof value !== 'object') return;
-            const fieldErrors = (value as any)._errors;
-            if (Array.isArray(fieldErrors) && fieldErrors.length > 0) {
-              messages.push(`${formatFieldLabel(key)}: ${fieldErrors.join(', ')}`);
+
+          const walk = (node: any, trail: string[]) => {
+            if (!node || typeof node !== 'object') return;
+            if (Array.isArray(node._errors) && node._errors.length > 0) {
+              const label = trail
+                .filter((part) => !/^\d+$/.test(part))
+                .map(formatFieldLabel)
+                .join(' ');
+              messages.push(label ? `${label}: ${node._errors.join(', ')}` : node._errors.join(', '));
             }
-          });
-          return messages.length > 0 ? messages.join(' | ') : null;
+            Object.entries(node).forEach(([key, value]) => {
+              if (key === '_errors') return;
+              walk(value, [...trail, key]);
+            });
+          };
+
+          walk(payload, []);
+          // The same wording can arrive from several rows of one list.
+          return messages.length > 0 ? [...new Set(messages)].join(' | ') : null;
         };
 
         if (data) {
@@ -949,8 +967,9 @@ class ApiClient {
     return this.request('/question-admin');
   }
 
-  async getAdminQuestionsByType(type: string) {
-    return this.request(`/question-admin/type/${type}`);
+  async getAdminQuestionsByType(type: string, categoryId?: string) {
+    const query = categoryId ? `?category=${encodeURIComponent(categoryId)}` : "";
+    return this.request(`/question-admin/type/${type}${query}`);
   }
 
   async createAdminQuestion(questionData: {
@@ -962,6 +981,9 @@ class ApiClient {
     dependsOnQuestionId?: string | null;
     dependsOnValue?: string | null;
     required?: boolean | null;
+    categoryId?: string | null;
+    hint?: string | null;
+    publicHint?: string | null;
   }) {
     // Backend DTO expects 'options' (plural), not 'option' (singular)
     const payload: any = {
@@ -980,6 +1002,11 @@ class ApiClient {
     if (questionData.dependsOnQuestionId) payload.dependsOnQuestionId = questionData.dependsOnQuestionId;
     if (questionData.dependsOnValue) payload.dependsOnValue = questionData.dependsOnValue;
     if (typeof questionData.required === 'boolean') payload.required = questionData.required;
+    // Which category's set the question joins. Sent only when there is one, so
+    // a caller that predates categories still writes a category-less question.
+    if (questionData.categoryId) payload.categoryId = questionData.categoryId;
+    if (questionData.hint) payload.hint = questionData.hint;
+    if (questionData.publicHint) payload.publicHint = questionData.publicHint;
 
     return this.request('/question-admin', {
       method: 'POST',
@@ -996,6 +1023,8 @@ class ApiClient {
     dependsOnQuestionId?: string | null;
     dependsOnValue?: string | null;
     required?: boolean | null;
+    hint?: string | null;
+    publicHint?: string | null;
   }) {
     // Backend DTO expects 'options' (plural), not 'option' (singular)
     const payload: any = {};
@@ -1016,10 +1045,29 @@ class ApiClient {
     if (questionData.dependsOnQuestionId !== undefined) payload.dependsOnQuestionId = questionData.dependsOnQuestionId || null;
     if (questionData.dependsOnValue !== undefined) payload.dependsOnValue = questionData.dependsOnValue || null;
     if (questionData.required !== undefined) payload.required = questionData.required;
+    // Sent whenever the caller had an opinion, empty string included — that is
+    // how an administrator clears a hint they no longer want.
+    if (questionData.hint !== undefined) payload.hint = questionData.hint || null;
+    if (questionData.publicHint !== undefined) {
+      payload.publicHint = questionData.publicHint || null;
+    }
 
     return this.request(`/question-admin/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    });
+  }
+
+  /**
+   * Write a whole step's order in one request.
+   *
+   * A call per question would leave the arrangement half-saved whenever one of
+   * them failed, and a step can hold thirty.
+   */
+  async reorderAdminQuestions(items: { id: string; position: number }[]) {
+    return this.request('/question-admin/reorder', {
+      method: 'PATCH',
+      body: JSON.stringify({ items }),
     });
   }
 

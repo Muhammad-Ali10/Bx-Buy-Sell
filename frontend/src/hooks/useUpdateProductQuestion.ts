@@ -13,7 +13,7 @@ export const useUpdateProductQuestion = () => {
       options?: string[];
       dependsOnQuestionId?: string | null;
       dependsOnValue?: string | null;
-      required?: boolean | null;
+      required?: boolean | null; hint?: string | null; publicHint?: string | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -29,6 +29,8 @@ export const useUpdateProductQuestion = () => {
         dependsOnQuestionId: data.dependsOnQuestionId ?? null,
         dependsOnValue: data.dependsOnValue ?? null,
         required: data.required ?? null,
+        hint: data.hint,
+        publicHint: data.publicHint,
       };
 
       // Add options if provided (even if empty array to clear options)

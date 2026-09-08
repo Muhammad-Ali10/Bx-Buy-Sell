@@ -11,7 +11,7 @@ export const useUpdateManagementQuestion = () => {
       question: string;
       answer_type: string;
       options?: string[];
-      required?: boolean | null;
+      required?: boolean | null; hint?: string | null; publicHint?: string | null;
     }) => {
       const response = await apiClient.updateAdminQuestion(data.id, {
         question: data.question,
@@ -19,6 +19,8 @@ export const useUpdateManagementQuestion = () => {
         answer_for: "MANAGEMENT",
         options: data.options,
         required: data.required ?? null,
+        hint: data.hint,
+        publicHint: data.publicHint,
       });
 
       if (!response.success) {

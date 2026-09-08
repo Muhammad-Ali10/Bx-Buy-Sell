@@ -11,7 +11,7 @@ export const useUpdateHandoverQuestion = () => {
       question: string;
       answer_type: string;
       options?: string[];
-      required?: boolean | null;
+      required?: boolean | null; hint?: string | null;
     }) => {
       // Map frontend answer types to backend enum values
       const answerTypeMap: Record<string, string> = {
@@ -26,6 +26,7 @@ export const useUpdateHandoverQuestion = () => {
         answer_for: "HANDOVER",
         options: data.options,
         required: data.required ?? null,
+        hint: data.hint,
       });
 
       if (!response.success) {
