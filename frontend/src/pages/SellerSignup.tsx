@@ -118,8 +118,8 @@ const SellerSignup = () => {
           });
         }
         toast.success("Account created successfully!");
-        // One step left: collect the phone number for our own records.
-        navigate("/phone-verification");
+        // Next: confirm the email address, then the phone number.
+        navigate("/verify-otp");
       } else {
         toast.error(result.error || "Failed to create account");
       }

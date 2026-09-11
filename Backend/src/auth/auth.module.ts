@@ -3,10 +3,12 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { UserModule } from 'src/user/user.module';
 import { JwtModule } from '@nestjs/jwt';
+import { ActivityLogModule } from 'src/activity-log/activity-log.module';
 
 @Module({
   imports: [
     UserModule,
+    ActivityLogModule,
     JwtModule.register({
       global: true,
     }),

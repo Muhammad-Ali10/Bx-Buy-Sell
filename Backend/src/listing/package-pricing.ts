@@ -126,7 +126,39 @@ export function getAddonPrice(tier: PricingTier, addon: AddonId): number {
   }
 }
 
+/** What one monthly price comes to over a whole billing cycle. */
+export interface CycleTotal {
+  /** Monthly price times the months in the cycle, before any discount. */
+  gross: number;
+  /** Absolute amount taken off for committing to the longer cycle. */
+  discount: number;
+  /** What is actually charged for the cycle. */
+  total: number;
+}
+
+/**
+ * The one piece of cycle arithmetic.
+ *
+ * Packages and add-ons both go through here, and `frontend/src/lib/
+ * packagePricing.ts` repeats it exactly, so what the overview table shows is
+ * what Stripe collects.
+ */
+export function priceOverCycle(monthlyPrice: number, cycle: BillingCycleDef): CycleTotal {
+  const gross = monthlyPrice * cycle.months;
+  const discount = Math.round((gross * cycle.discountPercent) / 100);
+  return { gross, discount, total: gross - discount };
+}
+
 export interface ChargeLine {
+  /**
+   * Which half of the purchase this is.
+   *
+   * Not decoration: when the package and the add-on run on different cycles
+   * one of them has to be charged as a one-off, and it must be the add-on.
+   * Picking it by interval length was wrong the moment the add-on could be
+   * the longer of the two.
+   */
+  kind: 'package' | 'addon';
   /** Stripe line item label. */
   name: string;
   /** Total for the whole billing period, in whole currency units. */
@@ -143,25 +175,33 @@ export interface PackageCharge {
 
 /**
  * Recompute exactly what the seller owes for the chosen package + add-on.
- * Add-ons are billed monthly on their own cycle, independent of the package.
+ *
+ * The add-on has its own billing cycle, picked independently of the package's.
+ * Before this it was pinned to one month: no choice, no discount, and nothing
+ * on the Stripe page to say so. The client's words were "the add-ons also need
+ * billing cycle options (monthly, 3 months, 6 months) — the same as we already
+ * have for the packages", and "the same" is meant literally: the same three
+ * cycles and the same 10% / 20%.
  */
 export function computePackageCharge(params: {
   listingPrice: number;
   packageId: PackageId;
   addon: AddonId;
   billingCycle: BillingCycleId;
+  /** Omitted means monthly — which is what every add-on ran on until now. */
+  addonBillingCycle?: BillingCycleId | null;
 }): PackageCharge {
   const tier = getPricingTier(params.listingPrice);
   const cycle = getBillingCycle(params.billingCycle);
+  const addonCycle = getBillingCycle(params.addonBillingCycle ?? 'MONTHLY');
   const lines: ChargeLine[] = [];
 
   const monthly = getPackageMonthlyPrice(tier, params.packageId);
   if (monthly > 0) {
-    const gross = monthly * cycle.months;
-    const discount = Math.round((gross * cycle.discountPercent) / 100);
     lines.push({
+      kind: 'package',
       name: `${PACKAGE_LABELS[params.packageId]} — ${cycle.label}`,
-      amount: gross - discount,
+      amount: priceOverCycle(monthly, cycle).total,
       intervalMonths: cycle.months,
     });
   }
@@ -169,9 +209,13 @@ export function computePackageCharge(params: {
   const addonPrice = getAddonPrice(tier, params.addon);
   if (addonPrice > 0 && params.addon !== 'NONE') {
     lines.push({
-      name: ADDON_LABELS[params.addon],
-      amount: addonPrice,
-      intervalMonths: 1,
+      kind: 'addon',
+      // The cycle belongs in the label. On the seller's Stripe page the
+      // package line read "— Monthly" and the add-on line read nothing,
+      // so there was no way to see what the add-on was being billed for.
+      name: `${ADDON_LABELS[params.addon]} — ${addonCycle.label}`,
+      amount: priceOverCycle(addonPrice, addonCycle).total,
+      intervalMonths: addonCycle.months,
     });
   }
 

@@ -2,7 +2,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { trimListingFeedRecord } from 'common/util/trim-listing-feed.util';
-import { maskListingFor } from '../listing/listing-visibility';
+import { canViewBlockedListing, maskListingFor } from '../listing/listing-visibility';
 import type { UpdateUserType, UserType } from './dto/user.dto';
 import type {
   UpdateAdminUserType,
@@ -103,7 +103,11 @@ export class UserService {
     const [managedListings, managedChats, activityLog] = await Promise.all([
       this.db.listing.count({ where: { responsibleId: userId } }),
       this.db.chat.count({ where: { responsibleId: userId } }),
-      this.db.activityLog.count({ where: { actorId: userId } }),
+      // The same entries their Logs tab lists: what they did, and what was
+      // done to them.
+      this.db.activityLog.count({
+        where: { OR: [{ actorId: userId }, { subjectUserId: userId }] },
+      }),
     ]);
     return { managedListings, managedChats, activityLog };
   }
@@ -351,24 +355,31 @@ export class UserService {
       : [];
     const accessible = new Set(accessRows.map((row) => row.listingId));
 
-    return rows.map((row) => ({
-      ...row,
-      listing: row.listing
-        ? maskListingFor(trimListingFeedRecord(row.listing as Record<string, any>), {
-            userId: viewer?.userId ?? id,
-            role: viewer?.role,
-            hasConfidentialAccess: accessible.has(row.listing.id),
-          })
-        : row.listing,
-    }));
+    const who = { userId: viewer?.userId ?? id, role: viewer?.role };
+    return rows
+      // Saving a listing does not keep it on the market for you: one the team
+      // blocked drops out here, and comes back if the block is lifted.
+      .filter((row) => row.listing?.status !== 'BLOCKED' || canViewBlockedListing(row.listing, who))
+      .map((row) => ({
+        ...row,
+        listing: row.listing
+          ? maskListingFor(trimListingFeedRecord(row.listing as Record<string, any>), {
+              ...who,
+              hasConfidentialAccess: accessible.has(row.listing.id),
+            })
+          : row.listing,
+      }));
   }
 
   async getFavouriteCount(id: string) {
-    return this.db.favourite.count({
-      where: {
-        userId: `${id}`,
-      },
+    // Counted the way the list is built, so the number and the list agree.
+    const rows = await this.db.favourite.findMany({
+      where: { userId: `${id}` },
+      select: { listing: { select: { status: true, userId: true } } },
     });
+    return rows.filter(
+      (row) => row.listing?.status !== 'BLOCKED' || canViewBlockedListing(row.listing, { userId: id }),
+    ).length;
   }
 
   async addToFavourite(id: string, listingId: string) {

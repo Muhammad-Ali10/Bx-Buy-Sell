@@ -13,7 +13,6 @@ import {
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api";
 import ShareListingDialog from "@/components/ShareListingDialog";
-import ManageAddonsDialog from "@/components/listings/ManageAddonsDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +29,12 @@ import { Link, useNavigate } from "react-router-dom";
 interface ListingCardDashboardProps {
   id: string;
   title: string;
+  /**
+   * The seller's own description. Empty is normal and shows nothing — the
+   * card closes up rather than printing a placeholder on the seller's own
+   * dashboard, where they already know they have not written one.
+   */
+  description?: string;
   price: number;
   image_url?: string;
   status: "draft" | "published" | "archived" | "blocked";
@@ -39,13 +44,23 @@ interface ListingCardDashboardProps {
   requests_count: number;
   unread_messages_count: number;
   onUpdate: () => void;
-  /** Why the team blocked it, shown to the owner on hover. */
+  /** Why the team blocked it, shown to the owner under the title. */
   blockedReason?: string | null;
+  /**
+   * False on the admin's view of someone else's listings.
+   *
+   * Managing a subscription starts a Stripe checkout, and a checkout charges
+   * whoever is signed in — so an administrator pressing it against a seller's
+   * listing would be billing themselves for it. The entry is only offered to
+   * the person whose listing it is.
+   */
+  isOwnerView?: boolean;
 }
 
 export const ListingCardDashboard = ({
   id,
   title,
+  description,
   price,
   image_url,
   status,
@@ -56,11 +71,11 @@ export const ListingCardDashboard = ({
   unread_messages_count,
   onUpdate,
   blockedReason,
+  isOwnerView = true,
 }: ListingCardDashboardProps) => {
   const navigate = useNavigate();
   const [isPublishing, setIsPublishing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [addonsOpen, setAddonsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const normalizedPrice =
@@ -74,6 +89,17 @@ export const ListingCardDashboard = ({
       ? String((category as any)?.name ?? "")
       : "";
 
+  /**
+   * Push Listing goes to the package page rather than publishing outright.
+   *
+   * Publishing already requires a package — the server refuses without one —
+   * so the page is where the thing publishing needs is chosen, and it can
+   * publish from there. The old one-click publish is kept below for the
+   * moment it is wanted again; nothing calls it now.
+   */
+  const handlePush = () => navigate(`/manage-subscription/${id}`);
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handlePublish = async () => {
     setIsPublishing(true);
     try {
@@ -281,11 +307,32 @@ export const ListingCardDashboard = ({
             <DropdownMenuItem asChild>
               <Link to={editHref}>Edit Listing</Link>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => setAddonsOpen(true)}
-            >
-              Add-ons
-            </DropdownMenuItem>
+            {/* Beside Add-ons, because the two are the same kind of thing —
+                what this listing runs on and what is bolted to it. The
+                Manage Subscription page tells sellers this entry is here, so
+                until now it sent them somewhere that did not exist. */}
+            {isOwnerView && (
+              <DropdownMenuItem asChild>
+                {/* A real link, so right-click and open-in-new-tab work — the
+                    client asked for that on View Listing before. */}
+                <Link to={`/manage-subscription/${id}`}>Manage Subscription</Link>
+              </DropdownMenuItem>
+            )}
+            {/*
+              * Add-ons open the same page as the subscription above them.
+              *
+              * They used to open a dialog of their own, which could show one
+              * placement and change it by replacement — a shape that cannot
+              * express a seller holding the category page and the start page
+              * together, let alone cancel one of them. That page now does all
+              * of it, and two screens writing the same rows is how the two
+              * come to disagree.
+              */}
+            {isOwnerView && (
+              <DropdownMenuItem asChild>
+                <Link to={`/manage-subscription/${id}`}>Add-ons</Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onSelect={() => setDeleteOpen(true)}
               className="text-destructive"
@@ -307,12 +354,6 @@ export const ListingCardDashboard = ({
         onOpenChange={setShareOpen}
         url={shareUrl}
         title={title}
-      />
-      <ManageAddonsDialog
-        listingId={id}
-        listingTitle={title}
-        open={addonsOpen}
-        onOpenChange={setAddonsOpen}
       />
       {/* Deleting a listing is not undoable and does not stop at the listing:
           the conversations attached to it, and every message inside them, go
@@ -378,6 +419,57 @@ export const ListingCardDashboard = ({
             </span>
           </div>
         </div>
+
+        {/* Why the team took it off the marketplace, in the open — a hover
+            tooltip is invisible on a phone and easy to miss anywhere else. */}
+        {status === 'blocked' && (
+          <p
+            className="mt-2 mb-0 text-xs sm:text-sm"
+            style={{ fontFamily: 'Lufga', lineHeight: '140%', color: 'rgba(200, 16, 16, 1)' }}
+          >
+            {blockedReason ? (
+              <>
+                <span style={{ fontWeight: 600 }}>Reason:</span> {blockedReason}
+              </>
+            ) : (
+              'Blocked by our team. Contact support to find out why.'
+            )}
+          </p>
+        )}
+
+        {/*
+          * The description, in the same place and shape the public card uses.
+          *
+          * It was missing from this card entirely — and not because nothing
+          * drew it: the page that builds these cards was dropping the field
+          * while mapping, so there was never anything to draw.
+          *
+          * Two lines at a fixed height, so a long description and a short one
+          * leave the cards in a row the same height. Nothing renders at all
+          * when the seller has not written one.
+          */}
+        {description?.trim() ? (
+          <p
+            className="font-['Lufga'] font-normal text-xs sm:text-sm m-0 mt-2"
+            style={{
+              fontFamily: 'Lufga',
+              fontWeight: 400,
+              lineHeight: '150%',
+              letterSpacing: '0%',
+              color: 'rgba(0, 0, 0, 0.5)',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              // A seller can type one long unbroken run; without this it
+              // leaves the card, as it did on the listing page.
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {description}
+          </p>
+        ) : null}
 
         {/* Second Row: Price and Notification/Message */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-3 mt-3 sm:mt-4 md:mt-4">
@@ -512,7 +604,7 @@ export const ListingCardDashboard = ({
                 lineHeight: '140%',
                 letterSpacing: '0%',
               }}
-              onClick={handlePublish}
+              onClick={handlePush}
               disabled={isPublishing}
             >
               {isPublishing ? "Publishing..." : "Publish"}

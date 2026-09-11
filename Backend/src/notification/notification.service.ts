@@ -10,6 +10,30 @@ export class NotificationService {
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
+  /**
+   * Tell someone something, and make sure they see it on their next look.
+   *
+   * The list and the unread count are cached, so a notification written
+   * straight to the table can sit unseen until that cache runs out.
+   */
+  async notify(
+    userId: string,
+    notice: { title: string; message: string; type?: string; link?: string | null },
+  ) {
+    const created = await this.db.notification.create({
+      data: {
+        userId,
+        title: notice.title,
+        message: notice.message,
+        type: notice.type ?? 'info',
+        link: notice.link ?? null,
+      },
+    });
+    await this.cacheManager.del(`notification:list:${userId}`);
+    await this.cacheManager.del(`notification:unread:${userId}`);
+    return created;
+  }
+
   async getNotifications(userId: string) {
     const cacheKey = `notification:list:${userId}`;
     const cached = await this.cacheManager.get(cacheKey);

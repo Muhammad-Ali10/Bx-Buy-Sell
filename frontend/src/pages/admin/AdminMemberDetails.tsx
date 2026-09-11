@@ -892,17 +892,22 @@ export default function AdminMemberDetails() {
 
             <div className="flex flex-wrap gap-6">
               {[
+                // Each View opens the same screens as the statistics on the
+                // member's own page. The buttons here used to do nothing.
                 {
                   label: "Actually managed Listings",
                   value: listingsLoading ? "-" : String(managedListingsCount),
+                  to: `/admin/listings?assigned=${id}`,
                 },
                 {
                   label: "Actually managed Chats",
                   value: stats.loading ? "-" : String(stats.managedChats),
+                  to: `/admin/chats?assigned=${id}`,
                 },
                 {
                   label: "Activity Log",
                   value: stats.loading ? "-" : String(stats.activityLog),
+                  to: `/admin/users/${id}?tab=logs`,
                 },
               ].map((stat) => (
                 <div
@@ -946,6 +951,7 @@ export default function AdminMemberDetails() {
 
                   <div className="flex justify-end">
                     <Button
+                      onClick={() => navigate(stat.to)}
                       className="font-lufga font-medium"
                       style={{
                         width: '87px',

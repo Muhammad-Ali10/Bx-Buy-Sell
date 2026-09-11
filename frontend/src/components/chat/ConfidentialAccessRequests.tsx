@@ -35,6 +35,22 @@ interface AccessRequest {
   };
 }
 
+/**
+ * The seller's waiting requests. Shared with the conversation list, which keeps
+ * a request's chat out of the ordinary list while it is still waiting — one
+ * query, so the two can never disagree about which requests are open.
+ */
+export const confidentialRequestsQuery = {
+  queryKey: ["confidential-requests"],
+  queryFn: async (): Promise<AccessRequest[]> => {
+    const response: any = await apiClient.getConfidentialRequests();
+    const rows = response?.data ?? response;
+    return Array.isArray(rows) ? rows : [];
+  },
+  staleTime: 30_000,
+  refetchInterval: 60_000,
+};
+
 const buyerName = (buyer: AccessRequest["buyer"]) =>
   `${buyer?.first_name || ""} ${buyer?.last_name || ""}`.trim() || "A buyer";
 
@@ -54,16 +70,7 @@ export const ConfidentialAccessRequests = ({
   const queryClient = useQueryClient();
   const [deciding, setDeciding] = useState<string | null>(null);
 
-  const { data: requests = [] } = useQuery<AccessRequest[]>({
-    queryKey: ["confidential-requests"],
-    queryFn: async () => {
-      const response: any = await apiClient.getConfidentialRequests();
-      const rows = response?.data ?? response;
-      return Array.isArray(rows) ? rows : [];
-    },
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
+  const { data: requests = [] } = useQuery<AccessRequest[]>(confidentialRequestsQuery);
 
   if (!requests.length) return null;
 

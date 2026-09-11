@@ -85,6 +85,30 @@ function uniqueFolder(folder?: string): string {
   return folder ? `${folder}/${suffix}` : suffix;
 }
 
+/**
+ * Give the delivered URL back the extension the seller's file had.
+ *
+ * Cloudinary stores an image under its own canonical format, and its name for
+ * JPEG is "jpg" — so every `.jpeg` a seller uploaded came back `.jpg`. The
+ * file name shown everywhere is read out of the URL, so the rename was
+ * visible even though nothing about the file had changed.
+ *
+ * The extension in a delivery URL is a request rather than a fact: Cloudinary
+ * serves the asset in whatever format is asked for. Asking for `.jpeg` returns
+ * the same bytes as `.jpg` — identical `content-length`, identical
+ * `content-type: image/jpeg` — so the seller's own spelling can simply be put
+ * back.
+ *
+ * Only jpeg/jpg. Every other pair here is a real conversion, and asking for a
+ * format Cloudinary does not deliver would turn a working link into a broken
+ * one to fix a cosmetic name.
+ */
+export function keepOriginalExtension(url: string, originalName: string): string {
+  const original = originalName.split('.').pop()?.toLowerCase() ?? '';
+  if (original !== 'jpeg') return url;
+  return url.replace(/\.jpg(\?|#|$)/i, '.jpeg$1');
+}
+
 export interface UploadResult {
   success: boolean;
   url?: string;
@@ -200,9 +224,13 @@ export async function uploadToCloudinary(
 
     const data = await response.json();
 
+    const deliveredUrl = String(data.secure_url || data.url || '');
+
     return {
       success: true,
-      url: data.secure_url || data.url,
+      url: resourceType === 'image'
+        ? keepOriginalExtension(deliveredUrl, file.name)
+        : deliveredUrl,
       publicId: data.public_id,
     };
   } catch (error) {

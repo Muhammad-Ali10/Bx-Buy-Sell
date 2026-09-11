@@ -27,6 +27,27 @@ export function resolveListingTitle(listing: any, fallback = 'Untitled Listing')
 }
 
 /**
+ * The listing's own description.
+ *
+ * Sellers write it in Ad Information → Description; older listings kept theirs
+ * in Brand Information, which is why both are read. Beside the title resolver
+ * because the two are looked up together on every card, and a card that found
+ * one but not the other would be reading the same rows twice.
+ *
+ * Returns an empty string rather than a placeholder. What to show when a
+ * seller has not written one is the caller's decision — the dashboard closes
+ * the gap up, and nothing invents words on the seller's behalf.
+ */
+export function resolveListingDescription(listing: any): string {
+  return (
+    answerFor(listing?.advertisement, ['description']) ??
+    answerFor(listing?.brand, ['description', 'about']) ??
+    (typeof listing?.description === 'string' ? listing.description.trim() : '') ??
+    ''
+  );
+}
+
+/**
  * Colour used for the listing title. Kept here so the four places that render a
  * title (listing detail ×2, public cards, dashboard cards) stay identical and a
  * change only has to happen once.

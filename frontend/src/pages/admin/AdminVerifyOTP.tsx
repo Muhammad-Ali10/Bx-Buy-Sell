@@ -25,7 +25,8 @@ export default function AdminVerifyOTP() {
     setError(false);
 
     try {
-      const response = await apiClient.verifyOTP({ email, otp_code: otp });
+      // Checked, not spent: the next screen spends it with the new password.
+      const response = await apiClient.checkResetCode({ email, otp_code: otp });
       if (response.success) {
         toast.success("Code verified! Set your new password.");
         navigate("/admin/reset-password", { state: { email, otp } });

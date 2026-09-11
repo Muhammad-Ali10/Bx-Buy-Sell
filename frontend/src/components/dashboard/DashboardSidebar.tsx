@@ -1,5 +1,7 @@
 import { LayoutGrid, Building2, Wrench, CreditCard, Users, Megaphone, HandHeart, Package, TrendingUp, ShoppingBag, Target, Menu } from "lucide-react";
 import type { DashboardStep } from "@/pages/Dashboard";
+import { useListingAreaOrder } from "@/hooks/useListingAreaOrder";
+import { listingSteps } from "@/lib/listingAreaOrder";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import logo from "@/assets/_App Icon 1 (2).png";
@@ -58,6 +60,12 @@ const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep:
     onLinkClick?.();
   };
 
+  // The same order as the form's Next and Back, which an administrator
+  // arranges in Content Management.
+  const areaOrder = useListingAreaOrder();
+  const steps = listingSteps(areaOrder);
+  const orderedItems = [...menuItems].sort((a, b) => steps.indexOf(a.id) - steps.indexOf(b.id));
+
   return (
     <>
       <div className="p-4 sm:p-6">
@@ -81,7 +89,7 @@ const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep:
           paddingLeft: "12px",
         }}
       >
-        {menuItems.map((item) => {
+        {orderedItems.map((item) => {
           const Icon = activeStep === item.id ? item.iconInactive : item.iconActive ;
           const isActive = activeStep === item.id;
 

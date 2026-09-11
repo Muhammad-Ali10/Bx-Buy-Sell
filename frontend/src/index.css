@@ -101,6 +101,39 @@
   scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
 
+/* Member chat columns — the list, the messages and the details panel.
+   Windows otherwise draws a 15px grey bar down each of the three, side by
+   side, as soon as the window is not tall enough. The scrolling stays; the
+   bar is thin and only shows while the pointer is over that column. */
+.chat-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.chat-scrollbar:hover,
+.chat-scrollbar:focus-within {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+/* Safari reads only the prefixed form. */
+.chat-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.chat-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
 /* The chat column's width on desktop.
  *
  * A cap, not a fixed size. It was `width: 688px !important; flex: none`, which

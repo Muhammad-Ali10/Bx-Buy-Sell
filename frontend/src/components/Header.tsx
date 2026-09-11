@@ -3,7 +3,7 @@ import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api";
 import { NotificationDropdown } from "./NotificationDropdown";
@@ -61,6 +61,12 @@ interface HeaderProps {
    * `md`.
    */
   sidebarFrom?: "md" | "lg";
+  /**
+   * Something to sit at the start of the bar, before the logo — the chat
+   * page's menu button below 1280px. Floating beside the bar, it landed on the
+   * logo once the bar reached the left edge of the screen.
+   */
+  leading?: ReactNode;
 }
 
 /**
@@ -118,6 +124,7 @@ const Header = ({
   inColumn = false,
   dark = false,
   sidebarFrom = "lg",
+  leading,
 }: HeaderProps) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -244,6 +251,7 @@ const Header = ({
               <AdminSidebar isMobile />
             </div>
           )}
+          {leading && <div className="shrink-0">{leading}</div>}
 
           {/* Hidden once the sidebar beside this bar is on screen — it shows
               the same mark, and the two sat side by side. */}

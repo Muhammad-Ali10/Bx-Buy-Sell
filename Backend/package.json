@@ -6,6 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
+    "stripe:listen": "node scripts/stripe-listen.mjs",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -56,6 +57,7 @@
     "cacheable": "^1.10.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
+    "cloudinary": "^2.11.0",
     "crypto": "^1.0.1",
     "dotenv": "^16.4.7",
     "ioredis": "^5.6.1",

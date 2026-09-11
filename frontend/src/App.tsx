@@ -41,6 +41,7 @@ const VerifyFunds = lazy(() => import("./pages/VerifyFunds"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const PhoneVerification = lazy(() => import("./pages/PhoneVerification"));
 const VerifyOTP = lazy(() => import("./pages/VerifyOTP"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Register = lazy(() => import("./pages/Register"));
 const Profile = lazy(() => import("./pages/Profile"));
 const Pricing = lazy(() => import("./pages/Pricing"));
@@ -97,10 +98,14 @@ const router = createBrowserRouter(
     { path: "/profile", element: <Profile /> },
     { path: "/pricing", element: <Pricing /> },
     { path: "/manage-subscription", element: <ManageSubscription /> },
+    // With a listing, the page manages that listing's package instead of the
+    // buyer's plan — sellers have no account-wide plan, only per-listing ones.
+    { path: "/manage-subscription/:listingId", element: <ManageSubscription /> },
     { path: "/checkout/success", element: <CheckoutSuccess /> },
     { path: "/checkout/cancel", element: <CheckoutCancel /> },
     { path: "/manual-sync", element: <ManualSync /> },
     { path: "/forgot-password", element: <ForgotPassword /> },
+    { path: "/reset-password", element: <ResetPassword /> },
     { path: "/phone-verification", element: <PhoneVerification /> },
     { path: "/verify-otp", element: <VerifyOTP /> },
     { path: "/register", element: <Register /> },

@@ -188,8 +188,9 @@ export const FinancialsStep = ({
   const financialDataRef = useRef(financialData);
   financialDataRef.current = financialData;
 
-  // Selected display currency. Amounts are stored in USD; only the chosen
-  // currency code is persisted (inside the financials JSON) so it is remembered.
+  // The listing's currency. Figures are entered and stored in it exactly as
+  // typed; what they come to in other currencies is worked out by the server
+  // from the ECB rates.
   const [currency, setCurrency] = useState<string>(parentFormData?.currency || "USD");
   // Inline editing state for the "as-of" date column (#4) and custom rows (#6).
   // Which column's date is open for editing. Was a single boolean, so only the
@@ -198,35 +199,6 @@ export const FinancialsStep = ({
   const [customRows, setCustomRows] = useState<string[]>([]);
   const [addingRow, setAddingRow] = useState(false);
   const [newRowName, setNewRowName] = useState("");
-  // Tracks the cell being typed in, so converted editing doesn't jump mid-type.
-  const [editingCell, setEditingCell] = useState<{ row: string; col: string; value: string } | null>(null);
-
-  // Currency conversion (frontend-only): amounts are entered in USD (base) and
-  // shown converted when another currency is selected. Rates fetched live.
-  const [rates, setRates] = useState<Record<string, number>>({ USD: 1 });
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("https://open.er-api.com/v6/latest/USD")
-      .then((r) => r.json())
-      .then((d) => {
-        if (!cancelled && d?.rates && typeof d.rates === "object") {
-          setRates({ USD: 1, ...d.rates });
-        }
-      })
-      .catch(() => {
-        // Approximate fallback if the rates API is unreachable.
-        if (!cancelled) {
-          setRates({
-            USD: 1, EUR: 0.92, GBP: 0.79, PKR: 278, INR: 83, AED: 3.67,
-            CAD: 1.36, AUD: 1.52, JPY: 156, CNY: 7.2, SAR: 3.75, TRY: 32,
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Restore the seller's saved currency when editing an existing listing.
   useEffect(() => {
@@ -475,38 +447,22 @@ export const FinancialsStep = ({
   const columnWidth = 150;
   const gridWidth = columnWidth * (columnLabels.length + 1);
 
-  // Currency conversion: values are stored in USD; convert for display only.
-  const conversionRate = rates[currency] ?? 1;
-  const isBaseCurrency = currency === "USD";
   const currencySymbol = getCurrencySymbol(currency);
-  const formatConverted = (usd: string): string => {
-    const n = parseFloat(usd || "0");
+  const formatAmount = (value: string): string => {
+    const n = parseFloat(value || "0");
     if (Number.isNaN(n)) return "0";
-    return (n * conversionRate).toLocaleString("en-US", {
-      maximumFractionDigits: 2,
-    });
+    return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
   };
 
-  // Editable conversion: show USD amounts in the selected currency, and convert
-  // typed values back to USD for storage (so any currency stays editable).
-  const usdToDisplay = (usd: string): string => {
-    const n = parseFloat(usd || "");
-    if (Number.isNaN(n)) return "";
-    return String(Math.round(n * conversionRate * 100) / 100);
-  };
-  const displayToUsd = (typed: string): string => {
-    const n = parseFloat(typed || "");
-    if (Number.isNaN(n)) return "";
-    return String(n / conversionRate);
-  };
   /**
-   * A stored figure as a whole number, which is all this field now takes.
+   * A stored figure as a whole number, which is all this field takes.
    *
-   * Converted amounts are held to full precision — a listing in euros stores
-   * 1161.9408595341315 behind a round €1,000 — and 16 cells already hold one.
+   * Earlier builds converted what the seller typed into US dollars and kept
+   * the result to full precision — 1161.9408595341315 behind a round €1,000.
    * Shown raw in a field that strips the decimal point, the seller's next
-   * keystroke would turn it into 11619408595341315. Rounding on the way out
-   * means what is in the box is always something they could have typed.
+   * keystroke would turn one of those into 11619408595341315. Rounding on the
+   * way out means what is in the box is always something they could have
+   * typed.
    */
   const asWholeUnits = (stored: string): string => {
     const n = parseFloat(stored || "");
@@ -901,32 +857,10 @@ export const FinancialsStep = ({
                       <Input
                         type="text"
                         inputMode="numeric"
-                        value={
-                          isBaseCurrency
-                            ? asWholeUnits(financialData[row]?.[col.key] || "")
-                            : editingCell && editingCell.row === row && editingCell.col === col.key
-                              ? editingCell.value
-                              : asWholeUnits(usdToDisplay(financialData[row]?.[col.key] || ""))
+                        value={asWholeUnits(financialData[row]?.[col.key] || "")}
+                        onChange={(e) =>
+                          handleCellChange(row, col.key, sanitizeNumber(e.target.value))
                         }
-                        onFocus={() => {
-                          if (!isBaseCurrency) {
-                            setEditingCell({
-                              row,
-                              col: col.key,
-                              value: asWholeUnits(usdToDisplay(financialData[row]?.[col.key] || "")),
-                            });
-                          }
-                        }}
-                        onChange={(e) => {
-                          const s = sanitizeNumber(e.target.value);
-                          if (isBaseCurrency) {
-                            handleCellChange(row, col.key, s);
-                          } else {
-                            setEditingCell({ row, col: col.key, value: s });
-                            handleCellChange(row, col.key, displayToUsd(s));
-                          }
-                        }}
-                        onBlur={() => setEditingCell(null)}
                         className="text-center"
                         style={{
                           width: '100%',
@@ -1052,7 +986,7 @@ export const FinancialsStep = ({
                             : 'rgba(0,0,0,1)',
                     }}
                   >
-                    {profitNum !== 0 ? `${currencySymbol} ${formatConverted(profit)}` : "—"}
+                    {profitNum !== 0 ? `${currencySymbol} ${formatAmount(profit)}` : "—"}
                   </span>
                 </div>
               );
@@ -1060,12 +994,6 @@ export const FinancialsStep = ({
           </div>
         </div>
       </div>
-
-      {!isBaseCurrency && (
-        <p style={{ fontFamily: 'Lufga', fontSize: '12px', color: 'rgba(0,0,0,0.45)', marginTop: '10px' }}>
-          Shown in {currency}, converted from the USD base · you can edit in any currency.
-        </p>
-      )}
 
       {/* Navigation Buttons */}
       <div style={{ display: 'flex', gap: '16px', marginTop: 'auto', paddingTop: '24px' }}>

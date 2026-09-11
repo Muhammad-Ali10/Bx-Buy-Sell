@@ -14,7 +14,6 @@ import { sanitizeNumberInput } from "@/lib/numberInput";
 import { getFormCurrencySymbol } from "@/lib/listingCurrency";
 import {
   ALLOWED_ATTACHMENT_LABEL,
-  ATTACHMENT_ACCEPT,
   isAllowedAttachment,
   maxBytesFor,
 } from "@/lib/fileTypes";
@@ -281,6 +280,9 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                       </div>
                     )}
                     <div className="w-[220px] max-w-full">
+                      {/* No `accept`. The dialog filtering a file out is what made a
+                          refusal silent — the seller picked nothing and nothing was
+                          said. The check in the handler refuses instead, out loud. */}
                       <input
                         type="file"
                         accept="image/*"
@@ -313,7 +315,6 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                     <input
                       type="file"
                       multiple
-                      accept={ATTACHMENT_ACCEPT}
                       className="hidden"
                       id={`file-${question.id}`}
                       disabled={isUploading}

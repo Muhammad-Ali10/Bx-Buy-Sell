@@ -18,6 +18,8 @@ import { useSubscriptionTier } from "@/hooks/useSubscriptionTier";
 import logo from "@/assets/_App Icon 1 (2).png";
 
 import { formatNumber as formatFullNumber } from "@/lib/formatNumber";
+import { getCurrencySymbol } from "@/components/CurrencySelect";
+import { useDisplayCurrency } from "@/lib/displayCurrency";
 /**
  * Upper bounds for the range sliders.
  *
@@ -103,10 +105,14 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
     }
   };
 
-  // Format currency — the full figure, not the abbreviated one below.
+  // Format currency — the full figure, not the abbreviated one below. In the
+  // visitor's currency, which is what the listings are compared in.
+  const viewerCurrency = useDisplayCurrency();
+  const viewerSymbol = getCurrencySymbol(viewerCurrency);
+  const symbolGap = /^[A-Za-z]{2,}$/.test(viewerSymbol) ? " " : "";
   const formatCurrency = (value: number, max?: number) => {
     const suffix = max !== undefined && value >= max ? "+" : "";
-    return `$${formatFullNumber(value)}${suffix}`;
+    return `${viewerSymbol}${symbolGap}${formatFullNumber(value)}${suffix}`;
   };
 
   // Format number with k suffix
@@ -348,7 +354,12 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                           <div
                             key={i}
                             style={{
-                              width: "4.76px",
+                              // Shares the width rather than holding a fixed
+                              // 4.76px, so the histogram reads as one block at
+                              // any panel width instead of 30 stray ticks.
+                              flex: "1 1 0",
+                              minWidth: "2px",
+                              maxWidth: "6px",
                               height: `${barHeight}px`,
                               backgroundColor: isInRange 
                                 ? "rgba(197, 253, 31, 1)" 
@@ -360,7 +371,18 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                     </div>
                     
                     {/* Track line container - smooth continuous line with rounded ends */}
-                    <div className="absolute bottom-0" style={{ left: "12px", width: "269px", height: "6px", borderRadius: "10px", overflow: "hidden", backgroundColor: "rgba(58, 58, 59, 1)" }}>
+                    {/*
+                      * Pinned to both edges rather than given a width.
+                      *
+                      * The bars above already stretch to the panel (`left-0
+                      * right-0` with the same 12px inset), but the track and
+                      * the handles were fixed at 269px — the width of the
+                      * panel on one particular screen. Anywhere narrower the
+                      * track ran past the bars; anywhere wider it stopped
+                      * short of them and the handles could not reach the last
+                      * bar. Both now measure the same box the bars do.
+                      */}
+                    <div className="absolute bottom-0" style={{ left: "12px", right: "12px", height: "6px", borderRadius: "10px", overflow: "hidden", backgroundColor: "rgba(58, 58, 59, 1)" }}>
                       {/* Selected range horizontal line (green) - active, on top of gray background */}
                       <div 
                         className="absolute bottom-0"
@@ -381,7 +403,7 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                     </div>
                     
                     {/* Slider Component - handles only, track is hidden, centered on track line */}
-                    <div className="absolute" style={{ bottom: "-7px", left: "12px", width: "269px", height: "20px", backgroundColor: "transparent", pointerEvents: "none" }}>
+                    <div className="absolute" style={{ bottom: "-7px", left: "12px", right: "12px", height: "20px", backgroundColor: "transparent", pointerEvents: "none" }}>
                       <div style={{ pointerEvents: "auto", width: "100%", height: "100%", display: "flex", alignItems: "center" }}>
                         <Slider
                           value={filters.priceRange}

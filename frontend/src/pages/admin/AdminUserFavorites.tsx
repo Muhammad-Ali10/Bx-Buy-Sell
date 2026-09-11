@@ -1,3 +1,4 @@
+import { UNKNOWN_LABEL } from "@/lib/emptyValue";
 import { multipleOf, listingMultiples, profitMultipleLabel, revenueMultipleLabel } from "@/lib/financialTableUtils";
 import { useNavigate, useParams } from "react-router-dom";
 import { resolveListingTitle } from "@/lib/listingTitle";
@@ -22,7 +23,16 @@ import ListingCard from "@/components/ListingCard";
 
 import { formatNumber } from "@/lib/formatNumber";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
+import { useDisplayCurrency } from "@/lib/displayCurrency";
+import {
+  formatFigureIn,
+  formatMoneyIn,
+  listingFiguresIn,
+  listingMultiplesOf,
+  listingPriceIn,
+} from "@/lib/listingMoney";
 export default function AdminUserFavorites() {
+  const viewerCurrency = useDisplayCurrency();
   const navigate = useNavigate();
   const { id } = useParams();
   const { data: favorites, isLoading, refetch } = useUserFavorites(id);
@@ -174,7 +184,7 @@ export default function AdminUserFavorites() {
                     const businessName = resolveListingTitle(listing, 'Unnamed Business');
                     const listingLocation = getBrandAnswer(['country', 'location', 'address']) ||
                                            listing.location ||
-                                           'Not specified';
+                                           UNKNOWN_LABEL;
                     const categoryName = listing.category?.[0]?.name || '';
 
                     if (searchQuery) {
@@ -223,7 +233,7 @@ export default function AdminUserFavorites() {
                                     0;
                   const listingLocation = getBrandAnswer(['country', 'location', 'address']) ||
                                  listing.location ||
-                                 'Not specified';
+                                 UNKNOWN_LABEL;
 
                   const userCreatedAt = listing.user?.created_at || listing.user?.createdAt;
                   const businessAge = userCreatedAt ? formatBusinessAge(userCreatedAt) : undefined;
@@ -275,7 +285,9 @@ export default function AdminUserFavorites() {
                   }
 
                   // Worked out from the seller's grid, the same as the listing's own page.
-                  const multiples = listingMultiples(listing, askingPrice?.toString());
+                  const multiples = listingMultiplesOf(listing);
+                  // In the visitor's currency, from what the server stored.
+                  const figures = listingFiguresIn(listing, viewerCurrency);
                   const profitMultiple = profitMultipleLabel(multiples.profit);
                   const revenueMultiple = revenueMultipleLabel(multiples.revenue);
 
@@ -292,14 +304,25 @@ export default function AdminUserFavorites() {
                         category={categoryInfo?.name || 'Other'}
                         name={businessName}
                         description={adDescription || businessDescription}
-                        price={`${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`}
+                        price={
+                          formatMoneyIn(listingPriceIn(listing, viewerCurrency)) ||
+                          `${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`
+                        }
                         profitMultiple={profitMultiple}
                         revenueMultiple={revenueMultiple}
                         location={listingLocation}
                         locationFlag={listingLocation}
                         businessAge={businessAge}
-                        netProfit={avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined}
-                        revenue={avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined}
+                        netProfit={
+                          figures.annualProfit !== null
+                            ? figures.annualProfit > 0 ? formatFigureIn(figures.annualProfit, figures) : undefined
+                            : avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined
+                        }
+                        revenue={
+                          figures.annualRevenue !== null
+                            ? figures.annualRevenue > 0 ? formatFigureIn(figures.annualRevenue, figures) : undefined
+                            : avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined
+                        }
                         managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
                         isPremium={String(listing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
                         listingId={listingId}

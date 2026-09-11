@@ -28,6 +28,8 @@ import { toast } from "sonner";
 import { getAdminFinancialsTemplateVersion } from "@/lib/financialTableUtils";
 import { useAdInformationQuestions } from "@/hooks/useAdInformationQuestions";
 import { getListingPriceFromForm } from "@/lib/packagePricing";
+import { useListingAreaOrder } from "@/hooks/useListingAreaOrder";
+import { listingSteps } from "@/lib/listingAreaOrder";
 
 /** Packages pricing is derived from the listing price, so it must exist first. */
 const PACKAGES_LOCKED_MESSAGE =
@@ -646,14 +648,32 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
     setActiveStep(step);
   };
 
+  /**
+   * Next and Back, in the order an administrator arranged in Content
+   * Management. Each step used to name its neighbours by hand, so the order
+   * could not change without editing all of them.
+   */
+  const areaOrder = useListingAreaOrder();
+  const steps = listingSteps(areaOrder);
+  const stepIndex = steps.indexOf(activeStep);
+  const goNext = (data: any) => {
+    updateFormData(data);
+    const next = steps[stepIndex + 1];
+    if (next) setActiveStep(next);
+  };
+  const goBack = () => {
+    const previous = steps[stepIndex - 1];
+    if (previous) setActiveStep(previous);
+  };
+
   const renderStep = () => {
     switch (activeStep) {
       case "category":
-        return <CategoryStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("brand-information"); }} />;
+        return <CategoryStep formData={formData} onPersist={updateFormData} onNext={goNext} />;
       case "brand-information":
-        return <BrandInformationStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("tools"); }} onBack={() => setActiveStep("category")} />;
+        return <BrandInformationStep formData={formData} onPersist={updateFormData} onNext={goNext} onBack={goBack} />;
       case "tools":
-        return <ToolsStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("financials"); }} onBack={() => setActiveStep("brand-information")} />;
+        return <ToolsStep formData={formData} onPersist={updateFormData} onNext={goNext} onBack={goBack} />;
       case "financials":
         return (
           <FinancialsStep
@@ -661,11 +681,8 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
             isEditListing={isEditMode}
             formData={formData}
             onPersist={updateFormData}
-            onNext={(data) => {
-              updateFormData(data);
-              setActiveStep("statistics");
-            }}
-            onBack={() => setActiveStep("tools")}
+            onNext={goNext}
+            onBack={goBack}
           />
         );
       case "statistics":
@@ -673,8 +690,8 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
           <AdditionalInformationStep
             formData={formData}
             onPersist={updateFormData}
-            onNext={(data) => { updateFormData(data); setActiveStep("products"); }}
-            onBack={() => setActiveStep("financials")}
+            onNext={goNext}
+            onBack={goBack}
             defaultTab="statistics"
           />
         );
@@ -683,8 +700,8 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
           <AdditionalInformationStep
             formData={formData}
             onPersist={updateFormData}
-            onNext={(data) => { updateFormData(data); setActiveStep("management"); }}
-            onBack={() => setActiveStep("statistics")}
+            onNext={goNext}
+            onBack={goBack}
             defaultTab="products"
           />
         );
@@ -693,24 +710,24 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
           <AdditionalInformationStep
             formData={formData}
             onPersist={updateFormData}
-            onNext={(data) => { updateFormData(data); setActiveStep("accounts"); }}
-            onBack={() => setActiveStep("products")}
+            onNext={goNext}
+            onBack={goBack}
             defaultTab="management"
           />
         );
       case "accounts":
-        return <AccountsStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("ad-informations"); }} onBack={() => setActiveStep("management")} />;
+        return <AccountsStep formData={formData} onPersist={updateFormData} onNext={goNext} onBack={goBack} />;
       case "ad-informations":
-        return <AdInformationsStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("handover"); }} onBack={() => setActiveStep("accounts")} />;
+        return <AdInformationsStep formData={formData} onPersist={updateFormData} onNext={goNext} onBack={goBack} />;
       case "handover":
-        return <HandoverStep formData={formData} onPersist={updateFormData} onNext={(data) => { updateFormData(data); setActiveStep("packages"); }} onBack={() => setActiveStep("ad-informations")} />;
+        return <HandoverStep formData={formData} onPersist={updateFormData} onNext={goNext} onBack={goBack} />;
       case "packages":
         return (
           <PackagesStep
             key={packagesKey}
             formData={formData}
             listingId={id}
-            onBack={() => setActiveStep("handover")}
+            onBack={goBack}
             isGuest={isGuestCreateFlow}
             onGuestPersistDraft={persistGuestDraft}
             onGuestAuthOpenChange={setGuestAuthOpen}

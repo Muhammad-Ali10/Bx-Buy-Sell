@@ -5,7 +5,7 @@ import { ListingsSidebar } from "@/components/listings/ListingsSidebar";
 import { ListingCardDashboard } from "@/components/listings/ListingCardDashboard";
 import Header from "@/components/Header";
 import { parseMediaUrls } from "@/lib/mediaUtils";
-import { resolveListingTitle } from "@/lib/listingTitle";
+import { resolveListingDescription, resolveListingTitle } from "@/lib/listingTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus } from "lucide-react";
@@ -18,6 +18,8 @@ import { toast } from "sonner";
 interface Listing {
   id: string;
   title: string;
+  /** Empty when the seller has not written one; the card then shows nothing. */
+  description: string;
   price: number;
   image_url?: string;
   status: "draft" | "published" | "archived";
@@ -91,6 +93,10 @@ const MyListings = () => {
           // Title comes from Ad Information; never from an unrelated brand
           // answer, which used to turn values like "EUR" into the title.
           const title = resolveListingTitle(listing);
+          // Was dropped here entirely, which is why no card could show one —
+          // the page spreads this object, so a field missing from it never
+          // reaches the card however the card is written.
+          const description = resolveListingDescription(listing);
           
           // Normalize status
           let normalizedStatus = listing.status?.toLowerCase() || 'draft';
@@ -177,6 +183,7 @@ const MyListings = () => {
           return {
             id: listing.id,
             title: title,
+            description: description,
             price: price,
             image_url: image_url || listing.image_url || listing.image || '',
             status: normalizedStatus,

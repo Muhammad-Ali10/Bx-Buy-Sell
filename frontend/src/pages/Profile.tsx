@@ -1,9 +1,12 @@
+import { orUnknown } from "@/lib/emptyValue";
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import { capacityRowStatus } from "@/lib/capacityStatus";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
-import { Mail, Lock, Phone, ShieldCheck, BadgeCheck } from "lucide-react";
+import { Mail, Lock, Smartphone, IdCard, Wallet } from "lucide-react";
 import { ListingsSidebar } from "@/components/listings/ListingsSidebar";
 import Header from "@/components/Header";
 import { AccountSection, AccountField } from "@/components/account/AccountSection";
@@ -12,7 +15,6 @@ import { AccountSubscriptions } from "@/components/account/AccountSubscriptions"
 import { AccountBilling } from "@/components/account/AccountBilling";
 import { useSubscriptionTier } from "@/hooks/useSubscriptionTier";
 import { VerificationDialog } from "@/components/account/VerificationDialog";
-import { AccountVerification } from "@/components/account/AccountVerification";
 import { ChangePasswordDialog } from "@/components/account/ChangePasswordDialog";
 import { IdentityVerificationDialog } from "@/components/account/IdentityVerificationDialog";
 
@@ -24,7 +26,7 @@ import { IdentityVerificationDialog } from "@/components/account/IdentityVerific
  * three tabs so the page does not become a wall.
  */
 
-type TabId = "overview" | "verification" | "subscriptions" | "billing";
+type TabId = "overview" | "subscriptions" | "billing";
 
 interface ProfileState {
   first_name: string;
@@ -55,12 +57,11 @@ const EMPTY: ProfileState = {
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Overview" },
   /*
-   * Verification lives here, and only here.
-   *
-   * The left sidebar used to carry a "Verify Your Account" entry as well; this
-   * is the address the client refers to, so it is the one that stays.
+   * No Verification tab. Its checks already sit under the name on Overview —
+   * phone, ID and funds each with their own Verify Now, e-mail behind Change —
+   * and the client asked not to have them twice. `AccountVerification` and
+   * /verify-account are kept; nothing on this page links to them.
    */
-  { id: "verification", label: "Verification" },
   { id: "subscriptions", label: "Subscriptions" },
   { id: "billing", label: "Billing" },
 ];
@@ -70,7 +71,15 @@ const Profile = () => {
   const { user, isAuthenticated, loading: authLoading, logout, refreshUser } = useAuth();
   const { tier } = useSubscriptionTier();
 
-  const [tab, setTab] = useState<TabId>("overview");
+  /*
+   * A link can open a tab directly: a finished buyer-plan checkout sends the
+   * member to ?tab=subscriptions, so what they just bought is the first thing
+   * they see.
+   */
+  const [tab, setTab] = useState<TabId>(() => {
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    return TABS.some((t) => t.id === asked) ? (asked as TabId) : "overview";
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<ProfileState>(EMPTY);
@@ -81,6 +90,26 @@ const Profile = () => {
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [identityDialogOpen, setIdentityDialogOpen] = useState(false);
+  const [emailConfirmOpen, setEmailConfirmOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const identityReturnRef = useRef(false);
+
+  /*
+   * Proof of funds has a state of its own — sent, under review, verified. The
+   * row said "Verify Now" through all of them, so someone who had just sent
+   * their documents came back here to be asked for them again.
+   */
+  const { data: verification } = useQuery<any>({
+    queryKey: ["verification-overview", user?.id],
+    queryFn: async () => {
+      const response: any = await apiClient.getVerificationOverview();
+      if (response?.success === false) return null;
+      const payload = response?.data;
+      return payload?.funds ? payload : payload?.data ?? null;
+    },
+    enabled: Boolean(user?.id),
+  });
+  const fundsState = capacityRowStatus(verification?.funds);
 
   /**
    * The api client answers with a payload rather than throwing, so the dialog's
@@ -119,6 +148,26 @@ const Profile = () => {
     loadedProfileForRef.current = user.id;
     loadProfile(user.id);
   }, [isAuthenticated, authLoading, user?.id, navigate]);
+
+  /*
+   * Back from didit. The result arrives separately, on the provider's webhook,
+   * so all this can say is that the check is under way — and look again a
+   * little later, by when it has usually landed.
+   */
+  useEffect(() => {
+    if (identityReturnRef.current || searchParams.get("identity") !== "done") return;
+    identityReturnRef.current = true;
+    toast.success(
+      "Thanks — your ID check has been submitted. Your status updates here as soon as it is confirmed.",
+    );
+    const next = new URLSearchParams(searchParams);
+    next.delete("identity");
+    setSearchParams(next, { replace: true });
+    void refreshUser();
+    const again = window.setTimeout(() => void refreshUser(), 15000);
+    return () => window.clearTimeout(again);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadProfile = async (userId: string) => {
     try {
@@ -267,10 +316,17 @@ const Profile = () => {
                   </div>
 
                   <ul className="mt-5 flex flex-col gap-3 border-t border-[#F1F5F9] pt-4">
+                    {/* An unconfirmed address is offered the check first; the
+                        Verification tab used to be the only place saying so. */}
                     <StatusRow
                       icon={<Mail className="h-4 w-4" />}
-                      label={user.email || "—"}
-                      action={{ text: "Change", onClick: () => setEmailDialogOpen(true) }}
+                      label={orUnknown(user.email)}
+                      action={
+                        (user as any).is_email_verified
+                          ? { text: "Change", onClick: () => setEmailDialogOpen(true) }
+                          : { text: "Verify Now", onClick: () => setEmailConfirmOpen(true) }
+                      }
+                      pending={!(user as any).is_email_verified}
                     />
                     {/* The one row in this column with nothing to press. The
                         rest all offer the thing they describe. */}
@@ -280,7 +336,7 @@ const Profile = () => {
                       action={{ text: "Edit", onClick: () => setPasswordDialogOpen(true) }}
                     />
                     <StatusRow
-                      icon={<Phone className="h-4 w-4" />}
+                      icon={<Smartphone className="h-4 w-4" />}
                       label={profile.phone || "No phone number"}
                       action={
                         (user as any).is_phone_verified && profile.phone
@@ -290,7 +346,7 @@ const Profile = () => {
                       pending={!(user as any).is_phone_verified}
                     />
                     <StatusRow
-                      icon={<BadgeCheck className="h-4 w-4" />}
+                      icon={<IdCard className="h-4 w-4" />}
                       label={(user as any).verified ? "ID verified" : "ID not verified"}
                       action={
                         (user as any).verified
@@ -299,10 +355,29 @@ const Profile = () => {
                       }
                       pending={!(user as any).verified}
                     />
+                    {/* Sent documents read "In Review", a finished review
+                        "Verified"; both open the page listing the documents
+                        and their verdicts, where more can be added. */}
                     <StatusRow
-                      icon={<ShieldCheck className="h-4 w-4" />}
+                      icon={<Wallet className="h-4 w-4" />}
                       label="Acquisition Capacity"
-                      action={{ text: "Verify Now", onClick: () => navigate("/verify-funds") }}
+                      action={
+                        fundsState === "VERIFIED"
+                          ? {
+                              text: "Verified",
+                              tone: "green",
+                              title: "See your documents",
+                              onClick: () => navigate("/verify-funds"),
+                            }
+                          : fundsState === "IN_REVIEW"
+                            ? {
+                                text: "In Review",
+                                tone: "amber",
+                                title: "See your documents",
+                                onClick: () => navigate("/verify-funds"),
+                              }
+                            : { text: "Verify Now", onClick: () => navigate("/verify-funds") }
+                      }
                     />
                   </ul>
                 </section>
@@ -447,6 +522,18 @@ const Profile = () => {
           />
 
           <VerificationDialog
+            open={emailConfirmOpen}
+            onOpenChange={setEmailConfirmOpen}
+            channel="email-confirm"
+            initialValue={user?.email || ""}
+            onSend={() => unwrap(apiClient.sendEmailConfirmCode()).then(() => undefined)}
+            onVerify={(code) => unwrap(apiClient.confirmEmailCode(code)).then(() => undefined)}
+            onVerified={async () => {
+              await refreshUser();
+            }}
+          />
+
+          <VerificationDialog
             open={phoneDialogOpen}
             onOpenChange={setPhoneDialogOpen}
             channel="sms"
@@ -462,11 +549,6 @@ const Profile = () => {
             }}
           />
 
-          {tab === "verification" && (
-            <div className="mt-6">
-              <AccountVerification />
-            </div>
-          )}
           {tab === "subscriptions" && <AccountSubscriptions />}
           {tab === "billing" && <AccountBilling />}
         </main>
@@ -474,6 +556,13 @@ const Profile = () => {
     </div>
   );
 };
+
+/** The row's button: the accent for something to do, or the state itself. */
+const PILL_TONES = {
+  lime: { background: 'rgba(174, 243, 31, 1)', color: '#000000' },
+  amber: { background: '#FEF3C7', color: '#92400E' },
+  green: { background: '#DCFCE7', color: '#166534' },
+} as const;
 
 const StatusRow = ({
   icon,
@@ -484,7 +573,12 @@ const StatusRow = ({
   icon: React.ReactNode;
   label: string;
   pending?: boolean;
-  action?: { text: string; onClick: () => void };
+  action?: {
+    text: string;
+    onClick: () => void;
+    tone?: keyof typeof PILL_TONES;
+    title?: string;
+  };
 }) => (
   <li className="flex items-center gap-2.5">
     <span className="shrink-0 text-[#94A3B8]">{icon}</span>
@@ -498,8 +592,9 @@ const StatusRow = ({
       <button
         type="button"
         onClick={action.onClick}
-        className="shrink-0 rounded-full px-2.5 py-1 text-[10.5px] font-medium text-black hover:brightness-95"
-        style={{ background: 'rgba(174, 243, 31, 1)', fontFamily: 'Lufga' }}
+        title={action.title}
+        className="shrink-0 rounded-full px-2.5 py-1 text-[10.5px] font-medium hover:brightness-95"
+        style={{ ...PILL_TONES[action.tone ?? 'lime'], fontFamily: 'Lufga' }}
       >
         {action.text}
       </button>

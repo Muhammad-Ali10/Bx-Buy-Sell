@@ -1,3 +1,4 @@
+import { UNKNOWN_LABEL } from "@/lib/emptyValue";
 import {
   multipleOf,
   listingMultiples,
@@ -16,11 +17,20 @@ import { useAuth } from "@/hooks/useAuth";
 
 import { formatNumber } from "@/lib/formatNumber";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
+import { useDisplayCurrency } from "@/lib/displayCurrency";
+import {
+  formatFigureIn,
+  formatMoneyIn,
+  listingFiguresIn,
+  listingMultiplesOf,
+  listingPriceIn,
+} from "@/lib/listingMoney";
 interface ListingsProps {
   searchQuery: string;
 }
 
 const Listings = ({ searchQuery }: ListingsProps) => {
+  const viewerCurrency = useDisplayCurrency();
   const navigate = useNavigate();
   const [activeCategory, setActiveCategory] = useState("All");
   const [listings, setListings] = useState<any[]>([]);
@@ -294,7 +304,7 @@ const Listings = ({ searchQuery }: ListingsProps) => {
                   const location =
                     getBrandAnswer(["country", "location", "address"]) ||
                     listing.location ||
-                    "Not specified";
+                    UNKNOWN_LABEL;
                   // Calculate business age from user account creation date
                   // Use user account creation date to show how long the business has been on the platform
                   const userCreatedAt =
@@ -472,7 +482,9 @@ const Listings = ({ searchQuery }: ListingsProps) => {
                    * was showing one listing's numbers.
                    */
                   // Worked out from the seller's grid, the same as the listing's own page.
-                  const multiples = listingMultiples(listing, askingPrice);
+                  const multiples = listingMultiplesOf(listing);
+                  // In the visitor's currency, from what the server stored.
+                  const figures = listingFiguresIn(listing, viewerCurrency);
                   const profitMultiple = profitMultipleLabel(multiples.profit);
                   const revenueMultiple = revenueMultipleLabel(multiples.revenue);
 
@@ -495,21 +507,32 @@ const Listings = ({ searchQuery }: ListingsProps) => {
                         category={categoryInfo?.name || "Other"}
                         name={businessName}
                         description={adDescription || businessDescription}
-                        price={`${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`}
+                        price={
+                          formatMoneyIn(listingPriceIn(listing, viewerCurrency)) ||
+                          `${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`
+                        }
                         profitMultiple={profitMultiple}
                         revenueMultiple={revenueMultiple}
                         location={location}
                         locationFlag={location}
                         businessAge={businessAge}
                         netProfit={
-                          avgNetProfit > 0
-                            ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}`
-                            : undefined
+                          figures.annualProfit !== null
+                            ? figures.annualProfit > 0
+                              ? formatFigureIn(figures.annualProfit, figures)
+                              : undefined
+                            : avgNetProfit > 0
+                              ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}`
+                              : undefined
                         }
                         revenue={
-                          avgRevenue > 0
-                            ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}`
-                            : undefined
+                          figures.annualRevenue !== null
+                            ? figures.annualRevenue > 0
+                              ? formatFigureIn(figures.annualRevenue, figures)
+                              : undefined
+                            : avgRevenue > 0
+                              ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}`
+                              : undefined
                         }
                         managedByEx={
                           listing.managed_by_ex === true ||

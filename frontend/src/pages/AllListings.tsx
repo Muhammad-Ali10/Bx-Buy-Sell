@@ -1,3 +1,4 @@
+import { UNKNOWN_LABEL } from "@/lib/emptyValue";
 import { multipleOf, listingMultiples, profitMultipleLabel, revenueMultipleLabel } from "@/lib/financialTableUtils";
 import ListingCard from "@/components/ListingCard";
 import { resolveListingTitle } from "@/lib/listingTitle";
@@ -29,6 +30,14 @@ import { toast } from "sonner";
 import { createSocketConnection } from "@/lib/socket";
 import { formatNumber } from "@/lib/formatNumber";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
+import { useDisplayCurrency } from "@/lib/displayCurrency";
+import {
+  formatFigureIn,
+  formatMoneyIn,
+  listingFiguresIn,
+  listingMultiplesOf,
+  listingPriceIn,
+} from "@/lib/listingMoney";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -217,6 +226,7 @@ const rangeFromParam = (
 };
 
 const AllListings = () => {
+  const viewerCurrency = useDisplayCurrency();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const [listings, setListings] = useState<any[]>([]);
@@ -498,7 +508,7 @@ const AllListings = () => {
                       0) || 0;
     const location = getBrandAnswer(['country', 'location', 'address']) || 
                     listing.location || 
-                    'Not specified';
+                    UNKNOWN_LABEL;
     // Business age comes from the seller's own start date, not from when their
     // account was created — every listing by one seller shared that number.
     const businessAge =
@@ -608,14 +618,21 @@ const AllListings = () => {
     }
     
     // For filtering, use monthly averages
-    const monthlyRevenue = avgRevenue;
-    const monthlyProfit = avgNetProfit;
+    /*
+     * Compared in the visitor's currency, from what the server stored for
+     * every listing — never a live rate — so the filter judges the figures the
+     * cards print: ⌀ monthly revenue and profit, each year converted at its own
+     * rate before averaging.
+     */
+    const figures = listingFiguresIn(listing, viewerCurrency);
+    const monthlyRevenue = figures.monthlyRevenue ?? 0;
+    const monthlyProfit = figures.monthlyProfit ?? 0;
     
     // Calculate multiples (using average monthly * 12 for annual)
-    const annualRevenue = avgRevenue * 12;
-    const annualProfit = avgNetProfit * 12;
-    const revenueMultiple = (askingPrice > 0 && annualRevenue > 0) ? (askingPrice / annualRevenue) : 0;
-    const profitMultiple = (askingPrice > 0 && annualProfit > 0) ? (askingPrice / annualProfit) : 0;
+    // Worked out in euros, so the same whichever currency is being read.
+    const storedMultiples = listingMultiplesOf(listing);
+    const revenueMultiple = storedMultiples.revenue ?? 0;
+    const profitMultiple = storedMultiples.profit ?? 0;
     
     // Get pageviews (if available in statistics)
     const statisticQuestions = listing.statistics || [];
@@ -655,8 +672,10 @@ const AllListings = () => {
     }
     
     // 4. Price range filter
-    if (askingPrice < filters.priceRange[0]) return false;
-    if (filters.priceRange[1] < PRICE_MAX && askingPrice > filters.priceRange[1]) {
+    // In the visitor's currency, at this week's stored rates.
+    const priceShown = listingPriceIn(listing, viewerCurrency)?.amount ?? askingPrice;
+    if (priceShown < filters.priceRange[0]) return false;
+    if (filters.priceRange[1] < PRICE_MAX && priceShown > filters.priceRange[1]) {
       return false;
     }
     
@@ -1418,7 +1437,7 @@ const AllListings = () => {
                                         0;
                       const location = getBrandAnswer(['country', 'location', 'address']) || 
                                      listing.location || 
-                                     'Not specified';
+                                     UNKNOWN_LABEL;
                       // Calculate business age from user account creation date for display
                       // The business's own age, from the seller's start date.
                       const businessAgeForDisplay =
@@ -1551,9 +1570,10 @@ const AllListings = () => {
                         }
                       }
                       
-                      // Monthly averages, so x12 for the annual figure.
                       // Worked out from the seller's grid, the same as the listing's own page.
-                      const multiples = listingMultiples(listing, askingPrice);
+                      const multiples = listingMultiplesOf(listing);
+                      // In the visitor's currency, from what the server stored.
+                      const figures = listingFiguresIn(listing, viewerCurrency);
                       const profitMultiple = profitMultipleLabel(multiples.profit);
                       const revenueMultiple = revenueMultipleLabel(multiples.revenue);
                       
@@ -1569,14 +1589,25 @@ const AllListings = () => {
                           category={categoryInfo?.name || 'Other'}
                           name={businessName}
                           description={adDescription || businessDescription}
-                          price={`${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`}
+                          price={
+                            formatMoneyIn(listingPriceIn(listing, viewerCurrency)) ||
+                            `${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`
+                          }
                           profitMultiple={profitMultiple}
                           revenueMultiple={revenueMultiple}
                           location={location}
                           locationFlag={location}
                           businessAge={businessAgeForDisplay}
-                          netProfit={avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined}
-                          revenue={avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined}
+                          netProfit={
+                            figures.annualProfit !== null
+                              ? figures.annualProfit > 0 ? formatFigureIn(figures.annualProfit, figures) : undefined
+                              : avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined
+                          }
+                          revenue={
+                            figures.annualRevenue !== null
+                              ? figures.annualRevenue > 0 ? formatFigureIn(figures.annualRevenue, figures) : undefined
+                              : avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined
+                          }
                           managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
                           isPremium={String(listing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
                           listingId={listing.id}

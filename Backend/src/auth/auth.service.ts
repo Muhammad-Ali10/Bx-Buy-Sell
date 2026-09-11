@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { SignUpSchemaType } from 'src/auth/dto/signup-user.dto';
 import { UserService } from 'src/user/user.service';
 import * as bcrypt from 'bcrypt';
@@ -6,16 +6,21 @@ import { JwtService } from '@nestjs/jwt';
 import { signInSchema, SignInSchemaType } from './dto/signin.dto';
 import { randomBytes } from 'crypto';
 import { VerifyOtpType } from './dto/verify.dto';
-import sendgrid, { MailDataRequired, MailService } from '@sendgrid/mail';
+import { InboxCodeService } from 'src/user/inbox-code.service';
+import { ActivityLogService } from 'src/activity-log/activity-log.service';
+import type { RequestOrigin } from 'src/activity-log/request-origin';
 @Injectable()
 export class AuthService {
   constructor(
     private userService: UserService,
     private jwtService: JwtService,
+    private readonly inboxCode: InboxCodeService,
+    /** Sign-ins, sign-outs and password changes go into the member's log. */
+    @Optional() private readonly activityLog?: ActivityLogService,
   ) {}
 
   // SignUp Service
-  async signUp(body: SignUpSchemaType): Promise<unknown> {
+  async signUp(body: SignUpSchemaType, origin?: RequestOrigin): Promise<unknown> {
     const { password, confirm_password, email } = body;
 
     // Check Password If They are Matched
@@ -60,6 +65,16 @@ export class AuthService {
     });
     formattedUser = this.formatResponse(loggedInUser);
 
+    void this.activityLog?.record({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'profile.account-created',
+      entityType: 'user',
+      entityId: user.id,
+      message: 'Signed up',
+      ...origin,
+    });
+
     return {
       user: formattedUser,
       tokens: { accessToken, refreshToken: refreshToken },
@@ -67,7 +82,7 @@ export class AuthService {
   }
 
   // SignIn Service
-  async signIn(body: SignInSchemaType): Promise<unknown> {
+  async signIn(body: SignInSchemaType, origin?: RequestOrigin): Promise<unknown> {
     const { email, password } = body;
     const user = await this.userService.findOneByEmail(email);
 
@@ -135,44 +150,61 @@ export class AuthService {
     // Formatting Response
     formattedUser = this.formatResponse(loggedInUser);
 
+    // The client asked to see sign-ins in the member's log, with where from.
+    void this.activityLog?.record({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'auth.sign-in',
+      entityType: 'user',
+      entityId: user.id,
+      message: 'Signed in',
+      ...origin,
+    });
+
     return {
       user: formattedUser,
       tokens: { accessToken, refreshToken: refreshToken },
     };
   }
 
-  // Get OTP Service
+  /**
+   * Email a confirmation code, by address — the older, public form of
+   * `POST /user/me/email/confirm/send-code`.
+   *
+   * It stored a four-digit code and emailed nothing. The same answer comes back
+   * whether or not the address has an account, so this cannot be used to find
+   * out who is registered.
+   */
   async getOTP(email: string) {
     const user = await this.userService.findOneByEmail(email);
-    if (!user) {
-      throw new HttpException('User Not Found', HttpStatus.NOT_FOUND);
+    if (user && !user.is_email_verified) {
+      await this.inboxCode.send(user, 'verify');
     }
-    const otp = this.generateSecureOTP();
-
-    // await this.sendEmail(email, otp);
-    await this.userService.updateUser(user.id, { otp_code: otp });
-    return { message: 'OTP Sent successfully', success: true };
+    return { message: 'If this address has an account, a code is on its way.', success: true };
   }
 
-  // Verify OTP Service
+  /** Confirm an address with its emailed code; the public form of `me/email/confirm`. */
   async verifyOTP(body: VerifyOtpType) {
     const { otp_code, email } = body;
     const user = await this.userService.findOneByEmail(email);
     if (!user) {
-      throw new HttpException('User Not Found', HttpStatus.NOT_FOUND);
+      throw new HttpException('That code is not right.', HttpStatus.BAD_REQUEST);
     }
-    if (user.otp_code !== otp_code) {
-      throw new HttpException('Invalid OTP', HttpStatus.BAD_REQUEST);
-    }
-    await this.userService.updateUser(user.id, {
-      otp_code: '',
-      is_email_verified: true,
+    await this.inboxCode.check(user, otp_code, true);
+    await this.userService.updateUser(user.id, { is_email_verified: true });
+    void this.activityLog?.record({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'profile.email-verified',
+      entityType: 'user',
+      entityId: user.id,
+      message: 'Email address confirmed',
     });
-    return { message: 'OTP verified successfully', success: true };
+    return { message: 'Email confirmed', success: true };
   }
 
   // Logout Service
-  async logout(userId: string) {
+  async logout(userId: string, origin?: RequestOrigin, accessToken?: string) {
     const user = await this.userService.findOneByID(userId);
     if (!user) throw new HttpException('User Not Found', HttpStatus.NOT_FOUND);
     await this.userService.updateUser(userId, {
@@ -180,7 +212,31 @@ export class AuthService {
       is_online: false,
       last_offline: new Date(),
     });
+
+    // The route is public and names its account in the address, so a sign-out
+    // goes into the log only when the caller's own token is for that account.
+    if (accessToken && (await this.tokenOwner(accessToken)) === userId) {
+      void this.activityLog?.record({
+        actorId: userId,
+        actorRole: (user as any).role,
+        action: 'auth.sign-out',
+        entityType: 'user',
+        entityId: userId,
+        message: 'Signed out',
+        ...origin,
+      });
+    }
     return true;
+  }
+
+  /** The account an access token belongs to, or null when it does not check out. */
+  private async tokenOwner(token: string): Promise<string | null> {
+    try {
+      const payload = await this.jwtService.verifyAsync(token, { secret: process.env.JWT_SECRET });
+      return typeof payload?.id === 'string' ? payload.id : null;
+    } catch {
+      return null;
+    }
   }
 
   // Refresh Token Service
@@ -226,27 +282,6 @@ export class AuthService {
   checkPassword(password: string, confirm_password: string) {
     if (password !== confirm_password) return true;
     return false;
-  }
-
-  async sendEmail(email: string, otp: string) {
-    const sendgrid = new MailService();
-
-    sendgrid.setApiKey(process.env.SENDGRID_API_KEY!);
-
-    const msg = {
-      to: email, // Change to your recipient
-      from: process.env.EMAIL_SERVICE_FROM, // Change to your verified sender
-      subject: 'Your verification code',
-      text: `Your code is ${otp}. Do not share it with anyone.`,
-      html: `<h2>Your code is <h1>${otp}</h1>. Do not share it with anyone.</h2>`,
-    } as MailDataRequired;
-
-    try {
-      const response = await sendgrid.send(msg);
-      console.log('Email sent', response);
-    } catch (error) {
-      console.log(error.response.body.errors);
-    }
   }
 
   generateSecureOTP(length = 4) {
@@ -312,17 +347,33 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  // Reset Password - Send OTP
+  /**
+   * Start a password reset: email a code to the address.
+   *
+   * The code used to be stored and never sent, so nobody could finish a reset.
+   * The answer is the same whether or not the address has an account.
+   */
   async resetPassword(email: string) {
     const user = await this.userService.findOneByEmail(email);
-    if (!user) {
-      throw new HttpException('User Not Found', HttpStatus.NOT_FOUND);
+    if (user && !(user as any).blocked) {
+      await this.inboxCode.send(user, 'reset');
     }
-    const otp = this.generateSecureOTP();
-    await this.userService.updateUser(user.id, { otp_code: otp });
-    // TODO: Send email with OTP and reset link
-    // await this.sendEmail(email, otp);
-    return { message: 'Password reset OTP sent to your email', success: true };
+    return { message: 'If this address has an account, a code is on its way.', success: true };
+  }
+
+  /**
+   * Check a reset code without spending it. The reset screens take the code
+   * first and the new password after; the team's screens used to "verify" it
+   * with the address-confirmation call, which cleared it, so the password step
+   * that followed always failed.
+   */
+  async checkResetCode(email: string, otp_code: string) {
+    const user = await this.userService.findOneByEmail(email);
+    if (!user) {
+      throw new HttpException('That code is not right.', HttpStatus.BAD_REQUEST);
+    }
+    await this.inboxCode.check(user, otp_code, false);
+    return { success: true };
   }
 
   /**
@@ -343,6 +394,7 @@ export class AuthService {
     currentPassword: string,
     newPassword: string,
     confirmPassword: string,
+    origin?: RequestOrigin,
   ) {
     if (this.checkPassword(newPassword, confirmPassword)) {
       throw new HttpException('Passwords do not match', HttpStatus.BAD_REQUEST);
@@ -380,33 +432,55 @@ export class AuthService {
       password_hash: await this.hashData(newPassword),
     });
 
+    void this.activityLog?.record({
+      actorId: user.id,
+      action: 'auth.password-changed',
+      entityType: 'user',
+      entityId: user.id,
+      message: 'Changed their password',
+      ...origin,
+    });
+
     return { message: 'Password changed', success: true };
   }
 
   // Update Password with OTP
-  async updatePassword(email: string, otp_code: string, new_password: string, confirm_password: string) {
-    // Check passwords match
+  /**
+   * Finish a password reset. The code is spent here, and every other session
+   * ends: a reset is often what someone does after losing control of an account.
+   */
+  async updatePassword(
+    email: string,
+    otp_code: string,
+    new_password: string,
+    confirm_password: string,
+    origin?: RequestOrigin,
+  ) {
     if (this.checkPassword(new_password, confirm_password)) {
       throw new HttpException('Passwords do not match', HttpStatus.BAD_REQUEST);
     }
 
     const user = await this.userService.findOneByEmail(email);
     if (!user) {
-      throw new HttpException('User Not Found', HttpStatus.NOT_FOUND);
+      throw new HttpException('That code is not right.', HttpStatus.BAD_REQUEST);
     }
 
-    // Verify OTP
-    if (user.otp_code !== otp_code) {
-      throw new HttpException('Invalid OTP', HttpStatus.BAD_REQUEST);
-    }
+    await this.inboxCode.check(user, otp_code, true);
 
-    // Hash new password
     const hash = await this.hashData(new_password);
-    
-    // Update password and clear OTP
     await this.userService.updateUser(user.id, {
       password_hash: hash,
-      otp_code: '',
+      refresh_token: null,
+    });
+
+    void this.activityLog?.record({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'auth.password-reset',
+      entityType: 'user',
+      entityId: user.id,
+      message: 'Reset their password with an emailed code',
+      ...origin,
     });
 
     return { message: 'Password updated successfully', success: true };

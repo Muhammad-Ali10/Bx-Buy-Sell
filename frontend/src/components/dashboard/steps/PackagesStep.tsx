@@ -15,6 +15,8 @@ import {
   ChevronUp,
   CircleCheck,
   Crown,
+  Dot,
+  Rocket,
   Info,
   Lock,
   UserRoundCheck,
@@ -28,7 +30,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   ADDON_LABELS,
-  BILLING_CYCLES,
   PACKAGE_LABELS,
   getAddonPrice,
   SUCCESS_FEE_INFO_TEXT,
@@ -53,6 +54,12 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useAccountQuestions } from "@/hooks/useAccountQuestions";
 import { clearDraftListing } from "@/lib/draftListingStorage";
 import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
+import { ADDON_CARDS, PACKAGE_CARDS } from "@/lib/packageContent";
+import { BillingCycleChooser } from "@/components/listings/BillingCycleChooser";
+import { TrustBand, WhyPanel } from "@/components/marketing/TrustAndWhy";
+
+/** The brand lime, the same value the Manage Subscription page uses. */
+const LIME = "rgba(197, 253, 31, 1)";
 
 interface PackagesStepProps {
   formData: any;
@@ -106,6 +113,7 @@ export const PackagesStep = ({
     packageId: (formData.selectedPackage as PackageId) || null,
     addon: (formData.packageAddon as AddonId) || "NONE",
     billingCycle: (formData.packageBillingCycle as BillingCycleId) || "MONTHLY",
+    addonBillingCycle: (formData.addonBillingCycle as BillingCycleId) || "MONTHLY",
   });
   // Requirement: this must start switched off.
   const [approveBuyersManually, setApproveBuyersManually] = useState(
@@ -315,6 +323,9 @@ export const PackagesStep = ({
         columnLabels: formData.columnLabels,
         financialData: formData.financialData,
         currency: formData.currency || 'USD',
+        // The figures are in that currency, exactly as typed. Tables saved
+        // before this was written down hold US dollars instead.
+        amountsIn: formData.currency || 'USD',
       };
       
       return [{
@@ -486,6 +497,8 @@ export const PackagesStep = ({
         // paid features themselves are switched on once payment is wired up.
         selectedPackage: selection.packageId,
         packageBillingCycle: isPaidPackage ? selection.billingCycle : null,
+        addonBillingCycle:
+          selection.addon === "NONE" ? null : selection.addonBillingCycle,
         packageAddons: selection.addon === "NONE" ? [] : [selection.addon],
         successFeePercent: overview ? overview.successFeePercent : null,
         approveBuyersManually: isPaidPackage ? approveBuyersManually : false,
@@ -584,6 +597,7 @@ export const PackagesStep = ({
         packageId: selection.packageId || "MINIMUM",
         addon: selection.addon,
         billingCycle: selection.billingCycle,
+        addonBillingCycle: selection.addonBillingCycle,
       });
 
       const checkoutUrl = (response.data as any)?.checkoutUrl;
@@ -635,57 +649,10 @@ export const PackagesStep = ({
     );
   }
 
-  const packageCards: Array<{ id: PackageId; blurb: string; features: string[] }> = [
-    {
-      id: "MINIMUM",
-      blurb: "Everything you need to get started — with no upfront costs.",
-      features: [
-        "Start for free",
-        "Publish your listing",
-        "Access all essential features",
-        "Success fee is paid after the business is sold",
-      ],
-    },
-    {
-      id: "STARTER",
-      blurb: "For a solid mid-tier solution, choose our Starter plan.",
-      features: [
-        "All options from the Minimum plan",
-        "Standard reach for your listing",
-        "Manually approve buyers",
-        "Success fee is paid after the business is sold",
-      ],
-    },
-    {
-      id: "PREMIUM",
-      blurb: "Everything you need instantly — choose our premium package.",
-      features: [
-        "All options from the Starter plan",
-        "Extended reach for your listing",
-        "Stand out with a premium badge",
-        "Manually approve buyers",
-        "Success fee is paid after the business is sold",
-      ],
-    },
-  ];
-
-  const addonCards: Array<{ id: AddonId; description: string }> = [
-    {
-      id: "CATEGORY_PAGE",
-      description:
-        "Your listing appears alongside other featured listings in the same category for increased visibility.",
-    },
-    {
-      id: "BUNDLE",
-      description:
-        "Your listing is featured on both the homepage and category pages for maximum exposure.",
-    },
-    {
-      id: "START_PAGE",
-      description:
-        "Your listing is featured on the platform homepage for maximum reach and visibility.",
-    },
-  ];
+  // The words live in `lib/packageContent`, shared with the Manage
+  // Subscription page so the two never describe the same package differently.
+  const packageCards = PACKAGE_CARDS;
+  const addonCards = ADDON_CARDS;
 
   /* ---------------------------------------------------------------- screen 2 */
   if (screen === "confidentiality") {
@@ -894,9 +861,17 @@ export const PackagesStep = ({
         </div>
       </div>
 
-      {/* Packages */}
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-        {packageCards.map((card) => {
+      {/*
+        * Minimum, Premium, Starter — Premium in the middle.
+        *
+        * Display order only; the shared list keeps its own order because the
+        * Manage Subscription page reads the same data.
+        */}
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-start">
+        {(["MINIMUM", "PREMIUM", "STARTER"] as PackageId[])
+          .map((id) => packageCards.find((entry) => entry.id === id))
+          .filter((card): card is (typeof packageCards)[number] => Boolean(card))
+          .map((card) => {
           const isSelected = selection.packageId === card.id;
           const price = getPackageMonthlyPrice(tier, card.id);
           const isPremium = card.id === "PREMIUM";
@@ -909,68 +884,80 @@ export const PackagesStep = ({
                   packageId: prev.packageId === card.id ? null : card.id,
                 }))
               }
-              className={`relative rounded-2xl border-2 p-6 cursor-pointer transition-colors ${
-                isSelected ? "border-accent bg-accent/10" : "border-border bg-muted/30 hover:border-accent/50"
-              }`}
+              className="relative cursor-pointer rounded-2xl p-6 transition-colors"
+              style={{
+                // Premium is the card being sold, so it is lime whatever is
+                // selected — the selection shows as a dark outline instead.
+                background: isPremium ? LIME : "#FFFFFF",
+                border: isSelected ? "2px solid #000000" : "1px solid #E9EBF2",
+              }}
             >
-              {isPremium && (
-                <div className="absolute top-4 right-4 inline-flex items-center gap-1 rounded-full bg-foreground px-3 py-1 text-xs font-semibold text-background">
+              {/* The name in a dark pill, top left, as the design has it. */}
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full bg-black px-3 py-1 text-xs font-semibold text-white"
+                style={{ fontFamily: "Lufga" }}
+              >
+                {card.id === "MINIMUM" ? (
+                  <Dot className="h-4 w-4" />
+                ) : card.id === "STARTER" ? (
+                  <Rocket className="h-3 w-3" />
+                ) : (
                   <Crown className="h-3 w-3" />
-                  Premium
-                </div>
-              )}
-              <h3 className="text-xl font-bold">{PACKAGE_LABELS[card.id]}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{card.blurb}</p>
+                )}
+                {PACKAGE_LABELS[card.id]}
+              </span>
+              <p className="mt-3 text-sm text-black/60">{card.blurb}</p>
               <div className="mt-4">
                 <span className="text-3xl font-bold">{formatUsd(price)}</span>
-                <span className="ml-1 text-sm text-muted-foreground">/monthly</span>
+                <span className="ml-1 text-sm text-black/50">/monthly</span>
               </div>
               <div className="mt-4 space-y-2">
                 {card.features.map((f) => (
                   <div key={f} className="flex items-start gap-2 text-sm">
-                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                    <CircleCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
                     <span>{f}</span>
                   </div>
                 ))}
               </div>
+              {/*
+                * Still a div, not a button.
+                *
+                * The whole card is the click target and always has been; a
+                * real button inside it would fire the selection twice.
+                */}
               <div
-                className={`mt-5 rounded-xl py-2.5 text-center text-sm font-semibold ${
-                  isSelected ? "bg-accent text-accent-foreground" : "bg-background border border-border"
-                }`}
+                className="mt-5 rounded-full py-2.5 text-center text-sm font-semibold"
+                style={{
+                  background: isSelected ? "#000000" : LIME,
+                  color: isSelected ? "#FFFFFF" : "#000000",
+                }}
               >
                 {isSelected ? "Selected" : "Select"}
               </div>
+
+              {/*
+                * The billing cycle lives inside the card it belongs to.
+                *
+                * It was a full-width panel under all three, which is not what
+                * the design shows — and it read as a separate question rather
+                * than part of the package being bought. Minimum is free, so it
+                * has nothing to bill and shows none of this.
+                *
+                * The condition and the handler are the ones that were here
+                * before; only where it renders has changed.
+                */}
+              {isSelected && card.id !== "MINIMUM" && (
+                <BillingCycleChooser
+                  value={selection.billingCycle}
+                  onChange={(cycle) =>
+                    setSelection((prev) => ({ ...prev, billingCycle: cycle }))
+                  }
+                />
+              )}
             </div>
           );
         })}
       </div>
-
-      {/* Billing cycle — the free Minimum plan has nothing to bill. */}
-      {selection.packageId && selection.packageId !== "MINIMUM" && (
-        <div className="mt-8">
-          <h2 className="text-base font-semibold mb-3">Select Billing Cycle</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {BILLING_CYCLES.map((cycle) => {
-              const isSelected = selection.billingCycle === cycle.id;
-              return (
-                <button
-                  key={cycle.id}
-                  type="button"
-                  onClick={() => setSelection((prev) => ({ ...prev, billingCycle: cycle.id }))}
-                  className={`rounded-2xl border-2 px-4 py-3 text-left transition-colors ${
-                    isSelected ? "border-accent bg-accent/10" : "border-border bg-muted/30 hover:border-accent/50"
-                  }`}
-                >
-                  <div className="text-sm font-semibold">{cycle.label}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {cycle.discountPercent > 0 ? `${cycle.discountPercent}% Discount` : "No discount"}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Add-ons — a single choice; picking one replaces the other. */}
       <div className="mt-8">
@@ -988,30 +975,59 @@ export const PackagesStep = ({
                     addon: prev.addon === addon.id ? "NONE" : addon.id,
                   }))
                 }
-                className={`relative rounded-2xl border-2 p-5 cursor-pointer transition-colors ${
-                  isSelected ? "border-accent bg-accent/10" : "border-border bg-muted/30 hover:border-accent/50"
-                }`}
+                className="relative cursor-pointer rounded-2xl p-5 transition-colors"
+                style={{
+                  // The bundle is the one being recommended, so it carries the
+                  // lime whatever is selected — as on the packages above.
+                  background: isBundle ? LIME : "#FFFFFF",
+                  border: isSelected ? "2px solid #000000" : "1px solid #E9EBF2",
+                }}
               >
                 {isBundle && (
-                  <div className="absolute top-3 right-3 rounded-full bg-foreground px-2.5 py-0.5 text-[10px] font-semibold text-background">
+                  <div className="mb-2 inline-flex rounded-full bg-black px-2.5 py-0.5 text-[10px] font-semibold text-white">
                     Best Option
                   </div>
                 )}
                 <div className="text-2xl font-bold">
                   {formatUsd(getAddonPrice(tier, addon.id))}
-                  <span className="ml-1 text-xs font-normal text-muted-foreground">/monthly</span>
+                  <span className="ml-1 text-xs font-normal text-black/50">/monthly</span>
                 </div>
-                <h3 className="mt-2 font-semibold text-sm">
+                {/* A radio beside the name: the add-ons are one choice, not
+                    three switches, and the design shows them that way. */}
+                <h3 className="mt-2 flex items-center gap-2 text-sm font-semibold">
+                  <span
+                    className="inline-flex h-3.5 w-3.5 shrink-0 rounded-full border"
+                    style={{ borderColor: "#000000", borderWidth: isSelected ? "4px" : "1px" }}
+                    aria-hidden
+                  />
                   {ADDON_LABELS[addon.id as Exclude<AddonId, "NONE">]}
                 </h3>
-                <p className="mt-1 text-xs text-muted-foreground">{addon.description}</p>
+                <p className="mt-1 text-xs text-black/55">{addon.description}</p>
                 <div
-                  className={`mt-4 rounded-xl py-2 text-center text-sm font-semibold ${
-                    isSelected ? "bg-accent text-accent-foreground" : "bg-background border border-border"
-                  }`}
+                  className="mt-4 rounded-full py-2 text-center text-sm font-semibold"
+                  style={{
+                    background: isSelected ? "#000000" : LIME,
+                    color: isSelected ? "#FFFFFF" : "#000000",
+                  }}
                 >
                   {isSelected ? "Selected" : "Select"}
                 </div>
+
+                {/*
+                  * The add-on's own billing cycle.
+                  *
+                  * The client asked for it explicitly, and it is the same
+                  * control the package above uses — the add-on had no cycle
+                  * at all before, only a fixed monthly charge.
+                  */}
+                {isSelected && (
+                  <BillingCycleChooser
+                    value={selection.addonBillingCycle}
+                    onChange={(cycle) =>
+                      setSelection((prev) => ({ ...prev, addonBillingCycle: cycle }))
+                    }
+                  />
+                )}
               </div>
             );
           })}
@@ -1095,6 +1111,11 @@ export const PackagesStep = ({
           Back
         </Button>
       </div>
+
+      {/* The two panels the design shows under this step. Shared with the
+          Manage Subscription page rather than copied. */}
+      <TrustBand />
+      <WhyPanel audience="SELLER" />
     </div>
   );
 };

@@ -136,6 +136,14 @@ describe("labels and examples", () => {
     expect(platformLabel("Our shop")).toBe("Our shop");
   });
 
+  it("keeps the rest of a longer question", () => {
+    // Returning just the platform gave the link and the follower count the
+    // same label, with nothing to tell them apart.
+    expect(platformLabel("Instagram Followers")).toBe("Instagram Followers");
+    expect(platformLabel("Tiktok Followers")).toBe("TikTok Followers");
+    expect(platformLabel("Enter Facebook URL")).toBe("Enter Facebook URL");
+  });
+
   it("offers the right example per platform", () => {
     expect(linkPlaceholder("TikTok")).toContain("tiktok.com");
     expect(linkPlaceholder("Amazon")).toContain("amazon.com");

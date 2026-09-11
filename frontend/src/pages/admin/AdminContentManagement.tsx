@@ -48,7 +48,6 @@ import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { useAdInformationQuestions } from "@/hooks/useAdInformationQuestions";
 import { useHandoverQuestions } from "@/hooks/useHandoverQuestions";
 import { useTools } from "@/hooks/useTools";
-import { useAccounts } from "@/hooks/useAccounts";
 import { useAccountQuestions } from "@/hooks/useAccountQuestions";
 import { usePlans } from "@/hooks/usePlans";
 import { resolveImageUrl } from "@/lib/imageUtils";
@@ -106,15 +105,6 @@ const EditToolDialog = lazy(() =>
 );
 const DeleteToolDialog = lazy(() =>
   import("@/components/admin/content/DeleteToolDialog").then((m) => ({ default: m.DeleteToolDialog }))
-);
-const AddAccountDialog = lazy(() =>
-  import("@/components/admin/content/AddAccountDialog").then((m) => ({ default: m.AddAccountDialog }))
-);
-const EditAccountDialog = lazy(() =>
-  import("@/components/admin/content/EditAccountDialog").then((m) => ({ default: m.EditAccountDialog }))
-);
-const DeleteAccountDialog = lazy(() =>
-  import("@/components/admin/content/DeleteAccountDialog").then((m) => ({ default: m.DeleteAccountDialog }))
 );
 const AddAccountQuestionDialog = lazy(() =>
   import("@/components/admin/content/AddAccountQuestionDialog").then((m) => ({ default: m.AddAccountQuestionDialog }))
@@ -242,10 +232,6 @@ const AdminContentManagement = () => {
   const [editManagementQuestionOpen, setEditManagementQuestionOpen] = useState(false);
   const [deleteManagementQuestionOpen, setDeleteManagementQuestionOpen] = useState(false);
   const [selectedManagementQuestion, setSelectedManagementQuestion] = useState<any>(null);
-  const [addAccountOpen, setAddAccountOpen] = useState(false);
-  const [editAccountOpen, setEditAccountOpen] = useState(false);
-  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState<any>(null);
   const [addAccountQuestionOpen, setAddAccountQuestionOpen] = useState(false);
   const [editAccountQuestionOpen, setEditAccountQuestionOpen] = useState(false);
   const [deleteAccountQuestionOpen, setDeleteAccountQuestionOpen] = useState(false);
@@ -520,7 +506,6 @@ const AdminContentManagement = () => {
   const { data: adInformationQuestions, isLoading: adInformationQuestionsLoading, error: adInformationQuestionsError } = useAdInformationQuestions(questionCategoryId || undefined);
   const { data: handoverQuestions, isLoading: handoverQuestionsLoading, error: handoverQuestionsError } = useHandoverQuestions(questionCategoryId || undefined);
   const { data: tools, isLoading: toolsLoading, error: toolsError } = useTools();
-  const { data: accounts, isLoading: accountsLoading, error: accountsError } = useAccounts();
   const { data: accountQuestions, isLoading: accountQuestionsLoading, error: accountQuestionsError } = useAccountQuestions(questionCategoryId || undefined);
   const { data: plans, isLoading: plansLoading, error: plansError } = usePlans();
   const location = useLocation();
@@ -1626,80 +1611,23 @@ const AdminContentManagement = () => {
             {/* Accounts Section */}
             {activeTab === 'accounts' && (
               <div className="space-y-4 sm:space-y-6 animate-fade-in">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4 sm:mb-6">
-                  <h2 className="text-xl sm:text-2xl font-bold text-foreground">Social Media Accounts</h2>
-                  <Button
-                    onClick={() => setAddAccountOpen(true)}
-                    className="bg-accent hover:bg-accent/90 text-black font-semibold rounded-lg px-6 sm:px-8 h-9 sm:h-10 text-sm sm:text-base whitespace-nowrap w-full sm:w-auto"
-                  >
-                    Add New Social Account
-                  </Button>
-                </div>
-
-                <div className="bg-card rounded-2xl p-4 sm:p-6 lg:p-8 border border-border">
-                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-6 sm:mb-8">Enabled Social Media Platforms</h3>
-                  
-                  {accountsLoading ? (
-                    <div className="text-muted-foreground text-sm sm:text-base">Loading platforms...</div>
-                  ) : accounts && Array.isArray(accounts) && accounts.length > 0 ? (
-                    <div className="space-y-3 sm:space-y-4">
-                      {accounts.map((account: any) => {
-                        const getPlatformIcon = () => {
-                          switch (account.platform.toLowerCase()) {
-                            case "facebook": return <Facebook className="w-4 h-4 sm:w-5 sm:h-5" />;
-                            case "instagram": return <Instagram className="w-4 h-4 sm:w-5 sm:h-5" />;
-                            case "twitter": return <Twitter className="w-4 h-4 sm:w-5 sm:h-5" />;
-                            case "tiktok": return <Music className="w-4 h-4 sm:w-5 sm:h-5" />;
-                            case "pinterest": return <Pin className="w-4 h-4 sm:w-5 sm:h-5" />;
-                            case "linkedin": return <Linkedin className="w-4 h-4 sm:w-5 sm:h-5" />;
-                            case "youtube": return <Youtube className="w-4 h-4 sm:w-5 sm:h-5" />;
-                            default: return <span>🌐</span>;
-                          }
-                        };
-
-                        return (
-                          <div
-                            key={account.id}
-                            className="bg-[#FAFAFA] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4"
-                          >
-                            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
-                              {getPlatformIcon()}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-black font-semibold text-base sm:text-lg mb-1 capitalize break-words">{account.platform}</h4>
-                              <p className="text-muted-foreground text-xs sm:text-sm">Users will enter their account links for this platform</p>
-                            </div>
-                            <div className="flex gap-2 w-full sm:w-auto">
-                              <Button
-                                onClick={() => {
-                                  setSelectedAccount(account);
-                                  setEditAccountOpen(true);
-                                }}
-                                className="bg-accent hover:bg-accent/90 text-black font-semibold rounded-full px-4 sm:px-6 h-8 sm:h-10 text-xs sm:text-sm flex-1 sm:flex-initial"
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                onClick={() => {
-                                  setSelectedAccount(account);
-                                  setDeleteAccountOpen(true);
-                                }}
-                                variant="destructive"
-                                className="rounded-full px-4 sm:px-6 h-8 sm:h-10 text-xs sm:text-sm flex-1 sm:flex-initial"
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-muted-foreground text-center py-8 sm:py-12 text-sm sm:text-base">
-                      No platforms enabled yet. Click "Add New Social Account" to enable a platform.
-                    </div>
-                  )}
-                </div>
+                {/*
+                  * "Social Media Accounts" used to live here.
+                  *
+                  * It managed a list of platforms that gave the seller a link
+                  * field and a follower field each — and that block has long
+                  * been commented out of the seller's form, so nothing an
+                  * administrator did here reached anybody. Enabling a platform
+                  * changed nothing, and the page said otherwise.
+                  *
+                  * The account questions below do the same job and are owned by
+                  * a category, which the platform list never was. The follower
+                  * count came back with them, as "<Platform> Followers".
+                  *
+                  * The rows themselves are left in the database: the listing
+                  * page still reads them to work out which card an older
+                  * answer belongs to.
+                  */}
 
                 {/* Account Questions Section */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4 sm:mb-6 mt-6 sm:mt-8">
@@ -2170,18 +2098,6 @@ const AdminContentManagement = () => {
           onOpenChange={setDeleteManagementQuestionOpen}
           questionId={selectedManagementQuestion?.id || null}
           questionText={selectedManagementQuestion?.question || ""}
-        />
-        <AddAccountDialog open={addAccountOpen} onOpenChange={setAddAccountOpen} />
-        <EditAccountDialog
-          open={editAccountOpen}
-          onOpenChange={setEditAccountOpen}
-          account={selectedAccount}
-        />
-        <DeleteAccountDialog
-          open={deleteAccountOpen}
-          onOpenChange={setDeleteAccountOpen}
-          accountId={selectedAccount?.id || null}
-          accountPlatform={selectedAccount?.platform || ""}
         />
         <AddAccountQuestionDialog open={addAccountQuestionOpen} onOpenChange={setAddAccountQuestionOpen} categoryId={questionCategoryId} />
         <EditAccountQuestionDialog

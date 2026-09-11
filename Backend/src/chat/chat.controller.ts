@@ -452,18 +452,9 @@ export class ChatController {
       chatId,
     );
 
-    await this.chatService.createSystemTimelineMessage(
-      chatId,
-      currentUser.id,
-      'Seller has granted access to confidential listing details.',
-      {
-        eventType: 'CONFIDENTIAL_ACCESS_GRANTED',
-        listingId: chat.listingId,
-        buyerId: chat.userId,
-        sellerId: chat.sellerId,
-        chatId,
-      },
-    );
+    // No second message here. Granting already posts the approval notice into
+    // this conversation and pushes it to both sides; this used to add another,
+    // worded differently, so approving from inside the chat said it twice.
 
     return {
       success: true,

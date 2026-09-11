@@ -284,18 +284,38 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
                         {alert.reporter?.full_name?.[0] || 'A'}
                       </AvatarFallback>
                     </Avatar>
-                    <span
-                      style={{
-                        fontFamily: 'Lufga',
-                        fontWeight: 500,
-                        fontSize: '14px',
-                        lineHeight: '150%',
-                        letterSpacing: '0%',
-                        color: '#6C6C6C',
-                      }}
-                    >
-                      {alert.reporter?.full_name || 'Automatic'}
-                    </span>
+                    {/* Opens the reporter's profile, the same way the
+                        problematic user's name does. An alert raised by the
+                        platform itself has nobody to open. */}
+                    {alert.reporter?.id ? (
+                      <Link
+                        to={`/admin/users/${alert.reporter.id}`}
+                        className="hover:underline"
+                        title="Open this user's profile"
+                        style={{
+                          fontFamily: 'Lufga',
+                          fontWeight: 500,
+                          fontSize: '14px',
+                          lineHeight: '150%',
+                          color: '#000000',
+                        }}
+                      >
+                        {alert.reporter.full_name || 'Unknown'}
+                      </Link>
+                    ) : (
+                      <span
+                        style={{
+                          fontFamily: 'Lufga',
+                          fontWeight: 500,
+                          fontSize: '14px',
+                          lineHeight: '150%',
+                          letterSpacing: '0%',
+                          color: '#6C6C6C',
+                        }}
+                      >
+                        {alert.reporter?.full_name || 'Automatic'}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="py-4 px-4">

@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { ActivityLogService } from 'src/activity-log/activity-log.service';
 
 /**
  * Identity verification through didit.me.
@@ -38,7 +39,11 @@ export class IdentityService {
     return process.env.DIDIT_WEBHOOK_SECRET?.trim() || '';
   }
 
-  constructor(private readonly db: PrismaService) {}
+  constructor(
+    private readonly db: PrismaService,
+    /** The provider's verdict goes into the member's log. */
+    @Optional() private readonly activityLog?: ActivityLogService,
+  ) {}
 
   isConfigured(): boolean {
     return Boolean(this.apiKey && this.workflowId);
@@ -225,6 +230,20 @@ export class IdentityService {
     });
 
     this.logger.log(`Identity status for ${target.id}: ${status || 'unknown'}`);
+
+    // Only the verdict goes into the member's log; the provider also reports
+    // every step a person passes through on the way.
+    const declined = /declined|rejected/i.test(status);
+    if (approved || declined) {
+      void this.activityLog?.record({
+        actorId: null,
+        subjectUserId: target.id,
+        action: approved ? 'profile.id-verified' : 'profile.id-declined',
+        entityType: 'user',
+        entityId: target.id,
+        message: approved ? 'ID verified' : 'ID check declined',
+      });
+    }
     return { matched: true, approved };
   }
 

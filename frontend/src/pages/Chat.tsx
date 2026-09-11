@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { MessageSquare, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { chatRoomsQueryKey, fetchChatRooms } from "@/lib/chatRooms";
@@ -25,6 +26,9 @@ const ChatPaneLoader = () => (
   </div>
 );
 
+/** Tailwind's `xl` — where the details column is shown beside the chat. */
+const WIDE_SCREEN = "(min-width: 1280px)";
+
 const Chat = () => {
   const { user, loading: authLoading } = useAuth();
   const isMobile = useIsMobile();
@@ -38,10 +42,47 @@ const Chat = () => {
   const queryClient = useQueryClient();
   const userId = user?.id;
 
+  // The word a chat was found by, kept with the chat it belongs to, so opening
+  // any other conversation — from the list or from a link — starts without it.
+  const [openedSearch, setOpenedSearch] = useState<{ chatId: string; term: string } | null>(
+    null,
+  );
+
+  // 1280px is where the page has room for everything: the details column
+  // beside the chat, and the header bar clear of the menu button.
+  const [isWide, setIsWide] = useState(() => window.matchMedia(WIDE_SCREEN).matches);
+  useEffect(() => {
+    const wide = window.matchMedia(WIDE_SCREEN);
+    const update = () => setIsWide(wide.matches);
+    wide.addEventListener('change', update);
+    return () => wide.removeEventListener('change', update);
+  }, []);
+
+  // Below it the details column has no room beside the chat; the chat header's
+  // info button opens the same panel over it instead. Closed again when the
+  // column comes back — the overlay would only cover it — and for each new chat.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  useEffect(() => {
+    setDetailsOpen(false);
+  }, [isWide, selectedConversation]);
+
+  // One menu button, placed by the width: two copies would share one drawer
+  // state and open two drawers at once.
+  const menuTrigger = (
+    <ListingsSidebar isMobile open={sidebarOpen} onOpenChange={setSidebarOpen} />
+  );
+
   const handleSelectConversation = useCallback(
-    (id: string, userId: string, sellerId: string, listingId?: string | null) => {
+    (
+      id: string,
+      userId: string,
+      sellerId: string,
+      listingId?: string | null,
+      searchTerm?: string,
+    ) => {
       setSelectedConversation(id);
       setChatRoomData({ userId, sellerId, listingId: listingId ?? undefined });
+      setOpenedSearch(searchTerm ? { chatId: id, term: searchTerm } : null);
     },
     [],
   );
@@ -125,6 +166,8 @@ const Chat = () => {
       }
       setListRefreshToken((prev) => prev + 1);
       checkConversations();
+      // A request card carries the same label; without this it waited a minute.
+      queryClient.invalidateQueries({ queryKey: ["confidential-requests"] });
     },
     [userId, chatRoomData, queryClient, checkConversations],
   );
@@ -217,12 +260,14 @@ const Chat = () => {
 
         <div className="flex-1 flex flex-col w-full overflow-hidden">
           {/* Header - Shared across all tabs */}
-          <Header />
+          <Header leading={isWide ? undefined : menuTrigger} />
         {/* Chat has no fixed sidebar — its drawer opened from the old bar, so the
-            trigger is kept here rather than lost with it. */}
-        <div className="fixed left-3 top-4 z-[60] sm:left-5 sm:top-6">
-          <ListingsSidebar isMobile open={sidebarOpen} onOpenChange={setSidebarOpen} />
-        </div>
+            trigger is kept here rather than lost with it. At the page's corner
+            only from 1280px: below that the bar reaches the left edge and the
+            button sat on the logo, so it moves inside the bar. */}
+        {isWide && (
+          <div className="fixed left-3 top-4 z-[60] sm:left-5 sm:top-6">{menuTrigger}</div>
+        )}
         <div className="h-20 sm:h-24 flex-shrink-0" />
 
           {/* Empty State Content */}
@@ -254,12 +299,14 @@ const Chat = () => {
 
         <div className="flex-1 flex flex-col w-full overflow-hidden" style={{ height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' }}>
         {/* Header - Shared across all tabs */}
-        <Header />
+        <Header leading={isWide ? undefined : menuTrigger} />
         {/* Chat has no fixed sidebar — its drawer opened from the old bar, so the
-            trigger is kept here rather than lost with it. */}
-        <div className="fixed left-3 top-4 z-[60] sm:left-5 sm:top-6">
-          <ListingsSidebar isMobile open={sidebarOpen} onOpenChange={setSidebarOpen} />
-        </div>
+            trigger is kept here rather than lost with it. At the page's corner
+            only from 1280px: below that the bar reaches the left edge and the
+            button sat on the logo, so it moves inside the bar. */}
+        {isWide && (
+          <div className="fixed left-3 top-4 z-[60] sm:left-5 sm:top-6">{menuTrigger}</div>
+        )}
         <div className="h-20 sm:h-24 flex-shrink-0" />
 
         {/* Main Content Area — fills the space left after the (responsive-height)
@@ -324,6 +371,10 @@ const Chat = () => {
                     sellerId={chatRoomData.sellerId}
                     listingId={chatRoomData.listingId}
                     refreshConversations={checkConversations}
+                    initialSearchQuery={
+                      openedSearch?.chatId === selectedConversation ? openedSearch.term : undefined
+                    }
+                    onOpenDetails={() => setDetailsOpen(true)}
                   />
                 </Suspense>
               </div>
@@ -384,6 +435,27 @@ const Chat = () => {
               </div>
             )}
           </div>
+
+          {selectedConversation && chatRoomData && (
+            <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
+              <SheetContent
+                side="right"
+                className="w-full p-0 sm:max-w-[400px]"
+                aria-describedby={undefined}
+              >
+                <SheetTitle className="sr-only">Chat details</SheetTitle>
+                <Suspense fallback={<ChatPaneLoader />}>
+                  <ChatDetails
+                    key={selectedConversation}
+                    conversationId={selectedConversation}
+                    userId={chatRoomData.userId}
+                    sellerId={chatRoomData.sellerId}
+                    onLabelUpdated={handleLabelUpdated}
+                  />
+                </Suspense>
+              </SheetContent>
+            </Sheet>
+          )}
         </div>
       </div>
     </div>

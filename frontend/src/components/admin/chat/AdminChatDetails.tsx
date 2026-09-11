@@ -5,6 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { asAttachmentUrl } from "@/lib/downloadFile";
 import docIcon from "@/assets/doc.svg";
 
 import { formatNumber } from "@/lib/formatNumber";
@@ -15,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import FlagIcon from "@/components/FlagIcon";
 import { resolveListingTitle } from "@/lib/listingTitle";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
+import { teamParticipants, uniqueParticipants, type TeamParticipant } from "@/lib/chatParticipants";
 interface AdminChatDetailsProps {
   conversationId: string;
 }
@@ -23,6 +25,8 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
   const navigate = useNavigate();
   const [listing, setListing] = useState<any>(null);
   const [participants, setParticipants] = useState<any[]>([]);
+  // Admins and moderators who wrote in the chat, shown after the buyer and seller.
+  const [teamMembers, setTeamMembers] = useState<TeamParticipant[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
   const [mediaCount, setMediaCount] = useState(0);
   
@@ -104,7 +108,9 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
             last_offline: seller.last_offline || null,
           } : null;
 
-          setParticipants([buyerProfile, sellerProfile].filter(Boolean));
+          // Once each — a chat's buyer and seller can be the same account.
+          setParticipants(uniqueParticipants([buyerProfile, sellerProfile]));
+          setTeamMembers(teamParticipants(chat.messages, [buyer?.id, seller?.id]));
           
         }
       }
@@ -259,15 +265,15 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
         
         {/* Profile Pictures Group - Centered */}
         <div className="flex items-center justify-center mb-4" style={{ gap: '-8px' }}>
-          {participants.slice(0, 3).map((participant, i) => (
-            <Avatar 
-              key={participant.id} 
-              className="border-2 border-white" 
-              style={{ 
+          {[...participants, ...teamMembers].map((participant, i, everyone) => (
+            <Avatar
+              key={participant.id}
+              className="border-2 border-white"
+              style={{
                 width: '48px',
                 height: '48px',
                 marginLeft: i > 0 ? '-8px' : '0',
-                zIndex: participants.length - i,
+                zIndex: everyone.length - i,
               }}
             >
               <AvatarImage src={participant.avatar_url} />
@@ -311,6 +317,25 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
         >
           {participants.map((p: any) => p.full_name || p.email || 'Unknown').join('  ←→  ')}
         </h4>
+
+        {/* The team members who wrote in the chat, by name — a third picture
+            with nothing to say who it is reads as a third buyer or seller. */}
+        {teamMembers.length > 0 && (
+          <p
+            style={{
+              fontFamily: 'Lufga',
+              fontWeight: 400,
+              fontSize: '14px',
+              lineHeight: '130%',
+              color: 'rgba(0, 0, 0, 0.5)',
+              textAlign: 'center',
+              margin: 0,
+              marginBottom: '8px',
+            }}
+          >
+            Team: {teamMembers.map((member) => member.full_name || 'Team member').join(', ')}
+          </p>
+        )}
 
         {/* When each of them was last around. "2 Members, 1 online" said how
             many were here now and nothing about the one who was not. */}
@@ -613,8 +638,11 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
                     />
                   ) : (
                     <div className="w-full h-48 bg-muted flex items-center justify-center">
+                      {/* The link says Download, so it downloads. Without the
+                          flag the CDN sends no disposition and the browser
+                          previews whichever formats it can read. */}
                       <a
-                        href={file.url || file.content}
+                        href={asAttachmentUrl(file.url || file.content)}
                         target="_blank" 
                         rel="noopener noreferrer"
                         className="text-blue-500 hover:underline"

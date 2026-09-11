@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
-import { resolveListingTitle } from "@/lib/listingTitle";
+import { resolveListingDescription, resolveListingTitle } from "@/lib/listingTitle";
 import { parseMediaUrls } from "@/lib/mediaUtils";
 
 export const useUserListings = (userId: string | undefined) => {
@@ -136,12 +136,11 @@ export const useUserListings = (userId: string | undefined) => {
               packageBillingCycle: listing.packageBillingCycle ?? null,
               packageAddons: Array.isArray(listing.packageAddons) ? listing.packageAddons : [],
               packageExpiresAt: listing.packageExpiresAt ?? null,
-              description:
-                listing.description ||
-                listing.advertisement?.find((a: any) =>
-                  a.question?.toLowerCase().includes('description'),
-                )?.answer ||
-                '',
+              // The same reading the seller's own dashboard uses. This looked
+              // only at Ad Information, so a listing that kept its
+              // description in Brand Information came back blank here while
+              // showing fine elsewhere.
+              description: resolveListingDescription(listing),
             };
           });
           

@@ -20,8 +20,10 @@ const ForgotPassword = () => {
     try {
       const response = await apiClient.resetPassword(email);
       if (response.success) {
-        toast.success("Password reset OTP sent to your email!");
-        navigate("/login");
+        // The same answer whether or not the address has an account, so the
+        // form cannot be used to find out who is registered.
+        toast.success("If an account uses this address, a code is on its way.");
+        navigate("/reset-password", { state: { email: email.trim().toLowerCase() } });
       } else {
         throw new Error(response.error || "Failed to send reset instructions");
       }

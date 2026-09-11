@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mail, Lock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { mustConfirmEmail } from "@/lib/emailConfirmation";
 import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
 import { toast } from "sonner";
 
@@ -75,7 +76,10 @@ const Login = () => {
 
       if (result.success) {
         toast.success("Successfully logged in!");
-        if (sessionStorage.getItem(LISTING_PUBLISH_PENDING_SESSION_KEY) === "1") {
+        if (mustConfirmEmail(result.user as any)) {
+          // A new account that never confirmed its address finishes that first.
+          navigate("/verify-otp");
+        } else if (sessionStorage.getItem(LISTING_PUBLISH_PENDING_SESSION_KEY) === "1") {
           navigate("/dashboard");
         } else {
           navigate(getPostLoginRoute(result.user?.role));

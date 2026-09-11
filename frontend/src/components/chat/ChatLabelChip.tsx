@@ -13,7 +13,8 @@
  */
 export type ChatLabelValue = 'GOOD' | 'MEDIUM' | 'BAD';
 
-const CHIPS: Record<ChatLabelValue, { text: string; className: string }> = {
+/** Shared with the chat list's label filter, so a chip and its button match. */
+export const CHAT_LABEL_CHIPS: Record<ChatLabelValue, { text: string; className: string }> = {
   GOOD: { text: 'Good', className: 'bg-[#DCFCE7] text-[#15803D]' },
   MEDIUM: { text: 'Medium', className: 'bg-[#DBEAFE] text-[#1D4ED8]' },
   BAD: { text: 'Bad', className: 'bg-[#FEE2E2] text-[#DC2626]' },
@@ -31,7 +32,7 @@ export const ChatLabelChip = ({
 }: {
   label?: ChatLabelValue | null;
 }) => {
-  const chip = label ? CHIPS[label] : null;
+  const chip = label ? CHAT_LABEL_CHIPS[label] : null;
   if (!chip) return null;
 
   return (

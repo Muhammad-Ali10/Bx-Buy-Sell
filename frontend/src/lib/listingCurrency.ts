@@ -12,6 +12,10 @@ import { getCurrencySymbol } from "@/components/CurrencySelect";
  * the seller entered them.
  */
 export function getListingCurrencySymbol(listing: any): string {
+  // The server now keeps it on the listing itself, copied from the table.
+  const own = String(listing?.currency ?? "").trim().toUpperCase();
+  if (/^[A-Z]{3}$/.test(own)) return getCurrencySymbol(own);
+
   const financials = listing?.financials;
   if (!Array.isArray(financials)) return getCurrencySymbol("USD");
 

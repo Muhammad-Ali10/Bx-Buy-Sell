@@ -154,6 +154,7 @@ export const listingSchema = z.object({
   // Package selection made in the Packages step.
   selectedPackage: z.string().nullish(),
   packageBillingCycle: z.string().nullish(),
+  addonBillingCycle: z.string().nullish(),
   packageAddons: z.array(z.string()).optional(),
   successFeePercent: z.number().nullish(),
   approveBuyersManually: z.boolean().nullish(),

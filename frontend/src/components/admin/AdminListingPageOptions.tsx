@@ -1,6 +1,7 @@
+import { openListingChat } from "@/lib/openListingChat";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +15,9 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { EditSvg, BlockSvg, DeleteSvg, MessagesSvg } from "@/assets/svg";
 import { Loader2 } from "lucide-react";
+import { BlockListingDialog } from "@/components/admin/BlockListingDialog";
+import { unblockListing } from "@/lib/listingModeration";
+import { resolveListingTitle } from "@/lib/listingTitle";
 
 type Props = {
   listingId: string;
@@ -24,6 +28,7 @@ const iconTileClass =
 
 export function AdminListingPageOptions({ listingId }: Props) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const [chatLoading, setChatLoading] = useState(false);
 
@@ -43,12 +48,6 @@ export function AdminListingPageOptions({ listingId }: Props) {
     ((listing?.user as { id?: string } | undefined)?.id as string | undefined) ||
     null;
 
-  const sellerRole = String(
-    (listing?.user as { role?: string } | undefined)?.role ||
-      (listing?.profile as { role?: string } | undefined)?.role ||
-      "",
-  ).toUpperCase();
-
   const handleEdit = () => {
     navigate(`/listing/${listingId}/edit`);
   };
@@ -64,31 +63,14 @@ export function AdminListingPageOptions({ listingId }: Props) {
     }
     setChatLoading(true);
     try {
-      let chatResponse: any = await apiClient.getChatRoom(user.id, sellerId);
-      let chatId: string;
-      const chatData = chatResponse.data?.data || chatResponse.data;
+      // The chat for this listing, found or made — never just "any chat with
+      // this seller". See lib/openListingChat.ts for why.
+      const chatId = await openListingChat(apiClient, {
+        buyerId: user.id,
+        sellerId,
+        listingId,
+      });
 
-      if (chatResponse.success && chatData?.id) {
-        chatId = chatData.id;
-      } else {
-        const createResponse: any = await apiClient.createChatRoom(
-          user.id,
-          sellerId,
-          listingId,
-        );
-        const createData = createResponse.data?.data || createResponse.data;
-        if (!createResponse.success || !createData?.id) {
-          chatResponse = await apiClient.getChatRoom(user.id, sellerId);
-          const retry = (chatResponse as any).data?.data || (chatResponse as any).data;
-          if (chatResponse.success && retry?.id) {
-            chatId = retry.id;
-          } else {
-            throw new Error(createResponse.error || "Failed to open chat");
-          }
-        } else {
-          chatId = createData.id;
-        }
-      }
       navigate(`/chat?chatId=${chatId}&userId=${user.id}&sellerId=${sellerId}`);
       toast.success("Opening chat…");
     } catch (e: unknown) {
@@ -99,28 +81,28 @@ export function AdminListingPageOptions({ listingId }: Props) {
     }
   };
 
-  const handleBlockSeller = async () => {
-    if (!sellerId) {
-      toast.error("Seller information not available");
+  /*
+   * Blocking here blocks this listing, exactly as the Listings table does.
+   *
+   * It used to block the seller, by clearing `verified` on their account — a
+   * flag that now means "ID verified" — so it quietly took their badge away
+   * and blocked nothing. A listing screen never touches the seller's account.
+   */
+  const [blockOpen, setBlockOpen] = useState(false);
+  const isBlocked = String(listing?.status ?? "").toUpperCase() === "BLOCKED";
+  const listingTitle = resolveListingTitle(listing, "this listing");
+
+  const refreshListing = () => {
+    queryClient.invalidateQueries({ queryKey: ["admin-listing-options", listingId] });
+    queryClient.invalidateQueries({ queryKey: ["admin-listings"] });
+  };
+
+  const handleBlockToggle = async () => {
+    if (isBlocked) {
+      if (await unblockListing(listingId, listingTitle)) refreshListing();
       return;
     }
-    if (sellerRole === "ADMIN" || sellerRole === "MONITER" || sellerRole === "MODERATOR") {
-      toast.error("You cannot block staff accounts");
-      return;
-    }
-    if (!confirm("Block this seller? They will lose access until an admin unblocks them.")) {
-      return;
-    }
-    try {
-      const res = await apiClient.updateUserByAdmin(sellerId, { verified: false });
-      if (!res.success) {
-        throw new Error(res.error || "Failed to block user");
-      }
-      toast.success("Seller has been blocked");
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to block user";
-      toast.error(msg);
-    }
+    setBlockOpen(true);
   };
 
   const handleDeleteListing = async () => {
@@ -200,12 +182,13 @@ export function AdminListingPageOptions({ listingId }: Props) {
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          disabled={isLoading || !sellerId}
+          disabled={isLoading || !listingId}
           onSelect={() => {
-            void handleBlockSeller();
+            void handleBlockToggle();
           }}
           className="group cursor-pointer justify-center rounded-lg p-1.5 focus:bg-transparent"
-          title="Block seller"
+          title={isBlocked ? "Unblock listing" : "Block listing"}
+          aria-label={isBlocked ? "Unblock listing" : "Block listing"}
         >
           <span className={iconTileClass}>
             <BlockSvg className="h-4 w-4" />
@@ -224,6 +207,15 @@ export function AdminListingPageOptions({ listingId }: Props) {
           </span>
         </DropdownMenuItem>
       </DropdownMenuContent>
+      {/* Beside the menu's content, not inside it: the content unmounts when
+          the menu closes, and the dialog has to outlive that. */}
+      <BlockListingDialog
+        listingId={listingId}
+        listingTitle={listingTitle}
+        open={blockOpen}
+        onOpenChange={setBlockOpen}
+        onBlocked={refreshListing}
+      />
     </DropdownMenu>
   );
 }

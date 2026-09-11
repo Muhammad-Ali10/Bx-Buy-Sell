@@ -1,11 +1,29 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { List, Heart, MessageSquare, User, Menu } from "lucide-react";
+import { List, Heart, MessageSquare, User, Menu, ChevronRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import logo from "@/assets/_App Icon 1 (2).png";
 import rocketIcon from "@/assets/roccket.svg";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
+import { getChatListingImage, getChatListingTitle } from "@/lib/chatListing";
+import {
+  PACKAGE_LABEL,
+  currentPackage,
+  pickerOrder,
+  showUpgradeCard,
+  upgradeRoute,
+  upgradeableListings,
+} from "@/lib/upgradeRoute";
 
 interface ListingsSidebarProps {
   mobileOpen?: boolean;
@@ -18,8 +36,29 @@ interface ListingsSidebarProps {
 const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [isPro, setIsPro] = useState(false);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  /*
+   * The member's own listings, for the upgrade card. A seller's packages are
+   * bought per listing, so these decide where Let's Go leads and whether there
+   * is anything left to upgrade. Cached for a minute: this sidebar is on every
+   * account page.
+   */
+  const { data: ownListings = [], isFetched: listingsFetched } = useQuery<any[]>({
+    queryKey: ["upgrade-card-listings", user?.id],
+    queryFn: async () => {
+      const response = await apiClient.getSecureListings({ userId: user?.id, limit: 1000 });
+      const payload: any = response.data;
+      const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+      return upgradeableListings(rows.filter((row: any) => row?.userId === user?.id));
+    },
+    enabled: Boolean(user?.id),
+    staleTime: 60_000,
+  });
+  const listingsReady = !user?.id || listingsFetched;
 
   useEffect(() => {
     checkSubscription();
@@ -27,9 +66,10 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
 
   const checkSubscription = async () => {
     try {
-      const response = await apiClient.request("/subscription/current");
-      if (response.success && response.data) {
-        setIsPro(response.data.plan?.slug === "pro" && response.data.status === "ACTIVE");
+      const response = await apiClient.getCurrentSubscription();
+      const current: any = response.success ? response.data : null;
+      if (current) {
+        setIsPro(current.plan?.slug === "pro" && current.status === "ACTIVE");
       }
     } catch (error) {
       console.error("Error checking subscription:", error);
@@ -45,8 +85,25 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
     }
   };
 
+  /*
+   * A seller goes to a listing's own Manage Your Subscription page, as the
+   * client asked — straight there with one listing, by way of a choice with
+   * several. A buyer goes to the buyer plans. This sent everyone to /pricing,
+   * the old buyer-only page.
+   */
   const handleUpgrade = () => {
-    navigate("/pricing");
+    const route = upgradeRoute(ownListings, user?.role);
+    if (route.kind === "pick") {
+      setPickerOpen(true);
+      return;
+    }
+    navigate(route.to);
+    onLinkClick?.();
+  };
+
+  const chooseListing = (listingId: string) => {
+    setPickerOpen(false);
+    navigate(`/manage-subscription/${listingId}`);
     onLinkClick?.();
   };
 
@@ -58,8 +115,9 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
    * the entry was a second door onto one room. `/verify-account` still answers
    * for anyone holding the link; it simply is not advertised twice.
    */
-  const menuItems = [
-    { icon: List, label: "My Listings", path: "/my-listings" },
+  const menuItems: { icon: typeof List; label: string; path: string; also?: string[] }[] = [
+    // A listing's subscription page is part of that listing, as in the design.
+    { icon: List, label: "My Listings", path: "/my-listings", also: ["/manage-subscription/"] },
     { icon: Heart, label: "Favourites", path: "/favourites" },
     { icon: MessageSquare, label: "Chat", path: "/chat" },
     { icon: User, label: "Account Details", path: "/profile" },
@@ -93,7 +151,10 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
         >
           {menuItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+            const isActive =
+              location.pathname === item.path ||
+              location.pathname.startsWith(item.path + '/') ||
+              Boolean(item.also?.some((prefix) => location.pathname.startsWith(prefix)));
             
             return (
               <button
@@ -127,8 +188,10 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
           })}
         </nav>
 
-        {/* Pro Signup Card - Only show for Free users */}
-        {!loadingSubscription && !isPro && (
+        {/* Upgrade card — gone once there is nothing left to upgrade: every
+            listing on Premium, or, for someone with no listings, the Premium
+            buyer plan. */}
+        {!loadingSubscription && listingsReady && showUpgradeCard(ownListings, isPro) && (
           <div 
             className="mx-0 mb-3 sm:mb-4 flex-shrink-0 w-full rounded-[24px] sm:rounded-[28px] md:rounded-[32px] p-3 sm:p-4 md:p-5 bg-[rgba(174,243,31,1)] flex flex-col gap-3 sm:gap-4 md:gap-5 items-center"
             style={{
@@ -177,6 +240,50 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
           </div>
         )}
       </div>
+
+      {/* Several listings: which one gets upgraded is the seller's call, not
+          a guess. */}
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent className="max-w-[440px] gap-0 overflow-hidden p-0">
+          <DialogHeader className="px-5 pt-5 pb-3 text-left">
+            <DialogTitle className="font-['Lufga'] text-[17px] font-semibold text-[#0F172A]">
+              Which listing do you want to upgrade?
+            </DialogTitle>
+            <DialogDescription className="font-['Lufga'] text-[12.5px] text-[#64748B]">
+              Packages and add-ons are chosen for each listing separately.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto px-3 pb-3">
+            {pickerOrder(ownListings).map((listing: any) => {
+              const image = getChatListingImage(listing);
+              return (
+                <button
+                  key={listing.id}
+                  type="button"
+                  onClick={() => chooseListing(listing.id)}
+                  className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left hover:bg-black/[0.04]"
+                >
+                  <div className="h-11 w-14 shrink-0 overflow-hidden rounded-lg bg-black/5">
+                    {image && (
+                      <img src={image} alt="" loading="lazy" className="h-full w-full object-cover" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="m-0 truncate font-['Lufga'] text-[13.5px] font-semibold text-[#0F172A]">
+                      {getChatListingTitle(listing) || "Untitled listing"}
+                    </p>
+                    <p className="m-0 font-['Lufga'] text-[11.5px] text-[#64748B]">
+                      {PACKAGE_LABEL[currentPackage(listing)]} package
+                      {String(listing.status).toUpperCase() === "DRAFT" ? " · Draft" : ""}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-black/40" />
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -237,6 +344,8 @@ export const ListingsSidebar = ({ mobileOpen, onMobileClose, isMobile, open: con
             backgroundColor: 'rgba(0, 0, 0, 1)',
           }}
         >
+          {/* Screen readers announce the drawer by this; Radix warns without it. */}
+          <SheetTitle className="sr-only">Menu</SheetTitle>
           <SidebarContent onLinkClick={handleClose} />
         </SheetContent>
       </Sheet>
@@ -282,6 +391,8 @@ export const ListingsSidebar = ({ mobileOpen, onMobileClose, isMobile, open: con
             backgroundColor: 'rgba(0, 0, 0, 1)',
           }}
         >
+          {/* Screen readers announce the drawer by this; Radix warns without it. */}
+          <SheetTitle className="sr-only">Menu</SheetTitle>
           <SidebarContent onLinkClick={handleClose} />
         </SheetContent>
       </Sheet>

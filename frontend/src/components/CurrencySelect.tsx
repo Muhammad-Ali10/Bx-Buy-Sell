@@ -16,30 +16,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { ECB_CURRENCIES } from "@/lib/ecbCurrencies";
 
 interface CurrencyOption {
   code: string; // ISO 4217, e.g. "USD"
   symbol: string; // e.g. "$"
 }
-
-// Full list of ISO 4217 currencies via Intl (modern browsers), with a fallback.
-const getCurrencyCodes = (): string[] => {
-  try {
-    const fn = (
-      Intl as unknown as { supportedValuesOf?: (key: string) => string[] }
-    ).supportedValuesOf;
-    if (typeof fn === "function") {
-      const codes = fn("currency");
-      if (Array.isArray(codes) && codes.length) return codes;
-    }
-  } catch {
-    /* fall through to fallback */
-  }
-  return [
-    "USD", "EUR", "GBP", "PKR", "INR", "AED", "CAD", "AUD", "JPY", "CNY",
-    "CHF", "SGD", "SAR", "TRY", "ZAR", "BRL", "MXN", "RUB", "NZD", "HKD",
-  ];
-};
 
 const symbolFor = (code: string): string => {
   try {
@@ -61,7 +43,11 @@ const currencyLabel = (code: string, symbol: string): string =>
 /** Currency symbol for a code (e.g. "USD" -> "$", "PKR" -> "Rs"). */
 export const getCurrencySymbol = (code: string): string => symbolFor(code);
 
-const CURRENCIES: CurrencyOption[] = getCurrencyCodes()
+/**
+ * Only currencies the ECB publishes a rate for. A listing in any other could
+ * be shown, but never converted for a buyer browsing in another currency.
+ */
+const CURRENCIES: CurrencyOption[] = [...ECB_CURRENCIES]
   .map((code) => ({ code, symbol: symbolFor(code) }))
   .sort((a, b) => a.code.localeCompare(b.code));
 

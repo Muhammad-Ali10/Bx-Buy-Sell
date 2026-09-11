@@ -52,10 +52,20 @@ export const ALLOWED_ATTACHMENT_LABEL = ALLOWED_ATTACHMENT_EXTENSIONS.map((e) =>
 ).join(", ");
 
 /**
- * `accept` for the file input. This is only a hint — a browser will still let
- * someone pick "All files" or drag anything in, so never rely on it alone.
+ * The formats listed for the seller, as ".pdf, .doc, …".
+ *
+ * Deliberately not handed to the file input's `accept`. It was, and that is
+ * what made a refusal silent: the dialog greyed out a .zip, the seller picked
+ * nothing, no handler ran, and nothing was ever said. The browser was
+ * rejecting the file before the code that explains rejections could see it.
+ *
+ * So the picker now shows everything and the check below does the refusing —
+ * out loud. This string is for telling the seller what is allowed, not for
+ * stopping them.
  */
-export const ATTACHMENT_ACCEPT = ALLOWED_ATTACHMENT_EXTENSIONS.map((e) => `.${e}`).join(",");
+export const ATTACHMENT_ACCEPT_LABEL = ALLOWED_ATTACHMENT_EXTENSIONS.map(
+  (e) => `.${e}`,
+).join(", ");
 
 /** Documents, spreadsheets and images. */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;

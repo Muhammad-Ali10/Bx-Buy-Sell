@@ -34,9 +34,13 @@ import { IdentityModule } from './identity/identity.module';
 import { MonitoringAlertModule } from './monitoring-alert/monitoring-alert.module';
 import { AcquisitionCapacityModule } from './acquisition-capacity/acquisition-capacity.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AttachmentModule } from './attachment/attachment.module';
+import { ListingAreaOrderModule } from './listing-area-order/listing-area-order.module';
+import { FxModule } from './fx/fx.module';
 
 @Module({
   imports: [
+    AttachmentModule,
     ActivityLogModule,
     PrismaModule,
     RabbitMqModule.forRoot(),
@@ -60,6 +64,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     ProhibitedWordModule,
     FinancialAdminModule,
     QuestionAdminModule,
+    ListingAreaOrderModule,
     AdminSocialAccountModule,
     NotificationModule,
     SmsModule,
@@ -68,6 +73,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     MonitoringAlertModule,
     AcquisitionCapacityModule,
     DashboardModule,
+    FxModule,
   ],
   controllers: [AppController],
   providers: [AppService, AuthGuard, RolesGuard, ResponseInterceptor, LogInterceptor],

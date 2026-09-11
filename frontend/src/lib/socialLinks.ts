@@ -119,9 +119,25 @@ export const platformFor = (questionText: string | undefined | null): SocialPlat
   return PLATFORMS.find((platform) => lower.includes(platform.match)) ?? null;
 };
 
-/** The platform's own spelling where we know it, otherwise what the admin wrote. */
-export const platformLabel = (questionText: string): string =>
-  platformFor(questionText)?.label ?? questionText;
+/**
+ * The platform's own spelling, without losing the rest of the question.
+ *
+ * This used to return the platform's name outright, which was fine while every
+ * account question was just "Instagram" or "tiktok". It stopped being fine the
+ * moment a second question mentioned the same platform: "Instagram Followers"
+ * came back as "Instagram", so the seller saw two fields with the same label
+ * and no way to tell which wanted the link and which the count.
+ *
+ * Only the platform's own word is corrected now — "tiktok" to "TikTok" — and
+ * whatever the administrator wrote around it is left alone.
+ */
+export const platformLabel = (questionText: string): string => {
+  const text = String(questionText ?? "").trim();
+  const platform = platformFor(text);
+  if (!platform) return questionText;
+  if (text.toLowerCase() === platform.match) return platform.label;
+  return text.replace(new RegExp(platform.match, "i"), platform.label);
+};
 
 /** An example for this platform, or a neutral one when it is not a platform. */
 export const linkPlaceholder = (questionText: string): string =>

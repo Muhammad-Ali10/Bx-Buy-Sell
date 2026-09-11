@@ -45,7 +45,13 @@ const REGISTER_LABEL = 'register to unlock 🔓';
 const REGISTER_REDIRECT = '/register';
 const AGREEMENT_LABEL = 'Unlock Confidential Details';
 
-const STAFF_ROLES = new Set(['ADMIN', 'MONITER', 'MODERATOR']);
+/**
+ * Roles that see everything.
+ *
+ * Exported so the file endpoint recognises staff the same way the page does;
+ * a second list would eventually disagree with this one.
+ */
+export const STAFF_ROLES = new Set(['ADMIN', 'MONITER', 'MODERATOR']);
 
 /**
  * Section-level rules. A question inherits its section unless one of the
@@ -101,6 +107,17 @@ const REGISTERED_QUESTION_PATTERNS = [
 ];
 
 const isDescription = (question: string) => /description/i.test(question);
+
+/**
+ * When a confidential-access row actually grants something.
+ *
+ * A row on its own is not permission — a buyer waiting on a seller who vets by
+ * hand has one too. Exported so the file endpoint and the listing service
+ * decide this the same way; two copies of a permission rule is one copy too
+ * many.
+ */
+export const grantsConfidentialAccess = (status?: string | null): boolean =>
+  status === 'APPROVED';
 
 /** What a viewer is entitled to see on this listing. */
 export function resolveViewerLevel(
@@ -304,6 +321,7 @@ const BILLING_FIELDS = [
   'packageActive',
   'packageExpiresAt',
   'packageBillingCycle',
+  'addonBillingCycle',
   'packageAddons',
   'successFeePercent',
   'addonEndsAt',
@@ -368,4 +386,33 @@ export function maskListingFor(listing: any, viewer?: ListingViewer) {
   masked.portfolioLink = lock.answer;
 
   return masked;
+}
+
+/**
+ * Whether this viewer may still see a listing the team has blocked.
+ *
+ * Blocking takes one listing off the market and leaves its owner's account
+ * alone. So the owner keeps seeing it — under My Listings, with the reason —
+ * and the team sees it to review. For everyone else it is gone: its page
+ * answers as it does for a listing that does not exist, and saved favourites
+ * leave it out.
+ */
+export function canViewBlockedListing(
+  listing: { userId?: string | null },
+  viewer?: ListingViewer,
+): boolean {
+  if (!viewer?.userId) return false;
+  if (STAFF_ROLES.has(String(viewer.role || '').toUpperCase())) return true;
+  return Boolean(listing?.userId) && listing.userId === viewer.userId;
+}
+
+/**
+ * The statuses a list of listings leaves out for anyone who is not staff.
+ *
+ * Sold and blocked businesses are off the market. The one exception is an
+ * owner looking at their own listings, who still sees a blocked one: that is
+ * where they find out it was blocked, and why.
+ */
+export function hiddenListingStatuses(ownListings: boolean): Array<'SOLD' | 'BLOCKED'> {
+  return ownListings ? ['SOLD'] : ['SOLD', 'BLOCKED'];
 }

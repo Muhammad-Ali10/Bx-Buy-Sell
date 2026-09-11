@@ -40,6 +40,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { formatPresence } from "@/lib/lastSeen";
 import { DuplicateAccountsNotice } from "@/components/admin/DuplicateAccountsNotice";
+import { ProBadge } from "@/components/admin/ProBadge";
 
 /**
  * Team members are users with a staff role, not a separate population, so they
@@ -481,17 +482,10 @@ export default function AdminUsers() {
                                   {user.full_name?.substring(0, 2).toUpperCase() || user.email?.substring(0, 2).toUpperCase() || "U"}
                                 </AvatarFallback>
                               </Avatar>
-                              {/* PRO follows the paid subscription, not the
-                                  account type — a seller on the free plan is
-                                  not a PRO member. */}
-                              {user.is_pro && (
-                                <div
-                                  className="absolute -bottom-1 -right-1 bg-accent text-black text-[8px] font-bold px-1 rounded"
-                                  title={user.plan_name ? `${user.plan_name} plan` : "Paid plan"}
-                                >
-                                  Pro
-                                </div>
-                              )}
+                              {/* PRO follows the Pro plan while it is paid for,
+                                  not the account type (see isProMember). It is
+                                  the same pill as on the member's own page. */}
+                              {user.is_pro && <ProBadge size="sm" />}
                             </div>
                             <div className="flex flex-col gap-0.5">
                               <Link

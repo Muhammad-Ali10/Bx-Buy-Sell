@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { Button } from "@/components/ui/button";
@@ -20,11 +20,13 @@ import { TeamMemberStatistics } from "@/components/admin/TeamMemberStatistics";
 import { UserSubscriptionsList } from "@/components/admin/UserSubscriptionsPanel";
 import { ChangePasswordDialog } from "@/components/admin/ChangePasswordDialog";
 import { UserInvoiceList } from "@/components/admin/UserInvoiceList";
+import { MemberActivityLog } from "@/components/admin/MemberActivityLog";
 
 const ACCOUNT_TABS = [
   { key: "overview", label: "Overview" },
   { key: "subscriptions", label: "Subscriptions" },
   { key: "billing", label: "Billing" },
+  { key: "logs", label: "Logs" },
 ] as const;
 
 type AccountTab = (typeof ACCOUNT_TABS)[number]["key"];
@@ -77,7 +79,8 @@ const ROLE_LABELS: Record<string, string> = {
   SELLER: "Seller",
   USER: "User",
 };
-import proIcon from "@/assets/fi_5076417.svg";
+import { ProBadge } from "@/components/admin/ProBadge";
+import { isProMember } from "@/lib/proMembership";
 import simIcon from "@/assets/sim icon.svg";
 import verifiedTick from "@/assets/Tick.svg";
 import { useUserDetails } from "@/hooks/useUserDetails";
@@ -145,7 +148,12 @@ export default function AdminUserDetails() {
   // not-found returns below. Declared after them, they only ran once data had
   // arrived, and React refused to render the page at all.
   const [isChangingRole, setIsChangingRole] = useState(false);
-  const [activeTab, setActiveTab] = useState<AccountTab>("overview");
+  // "Activity log → View" on a team member's statistics opens ?tab=logs.
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<AccountTab>(() => {
+    const requested = searchParams.get("tab");
+    return ACCOUNT_TABS.some((tab) => tab.key === requested) ? (requested as AccountTab) : "overview";
+  });
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
 
   useEffect(() => {
@@ -160,7 +168,7 @@ export default function AdminUserDetails() {
         const response = await (apiClient as any).request(`/subscription/user/${id}`);
         if (response.success && response.data) {
           const data = response.data as any;
-          setIsPro(data.plan?.slug === 'pro' && data.status === 'ACTIVE');
+          setIsPro(isProMember(data));
           
           // Fetch payment method if user has active subscription
           if (data.stripeCustomerId && data.status === 'ACTIVE') {
@@ -592,40 +600,7 @@ export default function AdminUserDetails() {
                       {profile.full_name?.split(" ").map(n => n[0]).join("").slice(0, 2) || "U"}
                     </AvatarFallback>
                   </Avatar>
-                  {isPro && (
-                    <div
-                      className="absolute"
-                      style={{
-                        width: '48px',
-                        height: '21px',
-                        borderRadius: '13.04px',
-                        paddingTop: '1.96px',
-                        paddingBottom: '1.96px',
-                        background: '#C6FE1F',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '2.61px',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        bottom: '-10px',
-                      }}
-                    >
-                      <img src={proIcon} alt="Pro" style={{ width: '12px', height: '12px' }} />
-                      <span
-                        className="font-lufga"
-                        style={{
-                          fontWeight: 500,
-                          fontSize: '11px',
-                          lineHeight: '120%',
-                          letterSpacing: '0%',
-                          color: '#000000',
-                        }}
-                      >
-                        Pro
-                      </span>
-                    </div>
-                  )}
+                  {isPro && <ProBadge size="md" />}
                 </div>
 
                 <div className="min-w-0 flex flex-col">
@@ -1091,6 +1066,14 @@ export default function AdminUserDetails() {
               {id && <UserInvoiceList userId={id} />}
             </div>
           </Card>
+          )}
+
+          {/* What they did and what the team did to them: sign-ins, messages,
+              listings, payments. */}
+          {activeTab === "logs" && id && (
+            <Card className="p-5 bg-card border-border">
+              <MemberActivityLog memberId={id} />
+            </Card>
           )}
 
           {activeTab === "overview" && (

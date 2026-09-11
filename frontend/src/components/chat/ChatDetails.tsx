@@ -1,3 +1,4 @@
+import { nextPanelListing } from "@/lib/chatPanelListing";
 import { multipleOf, listingMultiples, profitMultipleLabel, revenueMultipleLabel } from "@/lib/financialTableUtils";
 import { useEffect, useRef, useState } from "react";
 import { apiClient } from "@/lib/api";
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { asAttachmentUrl } from "@/lib/downloadFile";
 import docIcon from "@/assets/doc.svg";
 import labelIcon from "@/assets/label.svg";
 import reportIcon from "@/assets/report.svg";
@@ -21,6 +23,15 @@ import ListingCard from "@/components/ListingCard";
 
 import { formatNumber } from "@/lib/formatNumber";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
+import { useDisplayCurrency } from "@/lib/displayCurrency";
+import {
+  formatFigureIn,
+  formatMoneyIn,
+  listingFiguresIn,
+  listingMultiplesOf,
+  listingPriceIn,
+} from "@/lib/listingMoney";
+import { teamParticipants, uniqueParticipants, type TeamParticipant } from "@/lib/chatParticipants";
 interface ChatDetailsProps {
   conversationId: string;
   userId?: string;
@@ -83,6 +94,7 @@ const seedInitialLabel = (chatId?: string, userId?: string): "GOOD" | "MEDIUM" |
 };
 
 export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }: ChatDetailsProps) => {
+  const viewerCurrency = useDisplayCurrency();
   const { user } = useAuth();
   // The seller is the party who is not the buyer on this chat.
   const isSellerViewing = Boolean(user?.id && sellerId && user.id === sellerId);
@@ -244,13 +256,18 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             last_offline: seller.last_offline,
           } : null;
 
-          setParticipants([buyerProfile, sellerProfile].filter(Boolean));
+          // Once each — a chat's buyer and seller can be the same account.
+          setParticipants(uniqueParticipants([buyerProfile, sellerProfile]));
         }
       }
     } catch (error) {
       console.error('Error fetching chat details:', error);
     }
   };
+
+  // Admins and moderators who wrote in the chat. Kept apart from the buyer and
+  // seller so the panel can say who they are.
+  const [teamMembers, setTeamMembers] = useState<TeamParticipant[]>([]);
 
   // Apply an already-fetched chat room object to the panel's state. Shared by
   // the instant cache seed and the fresh network refresh.
@@ -259,11 +276,16 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
     {
         const messagesData = chatData?.messages || [];
         setMessages(messagesData);
+        setTeamMembers(teamParticipants(messagesData, [chatData?.user?.id, chatData?.seller?.id]));
 
-        // Get listing from chat room if available
-        if (chatData?.listing && !listing) {
-          setListing(chatData.listing);
-        }
+        /*
+         * The conversation says which listing it is about; the panel follows.
+         *
+         * This used to set the listing only when the panel had none, so a
+         * wrong one — seeded from a cache, or left over from the previous
+         * chat — could never be corrected by the server's answer.
+         */
+        setListing((current: any) => nextPanelListing(current, chatData));
         const listingId = chatData?.listing?.id || chatData?.listingId;
         void hydrateListing(listingId, chatData?.listing);
 
@@ -512,7 +534,9 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
     listing?.location ||
     listing?.city ||
     listing?.country ||
-    "Location not available";
+    // The card prints "Location:" in front of this; the longer wording was cut
+    // to "Loca…" in the narrow details panel.
+    "Not available";
   const askingPrice =
     getAnswerByQuestion(adQuestions, ['listing price', 'price']) ||
     getAnswerByQuestion(brandQuestions, ['asking price', 'price', 'selling price']) ||
@@ -533,13 +557,15 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
     0;
 
   // Worked out from the seller's grid, the same as the listing's own page.
-  const multiples = listingMultiples(listing, askingPrice);
+  const multiples = listingMultiplesOf(listing);
+  // In the visitor's currency, from what the server stored.
+  const figures = listingFiguresIn(listing, viewerCurrency);
   const profitMultiple = profitMultipleLabel(multiples.profit);
   const revenueMultiple = revenueMultipleLabel(multiples.revenue);
 
   return (
     <>
-      <div className="w-full bg-background flex flex-col h-full overflow-y-auto p-4">
+      <div className="w-full bg-background flex flex-col h-full overflow-y-auto p-4 chat-scrollbar">
         {/* Details Heading - Top Left */}
         <h3 
           style={{
@@ -559,7 +585,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
         
         {/* Profile Pictures Group - Centered */}
         <div className="flex items-center justify-center mb-4" style={{ gap: '-8px' }}>
-          {participants.slice(0, 3).map((participant, i) => (
+          {participants.map((participant, i) => (
             <Avatar 
               key={participant.id} 
               className="border-2 border-white" 
@@ -610,6 +636,25 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
         >
           {otherParticipant?.full_name || 'Unknown User'}
         </h4>
+
+        {/* The team members who wrote in the chat, by name — a third picture
+            with nothing to say who it is reads as a third buyer or seller. */}
+        {teamMembers.length > 0 && (
+          <p
+            style={{
+              fontFamily: 'Lufga',
+              fontWeight: 400,
+              fontSize: '13px',
+              lineHeight: '130%',
+              color: 'rgba(0, 0, 0, 0.5)',
+              textAlign: 'center',
+              margin: 0,
+              marginBottom: '8px',
+            }}
+          >
+            Team: {teamMembers.map((member) => member.full_name || 'Team member').join(', ')}
+          </p>
+        )}
 
         <p
           style={{
@@ -952,18 +997,33 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
             category={categoryName}
             name={listingName}
             description={listingDescription}
-            price={askingPrice ? `${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}` : "Price not available"}
+            price={
+              askingPrice
+                ? formatMoneyIn(listingPriceIn(listing, viewerCurrency)) ||
+                  `${getListingCurrencySymbol(listing)}${formatNumber(Number(askingPrice))}`
+                : "Price not available"
+            }
             profitMultiple={profitMultiple}
             revenueMultiple={revenueMultiple}
             location={location}
             locationFlag={location}
             businessAge={listing?.business_age || listing?.businessAge || undefined}
-            netProfit={avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined}
-            revenue={avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined}
+            netProfit={
+              figures.annualProfit !== null
+                ? figures.annualProfit > 0 ? formatFigureIn(figures.annualProfit, figures) : undefined
+                : avgNetProfit > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgNetProfit))}` : undefined
+            }
+            revenue={
+              figures.annualRevenue !== null
+                ? figures.annualRevenue > 0 ? formatFigureIn(figures.annualRevenue, figures) : undefined
+                : avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined
+            }
             managedByEx={listing?.managed_by_ex === true || listing?.managed_by_ex === 1 || listing?.managed_by_ex === 'true' || listing?.managed_by_ex === '1'}
             isPremium={String(listing?.selectedPackage || '').toUpperCase() === 'PREMIUM'}
             listingId={listing?.id}
             sellerId={listing?.userId || listing?.user_id}
+            // This is already the conversation with the seller.
+            hideContactSeller
           />
         </div>
         </>
@@ -994,8 +1054,11 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
                     />
                   ) : (
                     <div className="w-full h-48 bg-muted flex items-center justify-center">
+                      {/* The link says Download, so it downloads. Without the
+                          flag the CDN sends no disposition and the browser
+                          previews whichever formats it can read. */}
                       <a
-                        href={file.url || file.content}
+                        href={asAttachmentUrl(file.url || file.content)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-500 hover:underline"

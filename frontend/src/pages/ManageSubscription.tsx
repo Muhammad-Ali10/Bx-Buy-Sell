@@ -1,12 +1,17 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Building2, Check, Globe, LayoutGrid, Sparkles } from "lucide-react";
+import { AlertTriangle, Building2, CircleCheck, Globe, LayoutGrid, Sparkles } from "lucide-react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { ListingsSidebar } from "@/components/listings/ListingsSidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
+import { resolveListingTitle } from "@/lib/listingTitle";
+import { ListingPackageManager } from "@/components/listings/ListingPackageManager";
+import { TrustBand, WhyPanel } from "@/components/marketing/TrustAndWhy";
+import { BUYER_CYCLES, buyerCyclePrice, type BuyerCycle } from "@/lib/buyerPlanCycles";
 
 /**
  * Manage Your Subscription.
@@ -23,7 +28,7 @@ import { toast } from "sonner";
  */
 
 type Tier = "MINIMUM" | "STARTER" | "PREMIUM";
-type Cycle = "MONTHLY" | "THREE_MONTH" | "SIX_MONTH";
+type Cycle = BuyerCycle;
 type Audience = "BUYER" | "SELLER";
 
 const RANK: Record<Tier, number> = { MINIMUM: 0, STARTER: 1, PREMIUM: 2 };
@@ -35,11 +40,8 @@ const TIER_BY_SLUG: Record<string, Tier> = {
   pro: "PREMIUM",
 };
 
-const CYCLES: { value: Cycle; label: string; months: number; discount: number }[] = [
-  { value: "MONTHLY", label: "Monthly", months: 1, discount: 0 },
-  { value: "THREE_MONTH", label: "3 Months", months: 3, discount: 0.1 },
-  { value: "SIX_MONTH", label: "6 Months", months: 6, discount: 0.2 },
-];
+// Shared with Account Details → Subscriptions, so both quote the same price.
+const CYCLES = BUYER_CYCLES;
 
 interface PlanRow {
   id: string;
@@ -65,15 +67,31 @@ function serverMessage(res: any, fallback: string): string {
   return res?.error || res?.message || fallback;
 }
 
-function priceFor(monthly: number, cycle: Cycle): number {
-  const c = CYCLES.find((x) => x.value === cycle)!;
-  return Math.round(monthly * c.months * (1 - c.discount));
-}
+const priceFor = buyerCyclePrice;
 
 const ManageSubscription = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
+
+  /**
+   * Which listing's package this page is about, if any.
+   *
+   * Without one it is the buyer's own plan, as before. With one it is a
+   * seller's listing — reached from Push Listing or Manage Subscription on
+   * that listing's card.
+   */
+  const { listingId } = useParams<{ listingId?: string }>();
+  const { data: listing } = useQuery<any>({
+    queryKey: ["listing-for-package", listingId],
+    queryFn: async () => {
+      const res: any = await apiClient.getListingById(listingId as string);
+      return res?.success === false ? null : (res?.data ?? res);
+    },
+    enabled: Boolean(listingId),
+  });
+  const listingTitle = resolveListingTitle(listing, "your listing");
+  const isDraft = String(listing?.status || "").toUpperCase() === "DRAFT";
 
   const [audience, setAudience] = useState<Audience>("BUYER");
   // The card the member has opened an action on. Null means nothing is being
@@ -229,14 +247,23 @@ const ManageSubscription = () => {
 
   const loading = plansLoading || (Boolean(user) && currentLoading);
 
-  return (
-    <div className="min-h-screen flex flex-col bg-white">
-      <Header />
+  /*
+   * A listing's page sits in the account area, sidebar and all, as the
+   * client's design has it. It is reached from the sidebar, My Listings and
+   * Account Details, which all carry that sidebar; the buyer plans page keeps
+   * the site's own header and footer.
+   */
+  const inAccountArea = Boolean(listingId);
 
+  const content = (
       <main className="flex-1 bg-white">
         {/* Three stacked panels, as the design has them: the subscription
             itself, then the figures, then the pitch. */}
-        <div className="mx-auto max-w-[1000px] px-4 pt-24 pb-8 sm:px-6 sm:pt-28 sm:pb-12">
+        <div
+          className={`mx-auto max-w-[1000px] px-4 pb-8 sm:px-6 sm:pb-12 ${
+            inAccountArea ? "pt-6 sm:pt-8" : "pt-24 sm:pt-28"
+          }`}
+        >
           <div className="rounded-2xl bg-[#FAFAFA] px-5 py-8 sm:px-10 sm:py-10">
           <h1
             className="text-center text-[22px] font-semibold uppercase text-[#0F172A] sm:text-[28px]"
@@ -256,7 +283,7 @@ const ManageSubscription = () => {
 
               Two separate pills rather than one segmented control: the design
               has them as a choice of who you are, not as a switch. */}
-          <div className="mt-7 flex justify-center gap-3">
+          {/* <div className="mt-7 flex justify-center gap-3">
             {(["BUYER", "SELLER"] as Audience[]).map((a) => (
               <button
                 key={a}
@@ -273,9 +300,23 @@ const ManageSubscription = () => {
                 {a === "BUYER" ? "I'm A Buyer" : "I'm A Seller"}
               </button>
             ))}
-          </div>
+          </div> */}
 
-          {audience === "SELLER" ? (
+          {listingId ? (
+            /*
+             * A listing was named, so this is that listing's package.
+             *
+             * The notice below is what a seller used to get here — it told
+             * them to open the three-dot menu of a listing, which is exactly
+             * where they have now come from. With the listing in hand there is
+             * something real to show instead.
+             */
+            <ListingPackageManager
+              listingId={listingId}
+              listingTitle={listingTitle}
+              isDraft={isDraft}
+            />
+          ) : audience === "SELLER" ? (
             <SellerPanel onGo={() => navigate("/my-listings")} />
           ) : loading ? (
             <div className="mt-12 grid gap-6 md:grid-cols-3">
@@ -333,10 +374,28 @@ const ManageSubscription = () => {
           </div>
 
           <TrustBand />
-          <WhyPanel audience={audience} />
+          {/* A listing's page is a seller's page; it used to pitch buying. */}
+          <WhyPanel audience={listingId ? "SELLER" : audience} />
         </div>
       </main>
+  );
 
+  if (inAccountArea) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <ListingsSidebar />
+        <div className="flex-1 w-full flex flex-col min-w-0 lg:ml-[240px] xl:ml-[280px]">
+          <Header inColumn dark />
+          {content}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col bg-white">
+      <Header />
+      {content}
       <Footer />
     </div>
   );
@@ -383,136 +442,6 @@ const SellerPanel = ({ onGo }: { onGo: () => void }) => (
     </button>
   </div>
 );
-
-/** The client's own figures, as copy — there is no data behind them. */
-const TRUST_STATS = [
-  { value: "$3B+", label: "Total Deal Interest" },
-  { value: "8 Weeks", label: "Average Time to Close" },
-  { value: "1 Deal", label: "Can Change Everything" },
-  { value: "190+", label: "Countries Supported" },
-];
-
-const TrustBand = () => (
-  <section className="mt-6 rounded-2xl bg-[#FAFAFA] px-5 py-8 sm:px-10">
-    <p
-      className="m-0 text-center text-[12px] text-[#94A3B8]"
-      style={{ fontFamily: "Lufga" }}
-    >
-      Trusted by <strong className="font-semibold text-[#0F172A]">thousands of users</strong>{" "}
-      worldwide
-    </p>
-    {/* Two by two on a phone, four across from small screens up: four of these
-        side by side on a narrow screen leaves each one a few characters wide. */}
-    <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
-      {TRUST_STATS.map((stat) => (
-        <div key={stat.label} className="text-center">
-          <p
-            className="m-0 text-[22px] font-semibold text-[#0F172A] sm:text-[26px]"
-            style={{ fontFamily: "Lufga" }}
-          >
-            {stat.value}
-          </p>
-          <p className="m-0 mt-1 text-[11.5px] text-[#94A3B8]" style={{ fontFamily: "Lufga" }}>
-            {stat.label}
-          </p>
-        </div>
-      ))}
-    </div>
-  </section>
-);
-
-/**
- * The pitch, in the words of whichever side is reading it.
- *
- * This started as one seller-facing section shown to everybody, because the
- * first design only showed the seller tab. A buyer was being told to "showcase
- * your business" on a page where they were choosing what to pay to *browse*.
- */
-const PITCH = {
-  SELLER: {
-    heading: "Why Sell with Company Exchange?",
-    subtitle: "Designed to help business owners connect with buyers and achieve successful exits.",
-    points: [
-      {
-        icon: Globe,
-        title: "Buyers from All Over the World",
-        body: "Showcase your business to a global audience of entrepreneurs, investors, and acquisition-focused buyers.",
-      },
-      {
-        icon: LayoutGrid,
-        title: "Everything in One Place",
-        body: "Manage inquiries, communicate with buyers, share documents, and oversee the entire process from one platform.",
-      },
-      {
-        icon: Building2,
-        title: "Built for Serious Sellers",
-        body: "Built for sellers who don't want to waste time and prefer a secure, professional environment to sell their business.",
-      },
-    ],
-  },
-  BUYER: {
-    heading: "Why Buy with Company Exchange?",
-    subtitle: "Explore opportunities. Connect with sellers. Acquire with confidence.",
-    points: [
-      {
-        icon: Globe,
-        title: "Listings from All Over the World",
-        body: "Access listings from sellers worldwide and discover opportunities across a wide range of industries and markets.",
-      },
-      {
-        icon: LayoutGrid,
-        title: "Everything in One Place",
-        body: "Browse listings, communicate with sellers, access documents, and manage inquiries from a single platform.",
-      },
-      {
-        icon: Building2,
-        title: "Built for Serious Buyers",
-        body: "Designed for entrepreneurs, investors, and acquirers looking to identify and pursue quality acquisition opportunities.",
-      },
-    ],
-  },
-} as const;
-
-const WhyPanel = ({ audience }: { audience: Audience }) => {
-  const { heading, subtitle, points } = PITCH[audience];
-
-  return (
-    <section className="mt-6 rounded-2xl bg-[#FAFAFA] px-5 py-10 sm:px-10">
-      <h2
-        className="m-0 text-center text-[20px] font-semibold text-[#0F172A] sm:text-[24px]"
-        style={{ fontFamily: "Lufga" }}
-      >
-        {heading}
-      </h2>
-      <p
-        className="mx-auto mt-2 max-w-[620px] text-center text-[12.5px] text-[#64748B]"
-        style={{ fontFamily: "Lufga" }}
-      >
-        {subtitle}
-      </p>
-
-      <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-3">
-        {points.map(({ icon: Icon, title, body }) => (
-          <div key={title} className="rounded-xl bg-white p-5">
-            <Icon className="h-5 w-5 text-[#0F172A]" />
-            <h3
-              className="m-0 mt-3 text-[13.5px] font-semibold text-[#0F172A]"
-              style={{ fontFamily: "Lufga" }}
-            >
-              {title}
-            </h3>
-            <p
-              className="m-0 mt-2 text-[12px] leading-relaxed text-[#64748B]"
-              style={{ fontFamily: "Lufga" }}
-            >
-              {body}
-            </p>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-};
 
 interface CardProps {
   tier: Tier;
@@ -656,7 +585,7 @@ const PlanCard = ({
       <ul className="mt-5 space-y-2.5 flex-1">
         {plan.feature.map((f) => (
           <li key={f} className="flex items-start gap-2.5">
-            <Check
+            <CircleCheck
               className="mt-0.5 h-4 w-4 shrink-0 text-[#0F172A]"
 
             />

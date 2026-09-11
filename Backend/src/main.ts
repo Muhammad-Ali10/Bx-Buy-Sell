@@ -23,7 +23,20 @@ async function bootstrap() {
     console.warn('⚠️  DATABASE_URL not set. Using default local MongoDB.');
   }
 
-  const app = await NestFactory.create(AppModule);
+  /*
+   * `rawBody` is what makes Stripe webhooks possible at all.
+   *
+   * A Stripe signature is an HMAC over the exact bytes that were sent. Once the
+   * JSON body has been parsed and re-serialised those bytes are gone, and no
+   * signature can ever verify again — so Nest has to be told to keep the
+   * original buffer alongside the parsed body.
+   *
+   * Without it `req.rawBody` is undefined on every request, the webhook throws
+   * on its first line, and Stripe sees a 500 for every delivery. Which is
+   * exactly what happened: payments were taken from August onwards and not one
+   * of them ever reached this application.
+   */
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   perfStore.timings.nestCreateMs = performance.now() - bootstrapStart;
   app.enableCors({
     origin: '*',

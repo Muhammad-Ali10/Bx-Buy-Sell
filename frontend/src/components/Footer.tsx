@@ -1,6 +1,7 @@
 import { Building2, Mail, Phone, MapPin, Facebook, Instagram, Linkedin, Send } from "lucide-react";
 import logo from "@/assets/_App Icon 1 (2).png";
 import { Button } from "./ui/button";
+import { HeaderCurrencySelect } from "./HeaderCurrencySelect";
 
 const Footer = () => {
   return (
@@ -148,8 +149,8 @@ const Footer = () => {
           </div>
         </div>
 
-        <div className="border-t border-white/20 pt-8 text-center">
-          <p 
+        <div className="border-t border-white/20 pt-8 flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left">
+          <p
             className="font-lufga"
             style={{
               fontWeight: 400,
@@ -161,6 +162,8 @@ const Footer = () => {
           >
             2026 Company Exchange™
           </p>
+          {/* The same choice as the menu bar's: changing either changes both. */}
+          <HeaderCurrencySelect onDark infoSide="top" />
         </div>
       </div>
     </footer>

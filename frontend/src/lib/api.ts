@@ -1,5 +1,9 @@
 // API Configuration — must be the NestJS origin (scheme + host + port), not the static SPA URL.
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+
+/** Where the API lives, for callers that fetch it outside this client. */
+export { apiBaseUrl } from './apiBase';
+import { uploadErrorMessage, uploadSizeRefusal } from './uploadError';
 // Bearer token for API authorization - used when user is not logged in
 const API_BEARER_TOKEN = import.meta.env.VITE_API_BEARER_TOKEN || '';
 
@@ -77,6 +81,7 @@ class ApiClient {
       endpoint.startsWith('/auth/signup') ||
       endpoint.startsWith('/auth/verify-otp') ||
       endpoint.startsWith('/auth/reset-password') ||
+      endpoint.startsWith('/auth/check-reset-code') ||
       endpoint.startsWith('/auth/update-password');
     const isPublicEndpoint =
       endpoint.startsWith('/listing') ||
@@ -213,7 +218,7 @@ class ApiClient {
         // Handle 401 Unauthorized specifically
         if (response.status === 401) {
           // Don't auto-logout for auth endpoints (login/signup) - 401 is expected for invalid credentials
-          const isAuthEndpoint = path.startsWith('/auth/signin') || path.startsWith('/auth/signup') || path.startsWith('/auth/verify-otp');
+          const isAuthEndpoint = path.startsWith('/auth/signin') || path.startsWith('/auth/signup') || path.startsWith('/auth/verify-otp') || path.startsWith('/auth/check-reset-code');
           const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
           const isPublicPage =
             currentPath === '/' ||
@@ -318,6 +323,7 @@ class ApiClient {
           path.startsWith('/auth/verify-otp') ||
           path.startsWith('/auth/get-otp') ||
           path.startsWith('/auth/reset-password') ||
+          path.startsWith('/auth/check-reset-code') ||
           path.startsWith('/auth/update-password');
 
         // Add specific messages only when the server did not return something useful
@@ -592,6 +598,19 @@ class ApiClient {
     });
   }
 
+  /** Email a code to the account's own address, to confirm it. */
+  async sendEmailConfirmCode() {
+    return this.request('/user/me/email/confirm/send-code', { method: 'POST' });
+  }
+
+  /** Confirm the account's own address with the emailed code. */
+  async confirmEmailCode(code: string) {
+    return this.request('/user/me/email/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
   /** Moderator's verdict on one uploaded proof-of-funds file. */
   /**
    * A moderator's verdict on one uploaded document, with what it proves. The
@@ -682,6 +701,18 @@ class ApiClient {
     });
   }
 
+  /**
+   * Drop a queued downgrade and stay on the current package.
+   *
+   * A scheduled change is otherwise locked in until its date, so one mis-click
+   * costs the seller the rest of their billing period.
+   */
+  async cancelScheduledPackageChange(listingId: string) {
+    return this.request(`/listing/${listingId}/package/cancel-change`, {
+      method: 'POST',
+    });
+  }
+
   /** Start Stripe checkout for a listing's package + add-on. */
   async createListingPackageCheckout(
     listingId: string,
@@ -689,6 +720,8 @@ class ApiClient {
       packageId: 'MINIMUM' | 'STARTER' | 'PREMIUM';
       addon?: 'NONE' | 'CATEGORY_PAGE' | 'START_PAGE' | 'BUNDLE';
       billingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
+      /** The add-on's own cycle, chosen separately from the package's. */
+      addonBillingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
     },
   ) {
     return this.request(`/listing/${listingId}/package-checkout`, {
@@ -714,12 +747,44 @@ class ApiClient {
     return this.request(`/listing/${listingId}/package`, { method: 'GET' });
   }
 
-  /** Add, replace or cancel a listing's add-on. 'NONE' cancels. */
-  async changeListingAddon(listingId: string, addon: string) {
-    return this.request(`/listing/${listingId}/addon`, {
+  /*
+   * Placements, addressed one at a time.
+   *
+   * A listing can hold more than one, each on its own subscription with its own
+   * renewal date, so there is no single "the add-on" to change any more.
+   */
+
+  /** Buy a placement, or move one already held onto a different cycle. */
+  async subscribeListingAddon(
+    listingId: string,
+    addon: 'CATEGORY_PAGE' | 'START_PAGE' | 'BUNDLE',
+    billingCycle: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH' = 'MONTHLY',
+  ) {
+    return this.request(`/listing/${listingId}/addons/${addon}`, {
       method: 'POST',
-      body: JSON.stringify({ addon }),
+      body: JSON.stringify({ billingCycle }),
     });
+  }
+
+  /** Stop one renewing; it stays up until the paid period ends. */
+  async cancelListingAddon(listingId: string, addon: string) {
+    return this.request(`/listing/${listingId}/addons/${addon}/cancel`, { method: 'POST' });
+  }
+
+  /** Undo that, before the date arrives. Nothing is charged. */
+  async reactivateListingAddon(listingId: string, addon: string) {
+    return this.request(`/listing/${listingId}/addons/${addon}/reactivate`, {
+      method: 'POST',
+    });
+  }
+
+  /** Stop the package renewing. Everything stays until the paid period ends. */
+  async cancelListingPackage(listingId: string) {
+    return this.request(`/listing/${listingId}/package/cancel`, { method: 'POST' });
+  }
+
+  async reactivateListingPackage(listingId: string) {
+    return this.request(`/listing/${listingId}/package/reactivate`, { method: 'POST' });
   }
 
   /** Past payments, for the Billing tab's invoice list. */
@@ -761,6 +826,71 @@ class ApiClient {
     return this.request('/subscription/checkout', {
       method: 'POST',
       body: JSON.stringify({ planSlug, billingCycle }),
+    });
+  }
+
+  /**
+   * Record a finished Stripe checkout when the member lands back on the site,
+   * rather than waiting on the webhook. Says whether it was a buyer plan or a
+   * listing's package, so the success page knows where to send them.
+   */
+  async syncCheckoutSession(sessionId: string) {
+    return this.request('/subscription/sync-session', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    });
+  }
+
+  /** Saved cards, and which one renewals are charged to. */
+  async getPaymentMethods() {
+    return this.request('/billing/payment-methods', { method: 'GET' });
+  }
+
+  /** Stripe's own page for adding a card. Returns its URL. */
+  async startAddPaymentMethod() {
+    return this.request('/billing/payment-methods/setup', { method: 'POST' });
+  }
+
+  /** Back from Stripe: confirm the card was saved; a first card becomes the default. */
+  async confirmAddPaymentMethod(sessionId: string) {
+    return this.request('/billing/payment-methods/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    });
+  }
+
+  async setDefaultPaymentMethod(paymentMethodId: string) {
+    return this.request(
+      `/billing/payment-methods/${encodeURIComponent(paymentMethodId)}/default`,
+      { method: 'POST' },
+    );
+  }
+
+  async removePaymentMethod(paymentMethodId: string) {
+    return this.request(`/billing/payment-methods/${encodeURIComponent(paymentMethodId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /** Every invoice the signed-in member has had, from Stripe. */
+  async getInvoices() {
+    return this.request('/billing/invoices', { method: 'GET' });
+  }
+
+  /** A member's invoices, for the Billing tab on their account page (staff). */
+  async getInvoicesForUser(userId: string) {
+    return this.request(`/billing/invoices/${userId}`, { method: 'GET' });
+  }
+
+  /** The saved invoice address, and the profile to start from when there is none. */
+  async getInvoiceAddress() {
+    return this.request('/billing/address', { method: 'GET' });
+  }
+
+  async saveInvoiceAddress(address: Record<string, string>) {
+    return this.request('/billing/address', {
+      method: 'PUT',
+      body: JSON.stringify(address),
     });
   }
 
@@ -1071,6 +1201,18 @@ class ApiClient {
     });
   }
 
+  // The order the listing form asks its areas in, arranged in Content Management.
+  async getListingAreaOrder() {
+    return this.request('/listing-area-order');
+  }
+
+  async saveListingAreaOrder(areas: string[]) {
+    return this.request('/listing-area-order', {
+      method: 'PUT',
+      body: JSON.stringify({ areas }),
+    });
+  }
+
   async deleteAdminQuestion(id: string) {
     return this.request(`/question-admin/${id}`, {
       method: 'DELETE',
@@ -1316,9 +1458,20 @@ class ApiClient {
     return this.request(`/subscription/payment-history/${userId}`);
   }
 
-  /** Everything a given member has done, newest first. */
-  async getActivityLogByUser(userId: string) {
-    return this.request(`/activity-log/user/${userId}`);
+  /**
+   * A member's activity log, newest first: what they did and what the team did
+   * to them. `before` asks for the next, older page.
+   */
+  async getActivityLogByUser(
+    userId: string,
+    filters: { category?: string; from?: string; to?: string; before?: string; limit?: number } = {},
+  ) {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/activity-log/user/${userId}${suffix}`);
   }
 
   /** Listings, chats and activity a team member is responsible for. */
@@ -1404,6 +1557,14 @@ class ApiClient {
     });
   }
 
+  /** Check a password-reset code without spending it; `updatePassword` does. */
+  async checkResetCode(data: { email: string; otp_code: string }) {
+    return this.request('/auth/check-reset-code', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   async logout(userId: string) {
     return this.request(`/auth/logout/${userId}`, {
       method: 'GET',
@@ -1426,44 +1587,72 @@ class ApiClient {
     });
   }
 
-  // File upload
-  async uploadFile(file: File, type: 'photo' | 'attachment') {
+  /**
+   * Add a document to a listing, privately.
+   *
+   * Replaces uploading straight to the CDN from the browser. That path used an
+   * unsigned preset, which could only ever produce a public file — every
+   * contract and P&L on this platform is readable by anyone holding the link
+   * because of it — and, since the preset name ships in this bundle, it let
+   * anyone upload to the account at all.
+   *
+   * What comes back is an id and an API path, not a CDN address: the file is
+   * only readable through the server now, by someone allowed to read it.
+   */
+  async uploadListingAttachment(listingId: string, file: File) {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('type', type);
 
     const headers: HeadersInit = {};
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
 
     try {
-      const response = await fetch(`${this.baseUrl}/upload`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
-
-      const data = await response.json();
+      const response = await fetch(
+        `${this.baseUrl}/attachments/${encodeURIComponent(listingId)}`,
+        { method: 'POST', headers, body: formData },
+      );
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         return {
           success: false,
-          error: data.message || 'Upload failed',
+          error: uploadErrorMessage(data, `Upload failed (${response.status})`),
         };
       }
-
-      return {
-        success: true,
-        data,
-      };
+      return { success: true, data: data?.data ?? data };
     } catch (error) {
-      console.error('File upload failed:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Upload error',
+        error: error instanceof Error ? error.message : 'Upload failed',
       };
     }
+  }
+
+  /**
+   * Upload a chat file or a category image and return where it lives.
+   *
+   * This used to post to `/upload`, a route the server has never had, so every
+   * chat photo and file failed with a 404 — shown as "[object Object]". It now
+   * goes to Cloudinary the way listing photos already do, and lands on a public
+   * link just as they do.
+   */
+  async uploadFile(
+    file: File,
+    type: 'photo' | 'attachment',
+  ): Promise<ApiResponse<{ url: string; path?: string }>> {
+    const refusal = uploadSizeRefusal(file.size);
+    if (refusal) return { success: false, error: refusal };
+
+    // Loaded on first use, so its start-up log stays off pages that never upload.
+    const { uploadToCloudinary } = await import('./cloudinary');
+    const result = await uploadToCloudinary(
+      file,
+      type === 'photo' ? 'uploads/photos' : 'uploads/files',
+    );
+    if (!result.success || !result.url) {
+      return { success: false, error: result.error || 'Upload failed' };
+    }
+    return { success: true, data: { url: result.url } };
   }
 
   // Chat endpoints

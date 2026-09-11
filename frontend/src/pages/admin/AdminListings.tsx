@@ -32,6 +32,8 @@ import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { addLocalNotification } from "@/lib/localNotifications";
 import { setLocalListingAssignment } from "@/lib/adminAssignments";
 import { useAuth } from "@/hooks/useAuth";
+import { BlockListingDialog } from "@/components/admin/BlockListingDialog";
+import { unblockListing } from "@/lib/listingModeration";
 
 const AssignResponsibleDialog = lazy(() =>
   import("@/components/admin/AssignResponsibleDialog").then((m) => ({ default: m.AssignResponsibleDialog }))
@@ -311,51 +313,17 @@ export default function AdminListings() {
    * This used to set `verified: false` on the owner's account and then announce
    * that they could no longer access the platform — which was not true, since
    * nothing checks that flag at sign-in. The listing itself stayed on the
-   * marketplace.
+   * marketplace. The dialog asks for the reason the owner is shown.
    */
-  const handleBlockListing = async (listingId: string, listingTitle: string) => {
-    const reason = window.prompt(
-      `Why is "${listingTitle}" being blocked?
+  const [blockTarget, setBlockTarget] = useState<{ id: string; title: string } | null>(null);
 
-The owner sees this, so it saves a support ticket.`,
-      "",
-    );
-    // Cancel returns null; an empty answer is a deliberate "no reason given".
-    if (reason === null) return;
-
-    try {
-      const response = await apiClient.updateListing(listingId, {
-        status: "BLOCKED",
-        blockedReason: reason.trim() || null,
-      });
-      if (!response.success) {
-        throw new Error(response.error || "Failed to block listing");
-      }
-
-      toast.success(`"${listingTitle}" has been blocked`, {
-        duration: 4000,
-        description:
-          "It is off the marketplace. The owner still sees it under My Listings and can edit it, but only we can put it back.",
-      });
-      queryClient.invalidateQueries({ queryKey: ["admin-listings"] });
-    } catch (error: any) {
-      toast.error(error.message || "Failed to block listing");
-      console.error("Error blocking listing:", error);
-    }
+  const handleBlockListing = (listingId: string, listingTitle: string) => {
+    setBlockTarget({ id: listingId, title: listingTitle });
   };
 
   const handleUnblockListing = async (listingId: string, listingTitle: string) => {
-    try {
-      const response = await apiClient.updateListing(listingId, { status: "DRAFT" });
-      if (!response.success) {
-        throw new Error(response.error || "Failed to unblock listing");
-      }
-      toast.success(`"${listingTitle}" is no longer blocked`, {
-        description: "It has gone back to Draft, so the owner can publish it again.",
-      });
+    if (await unblockListing(listingId, listingTitle)) {
       queryClient.invalidateQueries({ queryKey: ["admin-listings"] });
-    } catch (error: any) {
-      toast.error(error.message || "Failed to unblock listing");
     }
   };
 
@@ -1142,6 +1110,16 @@ The owner sees this, so it saves a support ticket.`,
                   </table>
                 </div>
               </div>
+
+              <BlockListingDialog
+                listingId={blockTarget?.id ?? null}
+                listingTitle={blockTarget?.title ?? ""}
+                open={Boolean(blockTarget)}
+                onOpenChange={(open) => {
+                  if (!open) setBlockTarget(null);
+                }}
+                onBlocked={() => queryClient.invalidateQueries({ queryKey: ["admin-listings"] })}
+              />
 
               {/* Assign Responsible Dialog */}
               <Suspense fallback={null}>

@@ -19,7 +19,7 @@ type Step = "enter" | "code" | "done";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  channel: "sms" | "email";
+  channel: "sms" | "email" | "email-confirm";
   /** Pre-fills the field, e.g. the number already on the account. */
   initialValue?: string;
   /** Sends the code. Resolve to throw-free success; reject with a message. */
@@ -52,6 +52,18 @@ const COPY = {
     doneSubtitle: "Your email address has been successfully changed",
     inputType: "email",
     hint: "Your current address keeps working until this is confirmed",
+  },
+  /** Confirming the address the account already has — nothing changes but the check. */
+  "email-confirm": {
+    title: "Verify Your Email",
+    subtitle: "We will send a code to the address on your account",
+    placeholder: "Your email address",
+    sendLabel: "Send Email Code",
+    codeSubtitle: "Check your inbox. We have sent a verification code to",
+    doneTitle: "Email Address Verified",
+    doneSubtitle: "Your email address has been successfully verified",
+    inputType: "email",
+    hint: "This is the address you sign in with",
   },
 } as const;
 
@@ -204,6 +216,7 @@ export const VerificationDialog = ({
           <div className="mt-5">
             <input
               type={copy.inputType}
+              readOnly={channel === "email-confirm"}
               value={value}
               onChange={(event) => setValue(event.target.value)}
               onKeyDown={(event) => {

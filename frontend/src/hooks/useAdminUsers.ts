@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
 import { getAdminUserNotes } from "@/lib/adminUserNotes";
+import { isProMember } from "@/lib/proMembership";
 
 export interface AdminUser {
   id: string;
@@ -21,7 +22,7 @@ export interface AdminUser {
   is_online: boolean;
   /** Drives "last online 2 days ago" when the user is not connected. */
   last_seen: string | null;
-  /** True while a paid plan is active — shows the PRO badge beside the name. */
+  /** True while the Pro plan is paid for; shows the PRO pill on the photo. */
   is_pro: boolean;
   plan_name: string | null;
   note?: string | null;
@@ -89,11 +90,9 @@ export const useAdminUsers = () => {
         blocked_reason: user.blocked_reason ?? null,
         is_online: user.is_online === true,
         last_seen: user.last_seen || user.last_offline || null,
-        // The free tier is a plan too, so a subscription row alone does not
-        // make someone PRO — it has to be an active paid one.
-        is_pro:
-          user.subscription?.status === "ACTIVE" &&
-          user.subscription?.plan?.slug !== "free",
+        // PRO is the Pro plan while it is paid for. Starter is paid too, but it
+        // is not PRO.
+        is_pro: isProMember(user.subscription),
         plan_name: user.subscription?.plan?.name ?? null,
         note: notesMap[user.id]?.text || null,
       }));

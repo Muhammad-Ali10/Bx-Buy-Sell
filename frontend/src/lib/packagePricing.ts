@@ -107,9 +107,6 @@ export const BILLING_CYCLES: BillingCycleDef[] = [
   { id: "SIX_MONTH", label: "6-Month Billing", months: 6, discountPercent: 20 },
 ];
 
-/** Add-ons are billed monthly regardless of the package cycle (per the mockup). */
-const ADDON_BILLING_LABEL = "Monthly";
-
 export const SUCCESS_FEE_INFO_TEXT =
   "The success fee is an additional fee to the packages below and is only payable once your business has been sold. The fee is calculated as a percentage of the final sale price.";
 
@@ -172,6 +169,34 @@ export interface PackageSelection {
   packageId: PackageId | null;
   addon: AddonId;
   billingCycle: BillingCycleId;
+  /**
+   * The add-on's own cycle.
+   *
+   * Separate from the package's on purpose: a seller can commit to six months
+   * of Premium and still take the placement a month at a time, or the other
+   * way round. Until the client asked for it the add-on had no cycle at all
+   * and was simply billed every month.
+   */
+  addonBillingCycle: BillingCycleId;
+}
+
+/** What one monthly price comes to over a whole cycle. */
+export interface CycleTotal {
+  gross: number;
+  discount: number;
+  total: number;
+}
+
+/**
+ * The one piece of cycle arithmetic, and deliberately identical to
+ * `priceOverCycle` in `Backend/src/listing/package-pricing.ts`. The server
+ * recomputes every charge, so any drift here would show the seller one figure
+ * and take another.
+ */
+export function priceOverCycle(monthlyPrice: number, cycle: BillingCycleDef): CycleTotal {
+  const gross = monthlyPrice * cycle.months;
+  const discount = Math.round((gross * cycle.discountPercent) / 100);
+  return { gross, discount, total: gross - discount };
 }
 
 export interface OverviewLine {
@@ -225,29 +250,41 @@ export function buildPricingOverview(
 
   if (selection.packageId) {
     const monthly = getPackageMonthlyPrice(tier, selection.packageId);
-    const gross = monthly * cycle.months;
-    const discount = Math.round((gross * cycle.discountPercent) / 100);
+    const { discount, total } = priceOverCycle(monthly, cycle);
     lines.push({
       key: "package",
       item: PACKAGE_LABELS[selection.packageId],
       billingCycleLabel: cycle.label,
       discount,
-      total: gross - discount,
+      total,
     });
   }
 
   if (selection.addon !== "NONE") {
-    // The bundle is priced below the two pages bought separately.
-    const discount =
+    const addonCycle = getBillingCycle(selection.addonBillingCycle);
+    const { discount: cycleDiscount, total } = priceOverCycle(
+      getAddonPrice(tier, selection.addon),
+      addonCycle,
+    );
+    /*
+     * Two savings on one line, added together.
+     *
+     * The bundle is priced below the two pages bought separately, and that
+     * saving repeats every month of the cycle; the cycle discount comes off
+     * the bundle price on top of it. Splitting them into two rows would say
+     * the seller bought two things, which they did not.
+     */
+    const bundleSaving =
       selection.addon === "BUNDLE"
-        ? tier.addonCategoryPage + tier.addonStartPage - tier.addonBundle
+        ? (tier.addonCategoryPage + tier.addonStartPage - tier.addonBundle) *
+          addonCycle.months
         : 0;
     lines.push({
       key: `addon-${selection.addon}`,
       item: ADDON_LABELS[selection.addon],
-      billingCycleLabel: ADDON_BILLING_LABEL,
-      discount,
-      total: getAddonPrice(tier, selection.addon),
+      billingCycleLabel: addonCycle.label,
+      discount: bundleSaving + cycleDiscount,
+      total,
     });
   }
 

@@ -253,6 +253,19 @@ export class ChatService {
   private static readonly REMINDER_EVERY = 20;
 
   /**
+   * The id a milestone's prompt is stored under.
+   *
+   * Deterministic on purpose. MongoDB will not hold two documents with one
+   * `_id`, so when two messages land together and both find milestone 40 still
+   * unposted, only one prompt can ever be written. Looking first and inserting
+   * after cannot promise that on its own — both lookups can come back empty
+   * before either insert happens.
+   */
+  private static reminderId(chatId: string, milestone: number) {
+    return `reminder-${chatId}-${milestone}`;
+  }
+
+  /**
    * Offer to begin the deal process once a conversation crosses another 20
    * messages.
    *
@@ -271,43 +284,82 @@ export class ChatService {
       // Nothing to invite them to once they have accepted the invitation.
       const chat = await this.db.chat.findUnique({
         where: { id: chatId },
-        select: { isOffered: true },
+        select: { isOffered: true, userId: true, sellerId: true },
       });
-      if (chat?.isOffered) return null;
+      if (!chat || chat.isOffered) return null;
+
+      /*
+       * Only between two members.
+       *
+       * A support conversation with an admin or a moderator has no deal in it
+       * to start, and inviting a member to begin one with the support team is
+       * nonsense — the same rule the chat window applies to the two notices
+       * at the head of a conversation. Without it, a member who had written 108
+       * messages to an admin would have been sent a deal prompt the next time
+       * either of them spoke. Two support chats here already show the deal as
+       * started, which is exactly where that invitation leads.
+       */
+      const participants = await this.db.user.findMany({
+        where: { id: { in: [chat.userId, chat.sellerId].filter(Boolean) as string[] } },
+        select: { role: true },
+      });
+      if (participants.some((p) => p.role === 'ADMIN' || p.role === 'MONITER')) {
+        return null;
+      }
 
       const humanMessages = await this.db.message.count({
         where: { chatId, senderId: { not: null } },
       });
 
-      if (
-        humanMessages === 0 ||
-        humanMessages % ChatService.REMINDER_EVERY !== 0
-      ) {
-        return null;
-      }
+      /*
+       * The latest milestone reached — not "is the count exactly a multiple of
+       * twenty".
+       *
+       * The exact test fired only if this check happened to run at precisely 20,
+       * 40, 60. Anything that moved the count without running it stepped over
+       * the milestone for good: a missed or finished video call is saved with a
+       * sender, so it counts, but it is not sent through the path that calls
+       * this. A call as the twentieth entry took the count from 19 to 21, and
+       * 21 is not a multiple of anything useful. Two people sending at once did
+       * the same. Across this database fifteen prompts were due and one was
+       * written.
+       *
+       * Asking "has the milestone we are past been announced?" cannot skip one:
+       * the next message after any gap posts it. A conversation that went quiet
+       * before this existed and then resumes gets the single prompt for where it
+       * now stands, not one for every milestone it missed on the way.
+       */
+      const milestone =
+        Math.floor(humanMessages / ChatService.REMINDER_EVERY) *
+        ChatService.REMINDER_EVERY;
+      if (milestone < ChatService.REMINDER_EVERY) return null;
 
-      // Stripe-style double-fire protection: if this milestone already has a
-      // prompt, do not post a second one.
+      // Announced already — including by the old code, which stored its
+      // prompts under random ids that the fixed id below would never find.
       const already = await this.db.message.findFirst({
         where: {
           chatId,
           type: MessageType.SYSTEM,
-          metadata: { equals: ChatService.reminderMeta(humanMessages) },
+          metadata: { equals: ChatService.reminderMeta(milestone) },
         },
       });
       if (already) return null;
 
       return await this.db.message.create({
         data: {
+          id: ChatService.reminderId(chatId, milestone),
           chatId,
           senderId: null,
           type: MessageType.SYSTEM,
           content: null,
           read: true,
-          metadata: ChatService.reminderMeta(humanMessages),
+          metadata: ChatService.reminderMeta(milestone),
         },
       });
     } catch (error) {
+      // Another message reached this milestone at the same moment and wrote the
+      // prompt first. That is the id doing its job, not a failure.
+      if ((error as { code?: string })?.code === 'P2002') return null;
       console.error('❌ Failed to post guideline reminder:', error);
       return null;
     }
@@ -342,6 +394,12 @@ export class ChatService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Which side of the platform they are on. The chat window shows
+            // its two standing notices only between two members: telling
+            // somebody to keep the conversation on the platform, while they
+            // are talking to the platform, is nonsense — and there is no deal
+            // to start with the support team.
+            role: true,
             // The details panel says "Last online 2 hours ago".
             is_online: true,
             last_offline: true,
@@ -353,6 +411,12 @@ export class ChatService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Which side of the platform they are on. The chat window shows
+            // its two standing notices only between two members: telling
+            // somebody to keep the conversation on the platform, while they
+            // are talking to the platform, is nonsense — and there is no deal
+            // to start with the support team.
+            role: true,
             // The details panel says "Last online 2 hours ago".
             is_online: true,
             last_offline: true,
@@ -441,6 +505,8 @@ export class ChatService {
         first_name: true,
         last_name: true,
         profile_pic: true,
+        /** See the note on the same field in `getChatById`. */
+        role: true,
         is_online: true,
         last_offline: true,
       },
@@ -451,6 +517,8 @@ export class ChatService {
         first_name: true,
         last_name: true,
         profile_pic: true,
+        /** See the note on the same field in `getChatById`. */
+        role: true,
         is_online: true,
         last_offline: true,
       },
@@ -678,6 +746,12 @@ export class ChatService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Which side of the platform they are on. The chat window shows
+            // its two standing notices only between two members: telling
+            // somebody to keep the conversation on the platform, while they
+            // are talking to the platform, is nonsense — and there is no deal
+            // to start with the support team.
+            role: true,
             // The details panel says "Last online 2 hours ago".
             is_online: true,
             last_offline: true,
@@ -1234,24 +1308,46 @@ export class ChatService {
 
     const like = { contains: query, mode: 'insensitive' as const };
 
+    /*
+     * Who was talking.
+     *
+     * Staff may look anyone up, email included. A member searches the person on
+     * the other side, by name: members are never shown emails, so matching on
+     * them let a member test guesses at someone's address, and matching their
+     * own name returned every chat they have. The member's scope sits inside
+     * each branch — spread in beside an `OR` of its own, the second `OR`
+     * replaced the first and this lookup ran across every conversation.
+     */
+    const named = { OR: [{ first_name: like }, { last_name: like }] };
+    const byParticipantWhere: Prisma.ChatWhereInput = isStaff
+      ? {
+          OR: [
+            { user: { OR: [...named.OR, { email: like }] } },
+            { seller: { OR: [...named.OR, { email: like }] } },
+          ],
+        }
+      : {
+          OR: [
+            { userId: viewerId, seller: named },
+            { sellerId: viewerId, user: named },
+          ],
+        };
+
     const [byMessage, byParticipant, titleRows] = await Promise.all([
-      // What was said. Newest first, so the snippet a chat is shown with is the
-      // most recent time the word came up rather than the first.
+      /*
+       * What was said: one row per conversation, its newest mention, so the
+       * snippet is the latest time the word came up. This used to take the 500
+       * newest matching messages instead, and a word used often in recent chats
+       * pushed older conversations out of the results altogether.
+       */
       this.db.message.findMany({
         where: { content: like, chat: visible },
         select: { chatId: true, content: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
-        take: 500,
+        distinct: ['chatId'],
       }),
-      // Who was talking — either side of the conversation.
       this.db.chat.findMany({
-        where: {
-          ...visible,
-          OR: [
-            { user: { OR: [{ first_name: like }, { last_name: like }, { email: like }] } },
-            { seller: { OR: [{ first_name: like }, { last_name: like }, { email: like }] } },
-          ],
-        },
+        where: byParticipantWhere,
         select: { id: true },
         take: 500,
       }),
@@ -1324,6 +1420,12 @@ export class ChatService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Which side of the platform they are on. The chat window shows
+            // its two standing notices only between two members: telling
+            // somebody to keep the conversation on the platform, while they
+            // are talking to the platform, is nonsense — and there is no deal
+            // to start with the support team.
+            role: true,
             // The details panel says "Last online 2 hours ago".
             is_online: true,
             last_offline: true,
@@ -1335,6 +1437,12 @@ export class ChatService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Which side of the platform they are on. The chat window shows
+            // its two standing notices only between two members: telling
+            // somebody to keep the conversation on the platform, while they
+            // are talking to the platform, is nonsense — and there is no deal
+            // to start with the support team.
+            role: true,
             // The details panel says "Last online 2 hours ago".
             is_online: true,
             last_offline: true,
@@ -1496,6 +1604,16 @@ export class ChatService {
   }
 
   async createChatRoom(userId: string, sellerId: string, listingId?: string) {
+    // Nobody can start a conversation with themselves. The support path and
+    // the confidential request already refused it; Contact Seller on one's own
+    // listing did not, and left chats with the same account on both sides.
+    if (userId === sellerId) {
+      throw new HttpException(
+        'You cannot start a conversation with yourself',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     // CRITICAL: Check if chat room exists first
     const existingRoom = await this.getChatRoom(userId, sellerId, listingId);
     
@@ -1551,6 +1669,12 @@ export class ChatService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Which side of the platform they are on. The chat window shows
+            // its two standing notices only between two members: telling
+            // somebody to keep the conversation on the platform, while they
+            // are talking to the platform, is nonsense — and there is no deal
+            // to start with the support team.
+            role: true,
             // The details panel says "Last online 2 hours ago".
             is_online: true,
             last_offline: true,
@@ -1562,6 +1686,12 @@ export class ChatService {
             first_name: true,
             last_name: true,
             profile_pic: true,
+            // Which side of the platform they are on. The chat window shows
+            // its two standing notices only between two members: telling
+            // somebody to keep the conversation on the platform, while they
+            // are talking to the platform, is nonsense — and there is no deal
+            // to start with the support team.
+            role: true,
             // The details panel says "Last online 2 hours ago".
             is_online: true,
             last_offline: true,

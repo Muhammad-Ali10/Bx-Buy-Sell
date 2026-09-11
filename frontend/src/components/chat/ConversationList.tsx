@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import filterIcon from "@/assets/filter.svg";
 import archiveIcon from "@/assets/archive.svg";
 import pinIcon from "@/assets/pin.svg";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -9,7 +8,26 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { chatRoomsQueryKey, fetchChatRooms, type EnrichedChatRoom } from "@/lib/chatRooms";
 import { getChatListingImage, getChatListingTitle } from "@/lib/chatListing";
-import ConfidentialAccessRequests from "@/components/chat/ConfidentialAccessRequests";
+import ConfidentialAccessRequests, {
+  confidentialRequestsQuery,
+} from "@/components/chat/ConfidentialAccessRequests";
+import { withoutPendingRequestChats } from "@/lib/pendingRequestChats";
+import {
+  MIN_SERVER_SEARCH_LENGTH,
+  focusOnMatch,
+  searchTermToOpenWith,
+  showInChatList,
+} from "@/lib/chatSearch";
+import { apiClient } from "@/lib/api";
+import { ChatListFilters } from "./ChatListFilters";
+import {
+  DEFAULT_CHAT_LIST_FILTERS,
+  listingChoices,
+  narrowsChatList,
+  passesChatFilters,
+  sortChats,
+  type ChatListFilterState,
+} from "@/lib/chatListFilters";
 import { ChatLabelChip } from "./ChatLabelChip";
 import { cn } from "@/lib/utils";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
@@ -49,6 +67,8 @@ interface ConversationListProps {
     sellerId: string,
     /** The listing this conversation is about; scopes the window and panel. */
     listingId?: string | null,
+    /** The word searched for, when the chat was found by something said in it. */
+    searchTerm?: string,
   ) => void;
   userId: string;
   refreshTrigger?: string | null; // Trigger refresh when conversation changes
@@ -59,11 +79,31 @@ interface ConversationListProps {
    * but not which conversation belongs to it.
    */
   autoSelectListingId?: string | null;
+  /**
+   * Called once the list has loaded with no conversation about
+   * `autoSelectListingId` — nobody has written about that listing yet — so the
+   * page can say so rather than wait for a choice there is nothing to make.
+   */
+  onAutoSelectMissing?: () => void;
 }
 
-export const ConversationList = ({ selectedConversation, onSelectConversation, userId, refreshTrigger, onConversationDeleted, autoSelectListingId }: ConversationListProps) => {
+export const ConversationList = ({ selectedConversation, onSelectConversation, userId, refreshTrigger, onConversationDeleted, autoSelectListingId, onAutoSelectMissing }: ConversationListProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  // Conversations the server found the search in, anywhere in their history,
+  // with the line it was found in. Null while nothing is being searched.
+  const [serverMatches, setServerMatches] = useState<{
+    ids: Set<string>;
+    snippets: Record<string, string>;
+  } | null>(null);
+  // The panel behind the filter button: label, listing and order. Arriving
+  // from the admin listings table, it starts on that listing's conversations,
+  // one click to each buyer; Clear goes back to all of them.
+  const [filters, setFilters] = useState<ChatListFilterState>(() =>
+    autoSelectListingId
+      ? { ...DEFAULT_CHAT_LIST_FILTERS, listingId: autoSelectListingId }
+      : DEFAULT_CHAT_LIST_FILTERS,
+  );
   // Bumped when pinned chats change (cross-tab storage event) so the ordering
   // re-derives locally without a network refetch.
   const socketRef = useRef<Socket | null>(null);
@@ -256,17 +296,7 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
     });
 
     // Pinned first — the newest pin at the very top — then by last message.
-    conversationsWithDetails.sort((a, b) => {
-      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-      if (a.isPinned && b.isPinned) {
-        const at = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
-        const bt = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
-        if (at !== bt) return bt - at;
-      }
-      return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
-    });
-
-    return conversationsWithDetails;
+    return sortChats(conversationsWithDetails, 'recent');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rooms, selectedConversation, userId]);
 
@@ -279,20 +309,77 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
   useEffect(() => {
     if (!autoSelectListingId || autoSelectedRef.current) return;
     const match = conversations.find((c) => c.listingId === autoSelectListingId);
-    if (!match) return;
+    if (!match) {
+      // Loaded, and nobody has written about this listing: say so, once.
+      if (!loading) {
+        autoSelectedRef.current = true;
+        onAutoSelectMissing?.();
+      }
+      return;
+    }
     autoSelectedRef.current = true;
     onSelectConversation(match.id, match.userId, match.sellerId, match.listingId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSelectListingId, conversations]);
+  }, [autoSelectListingId, conversations, loading]);
 
-  const filteredConversations = useMemo(() => {
-    const query = searchQuery.toLowerCase();
-    return conversations.filter(
-      (convo) =>
-        convo.isArchived === showArchived &&
-        convo.otherUserName.toLowerCase().includes(query),
-    );
-  }, [conversations, showArchived, searchQuery]);
+  // Waiting confidential-access requests have their own section above, as the
+  // client's design has it; their conversations join this list once decided.
+  const { data: pendingRequests = [] } = useQuery(confidentialRequestsQuery);
+
+  // The whole history lives on the server. Asked after a pause in typing, so
+  // a word is one request rather than one per letter.
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < MIN_SERVER_SEARCH_LENGTH) {
+      setServerMatches(null);
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await apiClient.searchChats(query);
+        if (!live || !response.success) return;
+        const data = (response.data as any)?.data ?? response.data ?? {};
+        setServerMatches({
+          ids: new Set<string>(Array.isArray(data.chatIds) ? data.chatIds : []),
+          snippets: data.snippets || {},
+        });
+      } catch (error) {
+        // Names and latest messages are still matched here.
+        console.error('Chat search failed:', error);
+      }
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  const isSearching = searchQuery.trim().length > 0;
+
+  const listings = useMemo(() => listingChoices(conversations), [conversations]);
+
+  // A listing whose last chat has gone would leave the picker blank and the
+  // list empty, with nothing on screen to say why.
+  useEffect(() => {
+    if (!filters.listingId || conversations.length === 0) return;
+    if (!listings.some((listing) => listing.id === filters.listingId)) {
+      setFilters((current) => ({ ...current, listingId: null }));
+    }
+  }, [filters.listingId, listings, conversations.length]);
+
+  const filteredConversations = useMemo(
+    () =>
+      sortChats(
+        withoutPendingRequestChats(conversations, pendingRequests).filter(
+          (convo) =>
+            showInChatList(convo, searchQuery, showArchived, serverMatches?.ids) &&
+            passesChatFilters(convo, filters),
+        ),
+        filters.sort,
+      ),
+    [conversations, showArchived, searchQuery, pendingRequests, serverMatches, filters],
+  );
 
   if (loading && conversations.length === 0) {
     return (
@@ -318,9 +405,11 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
           boxSizing: 'border-box',
         }}
       >
-        {/* Search Field */}
+        {/* Search Field. min-w-0 lets it give way: at its natural width it
+            pushed the filter button out of the column (gone entirely at
+            768–1023px). */}
         <div
-          className="flex-1"
+          className="flex-1 min-w-0"
           style={{
             position: 'relative',
             height: '42px',
@@ -343,7 +432,7 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
             placeholder="Search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="flex-1 border-none outline-none bg-transparent text-base lg:text-[13px] xl:text-base text-black/50"
+            className="flex-1 min-w-0 border-none outline-none bg-transparent text-base lg:text-[13px] xl:text-base text-black/50"
             style={{
               fontFamily: 'Lufga',
               fontWeight: 400,
@@ -353,33 +442,7 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
           />
         </div>
 
-        {/* Filter Icon Button */}
-        <button
-          type="button"
-          style={{
-            width: '42px',
-            height: '42px',
-            padding: '0',
-            borderRadius: '50px',
-            border: '1px solid rgba(0, 0, 0, 0.1)',
-            backgroundColor: 'rgba(250, 250, 250, 1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            flexShrink: 0,
-            boxSizing: 'border-box',
-          }}
-        >
-          <img 
-            src={filterIcon} 
-            alt="Filter" 
-            style={{ 
-              width: '18px', 
-              height: '18px',
-            }} 
-          />
-        </button>
+        <ChatListFilters filters={filters} onChange={setFilters} listings={listings} />
       </div>
 
       {/* A control, not a heading. It used to read as a title sitting above
@@ -438,7 +501,7 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
 
       {/* Conversations List */}
       <div 
-        className="flex-1 overflow-y-auto w-full"
+        className="flex-1 overflow-y-auto w-full chat-scrollbar"
         style={{
           marginTop: '16px',
           display: 'flex',
@@ -473,7 +536,13 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
             <div
               key={convo.id}
               onClick={() => {
-                onSelectConversation(convo.id, convo.userId, convo.sellerId, convo.listingId);
+                onSelectConversation(
+                  convo.id,
+                  convo.userId,
+                  convo.sellerId,
+                  convo.listingId,
+                  searchTermToOpenWith(convo, searchQuery, serverMatches?.snippets),
+                );
               }}
               className={cn(
                 // Three lines now (listing, person, message), so the row is
@@ -501,7 +570,10 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
             >
               {/* The listing, not the person: a rectangle suits a shopfront
                   photo, and it is what tells the two chats with the same
-                  seller apart at a glance. */}
+                  seller apart at a glance. The outer box carries the unread
+                  badge; the inner one clips the picture to its rounded
+                  corners, and would clip the badge too if it held it. */}
+              <div style={{ position: 'relative', flexShrink: 0 }}>
               <div
                 style={{
                   position: 'relative',
@@ -532,6 +604,38 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                     {convo.listingTitle.charAt(0).toUpperCase() || '—'}
                   </div>
                 )}
+              </div>
+              {/* The unread count on the picture's bottom-right corner, where
+                  the eye already is when scanning the list. The white ring
+                  keeps it readable over any photo, and it grows into a pill
+                  rather than squeezing a two-digit count into a dot. */}
+              {isUnread && (
+                <span
+                  aria-label={`${convo.unreadCount} unread message${convo.unreadCount === 1 ? '' : 's'}`}
+                  style={{
+                    position: 'absolute',
+                    right: '-5px',
+                    bottom: '-3px',
+                    minWidth: '18px',
+                    height: '18px',
+                    padding: '0 4px',
+                    boxSizing: 'border-box',
+                    borderRadius: '100px',
+                    background: 'linear-gradient(168.64deg, #FE4A23 7.17%, #FF4590 91.64%)',
+                    boxShadow: '0 0 0 2px #FFFFFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontFamily: 'Lufga',
+                    fontWeight: 600,
+                    fontSize: '9px',
+                    lineHeight: '100%',
+                    color: 'rgba(250, 250, 250, 1)',
+                  }}
+                >
+                  {convo.unreadCount}
+                </span>
+              )}
               </div>
 
               {/* Second Section: User Name and Last Message */}
@@ -582,6 +686,16 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                       about the person, and on the title line it read as
                       something about the listing. */}
                   <ChatLabelChip label={convo.label} />
+                  {/* A search reaches into the archive; say so, since the list
+                      otherwise shows open chats only. */}
+                  {isSearching && convo.isArchived && (
+                    <span
+                      className="shrink-0 rounded-full bg-black/[0.06] px-1.5 py-[3px] text-[9px] text-black/60"
+                      style={{ fontFamily: 'Lufga', fontWeight: 500, lineHeight: '100%' }}
+                    >
+                      Archived
+                    </span>
+                  )}
                 </div>
                 <p
                   className="text-xs lg:text-[10px] xl:text-xs m-0 overflow-hidden text-ellipsis whitespace-nowrap"
@@ -593,79 +707,34 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
                     color: isUnread ? 'rgba(0, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.6)',
                   }}
                 >
-                  {getDisplayMessage(convo.lastMessage || 'No messages yet')}
+                  {/* Where the word was said, when that is what found the chat;
+                      its latest message usually has nothing to do with it. */}
+                  {getDisplayMessage(
+                    (isSearching && serverMatches?.snippets[convo.id]
+                      ? focusOnMatch(serverMatches.snippets[convo.id], searchQuery)
+                      : convo.lastMessage) || 'No messages yet',
+                  )}
                 </p>
               </div>
 
-              {/* Third Section: Notification Badge and Pin Icon.
-                  The time the last message arrived used to sit above these.
-                  Without it there is one thing left in this column, so it
-                  centres rather than hanging from the top. The list is still
-                  ordered newest first, which is what the time was mostly
-                  being read for. */}
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-end',
-                  justifyContent: 'center',
-                  gap: '4px',
-                  flexShrink: 0,
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}
-                >
-                  {isUnread && (
-                    <div
-                      style={{
-                      width: '18px',
-                      height: '18px',
-                      borderRadius: '100px',
-                      background: 'linear-gradient(168.64deg, #FE4A23 7.17%, #FF4590 91.64%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: 'Lufga',
-                        fontWeight: 600,
-                        fontSize: '9px',
-                        lineHeight: '100%',
-                        letterSpacing: '0%',
-                        color: 'rgba(250, 250, 250, 1)',
-                      }}
-                    >
-                      {convo.unreadCount}
-                    </span>
-                    </div>
-                  )}
-                  {convo.isPinned && (
-                    <img
-                      src={pinIcon}
-                      alt="Pinned"
-                      style={{
-                      width: '14px',
-                      height: '14px',
-                      flexShrink: 0,
-                    }}
-                  />
-                )}
-              </div>
-              </div>
+              {/* The pin, when there is one. The unread count used to share
+                  this column; it moved onto the listing's picture. Rendered
+                  only for pinned chats, so an empty column does not take the
+                  row's 10px gap from the text beside it. */}
+              {convo.isPinned && (
+                <img
+                  src={pinIcon}
+                  alt="Pinned"
+                  style={{ width: '14px', height: '14px', flexShrink: 0 }}
+                />
+              )}
             </div>
           );
         })}
 
         {filteredConversations.length === 0 && !loading && (
           <div className="p-8 text-center text-muted-foreground">
-            <p>No conversations yet</p>
+            <p>{isSearching || narrowsChatList(filters) ? 'No chats found' : 'No conversations yet'}</p>
           </div>
         )}
       </div>

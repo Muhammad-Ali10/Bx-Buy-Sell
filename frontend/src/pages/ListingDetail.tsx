@@ -1,3 +1,4 @@
+import { openListingChat } from "@/lib/openListingChat";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
@@ -19,7 +20,7 @@ import {
   PieChart as PieChartIcon, Settings, Globe as GlobeIcon, Lock, AlertTriangle,
   UserRound, Paperclip, Image as ImageIcon, Contact
 } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -44,6 +45,14 @@ import {
   profitMultipleLabel,
   revenueMultipleLabel,
 } from "@/lib/financialTableUtils";
+import { chartColorAt, ChartStripeDefs, type ChartColor } from "@/lib/chartPalette";
+import { downloadAttachment } from "@/lib/downloadFile";
+import { orUnknown, UNKNOWN_LABEL as SHARED_UNKNOWN_LABEL } from "@/lib/emptyValue";
+import {
+  isWithinPriceRange,
+  listingAskingPrice,
+  listingCategoryName,
+} from "@/lib/listingPrice";
 import { resolveListingTitle, LISTING_TITLE_COLOR } from "@/lib/listingTitle";
 import { tidySellerText } from "@/lib/sellerText";
 import { domainDisplay, getDomainHref } from "@/lib/domainUtils";
@@ -61,7 +70,9 @@ import {SalesChannels, Country, AdvertisingChannels, Info, Dollar, Customer} fro
 const financingInstalments = (price: number): number => (price < 10_000 ? 48 : 96);
 
 /** Shown wherever the seller has not supplied enough data to derive a figure. */
-const UNKNOWN_LABEL = "Unknown";
+// The one word for a field the seller did not fill in. Defined in
+// `lib/emptyValue.ts`, which also explains what is deliberately not this.
+const UNKNOWN_LABEL = SHARED_UNKNOWN_LABEL;
 
 /** Four slides of three — past that nobody scrolls, and each card costs work. */
 const MAX_SIMILAR_LISTINGS = 12;
@@ -69,15 +80,22 @@ const MAX_SIMILAR_LISTINGS = 12;
 /**
  * Drawn behind the unlock prompt so the chart area keeps its shape. Invented
  * proportions, never the seller's — the real split is not sent at all.
+ *
+ * Painted from the top of the palette, so the blurred shape behind the prompt
+ * looks like the chart the buyer is about to unlock.
  */
 const LOCKED_CHART_PLACEHOLDER = [
-  { name: 'a', value: 45, color: 'rgba(198, 254, 31, 1)' },
-  { name: 'b', value: 30, color: 'rgba(0, 0, 0, 1)' },
-  { name: 'c', value: 25, color: 'rgba(0, 0, 0, 0.35)' },
+  { name: 'a', value: 45, ...chartColorAt(0) },
+  { name: 'b', value: 30, ...chartColorAt(1) },
+  { name: 'c', value: 25, ...chartColorAt(2) },
 ];
 
-/** Empty state for the Statistics cards, which the client words differently. */
-const NOT_AVAILABLE_LABEL = "not available";
+/**
+ * The Statistics cards used to word this differently — "not available" — and
+ * the client has since asked for one word across the platform. Kept as its own
+ * name so the two places that compare against it still read clearly.
+ */
+const NOT_AVAILABLE_LABEL = UNKNOWN_LABEL;
 
 /**
  * Prefixes a money answer with the listing's currency symbol.
@@ -98,7 +116,7 @@ const withCurrencySymbol = (value: string | number, symbol: string): string | nu
 import { useAccounts } from "@/hooks/useAccounts";
 import { useAccountQuestions } from "@/hooks/useAccountQuestions";
 import { fileNameFromUrl, parseMediaUrls } from "@/lib/mediaUtils";
-import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Legend, Tooltip } from "recharts";
+import { BarChart, Bar, PieChart, Pie, Cell, Customized, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Legend, Tooltip } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import FaceScanSquareIcon from "@/assets/Face Scan Square.svg";
@@ -122,6 +140,18 @@ import { useStatisticQuestions } from "@/hooks/useStatisticQuestions";
 import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
+import { useDisplayCurrency } from "@/lib/displayCurrency";
+import {
+  APPROX,
+  formatFigureIn,
+  formatMoneyIn,
+  listingCurrencyCode,
+  listingFiguresIn,
+  listingMultiplesOf,
+  listingPriceIn,
+  pnlFiguresIn,
+} from "@/lib/listingMoney";
+import { OriginalPriceNote } from "@/components/listings/OriginalPriceNote";
 import RequestIcon from "@/assets/request.svg";
 import DateIcon from "@/assets/date.svg";
 
@@ -470,7 +500,16 @@ const aggregateSocialByPlatform = (
   ) => {
     const seg = segment.trim();
     if (!seg) return;
-    if (!out[bucket].url && !seg.toLowerCase().includes("follower")) {
+    /*
+     * A bare number is a follower count, never a profile.
+     *
+     * Without this, "12000" answered to a Followers question is handed to
+     * `buildBucketUrl` — which happily returns https://instagram.com/12000 —
+     * and the card's link points at a profile that does not exist. The count
+     * itself is read further down, where a plain number belongs.
+     */
+    const isBareCount = /^\d[\d,.\s]*$/.test(seg);
+    if (!out[bucket].url && !isBareCount && !seg.toLowerCase().includes("follower")) {
       const urlBucket = inferBucketFromUrlString(seg);
       if (urlBucket === bucket) {
         // Full platform URL that matches this exact card.
@@ -812,7 +851,9 @@ const MediaCarousel = ({ images, isFavorite, isTogglingFavorite, onFavorite, onS
         </button>
       )}
       <Carousel setApi={setApi} className="w-full h-full">
-        <CarouselContent className="h-full">
+        {/* The wrapper needs the height too, or the picture stops short of the
+            frame and the badge below it looks like a stray button. */}
+        <CarouselContent className="h-full" containerClassName="h-full">
           {images.map((img, index) => (
             <CarouselItem key={index} className="h-full">
               <div className="relative w-full h-full">
@@ -927,6 +968,9 @@ const SummaryCard = ({
   listingPriceNumber?: number;
 }) => {
   const [financingOpen, setFinancingOpen] = useState(false);
+  // The price in the visitor's currency; the listing's own is noted beneath it.
+  const viewerCurrency = useDisplayCurrency();
+  const shownPrice = listingPriceIn(listing, viewerCurrency);
 
   const formatPrice = (price: number | string | undefined) => {
     if (!price) return "$0";
@@ -1010,7 +1054,7 @@ const SummaryCard = ({
    * showed "Multiple 1.5x Profit" and "0.5x Revenue" no matter what it cost or
    * earned. Two badges contradicting the correct figures directly beneath them.
    */
-  const multiples = listingMultiples(listing, askingPrice?.toString());
+  const multiples = listingMultiplesOf(listing);
   const profitMultiple = profitMultipleLabel(multiples.profit);
   const revenueMultiple = revenueMultipleLabel(multiples.revenue);
 
@@ -1029,6 +1073,8 @@ const SummaryCard = ({
             color: '#000000',
             marginBottom: '8px',
             textTransform: 'capitalize',
+            // A name typed as one long run has nowhere to wrap either.
+            overflowWrap: 'anywhere',
           }}
         >
           {listingTitle}
@@ -1044,6 +1090,13 @@ const SummaryCard = ({
             letterSpacing: '0%',
             color: 'rgba(0, 0, 0, 0.5)',
             marginTop: '8px',
+            /*
+             * A description the seller typed as one unbroken run of characters
+             * has nowhere to wrap, so it ran straight out of the card and off
+             * the side of the page. `anywhere` breaks it only when there is no
+             * space to break at, so ordinary prose still wraps between words.
+             */
+            overflowWrap: 'anywhere',
           }}
         >
           {truncatedDescription}
@@ -1064,8 +1117,9 @@ const SummaryCard = ({
             marginBottom: '4px',
           }}
         >
-          {formatPrice(askingPrice)}
+          {formatMoneyIn(shownPrice) || formatPrice(askingPrice)}
         </div>
+        <OriginalPriceNote listing={listing} shown={shownPrice} />
         {/* Profit/Revenue Multiple Section (same as listing cards) */}
         <div
           className="flex items-center bg-white border rounded-full overflow-hidden"
@@ -1142,7 +1196,12 @@ const SummaryCard = ({
               color: 'rgba(0, 0, 0, 0.7)',
             }}
           >
-            Pay in {getListingCurrencySymbol(listing)}{formatNumber(Math.round(parseFloat(askingPrice.toString()) / financingInstalments(parseFloat(askingPrice.toString()) || 0)))} monthly
+            Pay in {formatMoneyIn(
+              shownPrice && {
+                ...shownPrice,
+                amount: Math.round(shownPrice.amount / financingInstalments(parseFloat(askingPrice.toString()) || 0)),
+              },
+            ) || `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(parseFloat(askingPrice.toString()) / financingInstalments(parseFloat(askingPrice.toString()) || 0)))}`} monthly
           </span>
           <div
             style={{
@@ -1616,10 +1675,13 @@ const AverageCell = ({
   label,
   value,
   note,
+  currency,
 }: {
   label: string;
   value: number | null;
   note: string;
+  /** The currency `value` is in. It printed "$" whatever the listing was in. */
+  currency: string;
 }) => (
   <div
     style={{
@@ -1638,7 +1700,9 @@ const AverageCell = ({
         margin: '2px 0 4px',
       }}
     >
-      {value !== null ? `$${Math.round(value).toLocaleString('en-US')}` : UNKNOWN_LABEL}
+      {value !== null
+        ? formatMoneyIn({ amount: Math.round(value), currency, approx: false })
+        : UNKNOWN_LABEL}
     </div>
     <div style={{ fontFamily: 'Lufga', fontSize: '10px', color: 'rgba(0,0,0,0.4)' }}>{note}</div>
   </div>
@@ -2088,42 +2152,9 @@ const AttachmentCard = ({ fileName, url }: { fileName: string; url?: string }) =
 
   const handleDownload = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!url || url === '#') return;
-
-    try {
-      const response = await fetch(url);
-
-      /*
-       * Do not save a refusal as if it were the file.
-       *
-       * The CDN answers 401 for a document it is not allowed to deliver, and
-       * that response has a body like any other — so this saved it under the
-       * file's own name and handed the buyer a "PDF" of nothing, which is what
-       * "the file is destroyed, I can't open it" actually was. Say so instead.
-       */
-      if (!response.ok) {
-        toast.error(
-          `This file could not be downloaded (${response.status}). Please tell the seller.`,
-        );
-        return;
-      }
-
-      const blob = await response.blob();
-
-      // Create a download link
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = fileName || 'attachment';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      // Fallback: open in new tab
-      window.open(url, '_blank');
-    }
+    // Shared with the chat, so every route to a file saves it rather than
+    // leaving the browser to preview whichever formats it happens to know.
+    await downloadAttachment(url, fileName);
   };
 
   return (
@@ -2196,6 +2227,7 @@ type ListingDetailProps = {
 };
 
 const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailProps = {}) => {
+  const viewerCurrency = useDisplayCurrency();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const routeLocation = useLocation();
@@ -2215,6 +2247,11 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   const [isStartingChat, setIsStartingChat] = useState(false);
   // Confidentiality agreement gate for buyers.
   const [agreementOpen, setAgreementOpen] = useState(false);
+  // Set when the agreement was opened by pressing Contact Seller, so accepting
+  // it carries on to the chat instead of leaving the buyer to press it again.
+  const contactAfterAgreementRef = useRef(false);
+  // A listing card sends an unsigned buyer here with ?contact=1; handled once.
+  const contactParamHandledRef = useRef(false);
   const [isAcceptingAgreement, setIsAcceptingAgreement] = useState(false);
   const [hasConfidentialAccess, setHasConfidentialAccess] = useState(false);
   const [agreementChecked, setAgreementChecked] = useState(false);
@@ -2390,7 +2427,26 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       .then((res) => {
         if (cancelled) return;
         const data = res.data as { hasAccess?: boolean } | undefined;
-        setHasConfidentialAccess(Boolean(res.success && data?.hasAccess));
+        const granted = Boolean(res.success && data?.hasAccess);
+        setHasConfidentialAccess(granted);
+
+        /*
+         * Sent here by Contact Seller on a listing card, which asks for the
+         * agreement first by routing an unsigned buyer to this page. Ask once,
+         * and drop the flag from the address so a reload does not ask again.
+         */
+        const cameToContact =
+          new URLSearchParams(window.location.search).get("contact") === "1";
+        if (cameToContact && !contactParamHandledRef.current) {
+          contactParamHandledRef.current = true;
+          navigate(window.location.pathname, { replace: true });
+          if (granted) {
+            void startChat();
+          } else {
+            contactAfterAgreementRef.current = true;
+            setAgreementOpen(true);
+          }
+        }
       })
       .catch(() => {
         /* leave it locked; the agreement dialog will ask again */
@@ -2412,21 +2468,22 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
         if (response.success && response.data) {
           const allListings = Array.isArray(response.data) ? response.data : [];
 
-          // Similar means: same category and an asking price within ±50% of this
-          // one, newest first. Without a price to compare against, fall back to
-          // category alone rather than showing nothing.
-          const priceOf = (l: any): number => {
-            const rows = [...(l?.advertisement || []), ...(l?.brand || [])];
-            const row = rows.find((q: any) =>
-              /listing\s*price|asking\s*price|^\s*price\s*$/i.test(String(q?.question || '')),
-            );
-            return parseFloat(String(row?.answer ?? '').replace(/[^0-9.]/g, '')) || 0;
-          };
-
-          const currentCategory = String(listing?.category?.[0]?.name || '').toLowerCase();
-          const currentPrice = priceOf(listing);
-          const lowerBound = currentPrice * 0.5;
-          const upperBound = currentPrice * 1.5;
+          /*
+           * Similar means the price, first of all.
+           *
+           * The client's rule is an asking price within half again or half as
+           * much — nothing about the category. Requiring both was stricter
+           * than what was asked, and on this data it turned the feature off:
+           * 18 of the 34 priced listings had no same-category neighbour in
+           * range, so most listings fell through to "Recently Added" and the
+           * price rule looked broken when it was merely unsatisfiable.
+           *
+           * So price decides who is shown, and category decides the order —
+           * a comparable business still leads, but a similar price in another
+           * category beats nothing at all.
+           */
+          const currentCategory = listingCategoryName(listing);
+          const currentPrice = listingAskingPrice(listing);
 
           const newestFirst = (a: any, b: any) =>
             new Date(b.created_at || b.createdAt || 0).getTime() -
@@ -2442,24 +2499,38 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
             .sort(newestFirst);
 
           const sameCategory = currentCategory
-            ? candidates.filter(
-                (l: any) =>
-                  String(l.category?.[0]?.name || '').toLowerCase() === currentCategory,
-              )
+            ? candidates.filter((l: any) => listingCategoryName(l) === currentCategory)
             : [];
 
-          const inPriceRange = sameCategory.filter((l: any) => {
-            if (currentPrice <= 0) return true;
-            const price = priceOf(l);
-            return price > 0 && price >= lowerBound && price <= upperBound;
-          });
+          /*
+           * No price means no similarity to judge, not "everything matches".
+           *
+           * This used to let every candidate through when the current listing
+           * had no readable price — and still call the result "Similar
+           * Listings", which is exactly what the client photographed: a row of
+           * unrelated prices under a heading promising the opposite. Ten of
+           * the published listings have no price at all, so it was not rare.
+           */
+          const inPriceRange =
+            currentPrice > 0
+              ? candidates.filter((l: any) =>
+                  isWithinPriceRange(listingAskingPrice(l), currentPrice),
+                )
+              : [];
 
-          // What the client asked for comes first. When nothing matches, widen
-          // rather than leave the page ending on an empty section — and say so
-          // in the heading, so a loose match is never passed off as a close one.
           if (inPriceRange.length > 0) {
-            return { tier: 'similar' as const, items: inPriceRange.slice(0, MAX_SIMILAR_LISTINGS) };
+            // Same category first, newest within each group.
+            const ordered = [...inPriceRange].sort((a: any, b: any) => {
+              const aSame = listingCategoryName(a) === currentCategory ? 0 : 1;
+              const bSame = listingCategoryName(b) === currentCategory ? 0 : 1;
+              return aSame - bSame || newestFirst(a, b);
+            });
+            return { tier: 'similar' as const, items: ordered.slice(0, MAX_SIMILAR_LISTINGS) };
           }
+
+          // Nothing close in price. Widen rather than end the page on an empty
+          // section — and say so in the heading, so a loose match is never
+          // passed off as a close one.
           if (sameCategory.length > 0) {
             return { tier: 'category' as const, items: sameCategory.slice(0, MAX_SIMILAR_LISTINGS) };
           }
@@ -2703,9 +2774,18 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
         : 'Recently Added';
 
   const askingPriceNum = parseFloat(String(askingPrice)) || 0;
-  const annualRevenue = financialMetrics.annualRevenue;
-  const annualProfit = financialMetrics.annualProfit;
-  const avgMonthlyProfit = financialMetrics.monthlyProfit;
+  /*
+   * The ⌀ figures in the visitor's currency. In another one each year was
+   * converted at its own average rate before the years were averaged; in the
+   * listing's own they are worked out from the table exactly as written.
+   */
+  const shownFigures = listingFiguresIn(listing, viewerCurrency);
+  const figuresConverted = shownFigures.approx;
+  const figuresCurrency = figuresConverted ? shownFigures.currency : listingCurrencyCode(listing);
+  const annualRevenue = figuresConverted ? shownFigures.annualRevenue : financialMetrics.annualRevenue;
+  const annualProfit = figuresConverted ? shownFigures.annualProfit : financialMetrics.annualProfit;
+  const avgMonthlyProfit = figuresConverted ? shownFigures.monthlyProfit : financialMetrics.monthlyProfit;
+  const avgMonthlyRevenue = figuresConverted ? shownFigures.monthlyRevenue : financialMetrics.monthlyRevenue;
 
   const totalRevenue = annualRevenue ?? 0;
   const totalProfit = annualProfit ?? 0;
@@ -2715,15 +2795,14 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       ? `${Math.round(financialMetrics.profitMarginPercent)}%`
       : NOT_AVAILABLE_LABEL;
 
-  // A business that is not profitable has no meaningful profit multiple.
-  const profitMultipleValue =
-    askingPriceNum > 0 && annualProfit !== null && annualProfit > 0
-      ? askingPriceNum / annualProfit
-      : null;
-  const revenueMultipleValue =
-    askingPriceNum > 0 && annualRevenue !== null && annualRevenue > 0
-      ? askingPriceNum / annualRevenue
-      : null;
+  /*
+   * Worked out in euros by the server — price and figures in one currency —
+   * so a listing's multiple is the same whichever currency it is read in. A
+   * business that is not profitable has no meaningful profit multiple.
+   */
+  const storedMultiples = listingMultiplesOf(listing);
+  const profitMultipleValue = askingPriceNum > 0 ? storedMultiples.profit : null;
+  const revenueMultipleValue = askingPriceNum > 0 ? storedMultiples.revenue : null;
 
   const profitMultipleText = formatMultipleValue(profitMultipleValue);
   const revenueMultipleText = formatMultipleValue(revenueMultipleValue);
@@ -2937,11 +3016,23 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       )
     : null;
   const columnLabels = realignedTable ? realignedTable.columns : defaultColumnLabels;
+  /*
+   * In another currency, each figure at the average rate of its own year —
+   * filed through the same resolver, so it lands under the column it belongs
+   * to. Null when the table is shown as the seller wrote it.
+   */
+  const convertedPnl = pnlFiguresIn(listing, viewerCurrency);
   const financialData = (() => {
     // The figures as the resolver files them, so a listing saved under the old
     // keys is read from the year each figure belongs to rather than from the
     // slot it happened to sit in.
-    const fd = realignedTable?.financialData || financialTableData?.financialData || {};
+    const fd =
+      (convertedPnl && financialTableData?.columnLabels
+        ? realignFinancialTable(financialTableData.columnLabels, convertedPnl).financialData
+        : null) ||
+      realignedTable?.financialData ||
+      financialTableData?.financialData ||
+      {};
     if (fd['Gross Revenue'] && !fd['Revenue']) {
       return { ...fd, Revenue: fd['Gross Revenue'] };
     }
@@ -2985,20 +3076,12 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   const salesChannelsList = parseMultiValueAnswer(salesChannelsEntry?.answer);
   const advertisingChannelsList = parseMultiValueAnswer(advertisingChannelsEntry?.answer);
 
-  const colorPalette = [
-    "rgba(198, 255, 28, 1)",
-    "rgba(19, 100, 255, 1)",
-    "rgba(255, 182, 39, 1)",
-    "rgba(255, 92, 135, 1)",
-    "rgba(92, 214, 255, 1)",
-    "rgba(143, 102, 255, 1)",
-  ];
   const toDonutDataFromSplit = (items: Array<{ name: string; value: number }>) => {
     if (items.length === 0) return [];
     return items.map((item, index) => ({
       name: item.name,
       value: item.value,
-      color: colorPalette[index % colorPalette.length],
+      ...chartColorAt(index),
     }));
   };
   const salesChannelsData = toDonutDataFromSplit(salesChannelsSplitList);
@@ -3006,7 +3089,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   const salesCountrySplitData = salesCountrySplitList.map((item, index) => ({
     name: item.name,
     value: item.value,
-    color: colorPalette[index % colorPalette.length],
+    ...chartColorAt(index),
   }));
   const toTextSummary = (splitItems: Array<{ name: string; value: number }>, fallbackItems: string[]) => {
     if (splitItems.length > 0) {
@@ -3015,11 +3098,11 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
     if (fallbackItems.length > 0) {
       return fallbackItems.join(", ");
     }
-    return "Not specified";
+    return UNKNOWN_LABEL;
   };
   const salesChannelsSummary = toTextSummary(salesChannelsSplitList, salesChannelsList);
   const advertisingChannelsSummary = toTextSummary(advertisingChannelsSplitList, advertisingChannelsList);
-  const chartDataByTab: Record<string, Array<{ name: string; value: number; color: string }>> = {
+  const chartDataByTab: Record<string, Array<{ name: string; value: number } & ChartColor>> = {
     "sales-channels": salesChannelsData,
     "country-split": salesCountrySplitData,
     advertising: advertisingChannelsData,
@@ -3171,12 +3254,24 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
         return;
       }
 
-      const result = response.data as { granted?: boolean; pendingApproval?: boolean } | undefined;
+      const result = response.data as
+        | { granted?: boolean; pendingApproval?: boolean; chatId?: string }
+        | undefined;
       setAgreementOpen(false);
+      const wantedToContact = contactAfterAgreementRef.current;
+      contactAfterAgreementRef.current = false;
 
       if (result?.pendingApproval) {
         setHasConfidentialAccess(false);
         toast.success("Request sent. The seller will review it before granting access.");
+        /*
+         * Into the conversation the request created, so they can introduce
+         * themselves while the seller decides, and see the answer arrive.
+         */
+        if (result.chatId && user) {
+          const sellerId = listing.userId || listing.user_id;
+          navigate(`/chat?chatId=${result.chatId}&userId=${user.id}&sellerId=${sellerId}`);
+        }
         return;
       }
 
@@ -3185,6 +3280,8 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       // matches whichever variant is mounted.
       await queryClient.invalidateQueries({ queryKey: ["listing", id] });
       toast.success("Agreement accepted — the listing details are now visible");
+      // They pressed Contact Seller to get here; carry on to the chat.
+      if (wantedToContact) await startChat();
     } catch (error) {
       console.error("Agreement error:", error);
       toast.error("Could not accept the agreement");
@@ -3207,6 +3304,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
 
     // Every listing requires the agreement first.
     if (!hasConfidentialAccess) {
+      contactAfterAgreementRef.current = true;
       setAgreementOpen(true);
       return;
     }
@@ -3228,30 +3326,13 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       const sellerId = listing.userId || listing.user_id;
       const listingId = listing.id;
 
-      let chatResponse: any = await apiClient.getChatRoom(user.id, sellerId);
-      let chatId: string;
-
-      const chatData = chatResponse.data?.data || chatResponse.data;
-
-      if (chatResponse.success && chatData && chatData.id) {
-        chatId = chatData.id;
-      } else {
-        const createResponse: any = await apiClient.createChatRoom(user.id, sellerId, listingId);
-        const createData = createResponse.data?.data || createResponse.data;
-
-        if (!createResponse.success || !createData?.id) {
-          chatResponse = await apiClient.getChatRoom(user.id, sellerId);
-          const retryChatData = (chatResponse as any).data?.data || (chatResponse as any).data;
-
-          if (chatResponse.success && retryChatData && retryChatData.id) {
-            chatId = retryChatData.id;
-          } else {
-            throw new Error(createResponse.error || "Failed to create chat room");
-          }
-        } else {
-          chatId = createData.id;
-        }
-      }
+      // The chat for this listing, found or made — never just "any chat with
+      // this seller". See lib/openListingChat.ts for why.
+      const chatId = await openListingChat(apiClient, {
+        buyerId: user.id,
+        sellerId,
+        listingId,
+      });
 
       navigate(`/chat?chatId=${chatId}&userId=${user.id}&sellerId=${sellerId}`);
       toast.success("Opening chat...");
@@ -3335,6 +3416,8 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   const resolvedPrice = !Number.isNaN(parsedAskingPrice) && parsedAskingPrice > 0
     ? parsedAskingPrice
     : Number.parseFloat(String(fallbackPrice || 0)) || 0;
+  // In the visitor's currency; the listing's own is noted beneath it.
+  const shownPrice = listingPriceIn(listing, viewerCurrency);
 
   const ownerProfile: any = listing?.user || listing?.profile || {};
   const ownerName = ownerProfile.full_name
@@ -3485,17 +3568,20 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
               </p>
 
               <div className="flex flex-wrap items-center gap-3">
-                <span style={{
-                  fontFamily: 'Lufga',
-                  fontWeight: 500,
-                  fontStyle: 'normal',
-                  fontSize: '38.11px',
-                  lineHeight: '120%',
-                  letterSpacing: '0%',
-                  color: 'rgba(0, 0, 0, 1)',
-                }}>
-                  {formatPrice(resolvedPrice)}
-                </span>
+                <div className="flex flex-col">
+                  <span style={{
+                    fontFamily: 'Lufga',
+                    fontWeight: 500,
+                    fontStyle: 'normal',
+                    fontSize: '38.11px',
+                    lineHeight: '120%',
+                    letterSpacing: '0%',
+                    color: 'rgba(0, 0, 0, 1)',
+                  }}>
+                    {formatMoneyIn(shownPrice) || formatPrice(resolvedPrice)}
+                  </span>
+                  <OriginalPriceNote listing={listing} shown={shownPrice} />
+                </div>
 
                 <div style={{
                   height: '25.08px',
@@ -3546,7 +3632,12 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                   letterSpacing: '0%',
                   color: 'rgba(0, 0, 0, 0.7)',
                 }}>
-                  Pay in {listingCurrencySymbol}{formatNumber(Math.round(resolvedPrice / financingInstalments(resolvedPrice)))} monthly
+                  Pay in {formatMoneyIn(
+                    shownPrice && {
+                      ...shownPrice,
+                      amount: Math.round(shownPrice.amount / financingInstalments(resolvedPrice)),
+                    },
+                  ) || `${listingCurrencySymbol}${formatNumber(Math.round(resolvedPrice / financingInstalments(resolvedPrice)))}`} monthly
                 </span>
 
                 <div style={{
@@ -3899,6 +3990,9 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                     letterSpacing: '0%',
                     color: 'rgba(0, 0, 0, 0.5)',
                     whiteSpace: 'pre-wrap',
+                    // `pre-wrap` wraps between words; this is what lets a run
+                    // with no words in it break at all.
+                    overflowWrap: 'anywhere',
                     // A logged-out visitor gets three lines. The server already
                     // capped the text; clamping makes the cut land on a line
                     // boundary whatever the screen width.
@@ -4048,10 +4142,10 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
           <div className="grid grid-cols-1 lg:grid-cols-2" style={{ width: '100%', gap: '20px', marginTop: '20px' }}>
             <SectionBox title="Averages">
               <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '12px' }}>
-                <AverageCell label="⌀ Annual Revenue" value={annualRevenue} note="Average generated per year" />
-                <AverageCell label="⌀ Monthly Revenue" value={financialMetrics.monthlyRevenue} note="Average generated per month" />
-                <AverageCell label="⌀ Annual Profit" value={annualProfit} note="Average generated per year" />
-                <AverageCell label="⌀ Monthly Profit" value={avgMonthlyProfit} note="Average generated per month" />
+                <AverageCell label="⌀ Annual Revenue" value={annualRevenue} currency={figuresCurrency} note="Average generated per year" />
+                <AverageCell label="⌀ Monthly Revenue" value={avgMonthlyRevenue} currency={figuresCurrency} note="Average generated per month" />
+                <AverageCell label="⌀ Annual Profit" value={annualProfit} currency={figuresCurrency} note="Average generated per year" />
+                <AverageCell label="⌀ Monthly Profit" value={avgMonthlyProfit} currency={figuresCurrency} note="Average generated per month" />
               </div>
             </SectionBox>
 
@@ -4106,6 +4200,20 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
               Profit & Loss
             </h3>
           </div>
+          {convertedPnl && (
+            <p
+              style={{
+                fontFamily: 'Lufga',
+                fontSize: '12px',
+                lineHeight: '150%',
+                color: 'rgba(0, 0, 0, 0.55)',
+                margin: '6px 4px 0',
+              }}
+            >
+              {APPROX} Shown in {viewerCurrency}: each year converted at its own average exchange
+              rate. Entered in {listingCurrencyCode(listing)}.
+            </p>
+          )}
 
           {/* Table Container */}
           <div style={{ width: '100%', marginTop: '0', overflowX: isMobile ? 'auto' : 'visible' }}>
@@ -4627,6 +4735,11 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                 {chartsLocked ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
+                      {/* Recharts renders only the children it recognises, so
+                          a bare <defs> is dropped and the striped slice comes
+                          out with nothing to paint it. `Customized` is its own
+                          way through. */}
+                      <Customized component={ChartStripeDefs} />
                       <Pie
                         data={LOCKED_CHART_PLACEHOLDER}
                         cx="50%"
@@ -4638,7 +4751,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                         isAnimationActive={false}
                       >
                         {LOCKED_CHART_PLACEHOLDER.map((entry, index) => (
-                          <Cell key={`locked-cell-${index}`} fill={entry.color} />
+                          <Cell key={`locked-cell-${index}`} fill={entry.fill} />
                         ))}
                       </Pie>
                     </PieChart>
@@ -4646,6 +4759,11 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                 ) : activeChartHasData ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
+                      {/* Recharts renders only the children it recognises, so
+                          a bare <defs> is dropped and the striped slice comes
+                          out with nothing to paint it. `Customized` is its own
+                          way through. */}
+                      <Customized component={ChartStripeDefs} />
                       <Pie
                         data={activeChartData}
                         cx="50%"
@@ -4657,7 +4775,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                         dataKey="value"
                       >
                         {activeChartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
                         ))}
                       </Pie>
                     </PieChart>
@@ -4688,7 +4806,9 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                         width: isMobile ? '16px' : '20px',
                         height: isMobile ? '16px' : '20px',
                         borderRadius: '50%',
-                        background: entry.color,
+                        // The CSS form of the slice's paint: a colour for the
+                        // solid entries, a striped gradient for the grey one.
+                        background: entry.legend,
                       }}
                     />
                     <span
@@ -5444,13 +5564,20 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
 
                     const businessName = resolveListingTitle(similarListing, 'Unnamed Business');
                     const categoryName = similarListing.category?.[0]?.name || 'Other';
-                    const askingPrice = parseFloat(getAdAnswer(['listing price', 'price']) ||
-                      getBrandAnswer(['asking price', 'price', 'selling price']) ||
-                      similarListing.price ||
-                      0) || 0;
-                    const location = getBrandAnswer(['country', 'location', 'address']) ||
-                      similarListing.location ||
-                      'Not specified';
+                    /*
+                     * The same reading the filter used to choose this card.
+                     *
+                     * These were two separate lookups over different wordings,
+                     * so a listing could read as nothing to the filter and
+                     * still print a price here — the figure shown was not the
+                     * figure judged.
+                     */
+                    const askingPrice = listingAskingPrice(similarListing);
+                    const location =
+                      orUnknown(
+                        getBrandAnswer(['country', 'location', 'address']) ||
+                          similarListing.location,
+                      );
 
                     // Calculate business age (same logic as AllListings)
                     const businessAgeFromAnswer = getBrandAnswer(['business age', 'age', 'years']);
@@ -5470,9 +5597,17 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                      * broken sum as the multiples did, so they are read from
                      * here too rather than recomputed beside it.
                      */
-                    const similarMultiples = listingMultiples(similarListing, askingPrice);
-                    const totalRevenue = similarMultiples.annualRevenue ?? 0;
-                    const totalNetProfit = similarMultiples.annualProfit ?? 0;
+                    const similarMultiples = listingMultiplesOf(similarListing);
+                    // In the visitor's currency, from what the server stored.
+                    const similarFigures = listingFiguresIn(similarListing, viewerCurrency);
+                    /*
+                     * Left null when there is no figure, rather than coerced
+                     * to 0. The card has to tell "this business earns nothing"
+                     * from "this seller did not say", and `?? 0` erases the
+                     * difference before the card ever sees it.
+                     */
+                    const totalRevenue = similarFigures.annualRevenue ?? null;
+                    const totalNetProfit = similarFigures.annualProfit ?? null;
                     const revenueMultiple = revenueMultipleLabel(similarMultiples.revenue);
                     const profitMultiple = profitMultipleLabel(similarMultiples.profit);
 
@@ -5514,14 +5649,30 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                           category={categoryName}
                           name={businessName}
                           description={adDescription}
-                          price={`${getListingCurrencySymbol(similarListing)}${formatNumber(Number(askingPrice))}`}
+                          price={
+                            formatMoneyIn(listingPriceIn(similarListing, viewerCurrency)) ||
+                            `${getListingCurrencySymbol(similarListing)}${formatNumber(Number(askingPrice))}`
+                          }
                           profitMultiple={profitMultiple}
                           revenueMultiple={revenueMultiple}
                           location={location}
                           locationFlag={location}
                           businessAge={businessAge}
-                          netProfit={totalNetProfit > 0 ? `${getListingCurrencySymbol(similarListing)}${formatNumber(Math.round(totalNetProfit))}` : undefined}
-                          revenue={totalRevenue > 0 ? `${getListingCurrencySymbol(similarListing)}${formatNumber(Math.round(totalRevenue))}` : undefined}
+                          /*
+                           * Zero is an answer. These asked `> 0` and showed
+                           * nothing otherwise, so a business breaking even was
+                           * presented as one that had not filled the field in.
+                           */
+                          netProfit={
+                            totalNetProfit !== null && Number.isFinite(totalNetProfit)
+                              ? formatFigureIn(totalNetProfit, similarFigures)
+                              : undefined
+                          }
+                          revenue={
+                            totalRevenue !== null && Number.isFinite(totalRevenue)
+                              ? formatFigureIn(totalRevenue, similarFigures)
+                              : undefined
+                          }
                           managedByEx={similarListing.managed_by_ex === true || similarListing.managed_by_ex === 1 || similarListing.managed_by_ex === 'true' || similarListing.managed_by_ex === '1'}
                           isPremium={String(similarListing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
                           listingId={similarListing.id}

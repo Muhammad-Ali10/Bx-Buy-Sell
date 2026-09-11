@@ -1,37 +1,39 @@
-import { ChevronDown, Info } from "lucide-react";
+import { Fragment } from "react";
+import { ChevronDown } from "lucide-react";
 
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { InfoHint } from "@/components/InfoHint";
 import { getCurrencySymbol } from "@/components/CurrencySelect";
 import {
   HEADER_CURRENCIES,
+  POPULAR_CURRENCY_COUNT,
   setDisplayCurrency,
   useDisplayCurrency,
 } from "@/lib/displayCurrency";
+import { CURRENCY_CHOICE_NOTE } from "@/lib/listingMoney";
 
 /**
- * The currency chip in the menu bar.
+ * The currency chooser, in the menu bar and again in the footer.
  *
- * The info icon is not decoration: a seller enters their figures in their own
- * currency and the site shows them unchanged, so the icon explains why picking
- * EUR here does not turn a dollar listing into a euro one.
+ * Both read and write the same stored choice, so changing one changes the
+ * other. The ⓘ says what the choice does: amounts across the site are
+ * converted into it, approximately, while each listing's own currency stays
+ * the binding price.
  */
 interface HeaderCurrencySelectProps {
-  /** Set on the home page, whose blue hero needs light ink. */
+  /** Set on a dark background — the home page's blue hero, the black footer. */
   onDark?: boolean;
+  /** Which way the explanation opens; up in the footer, at the foot of the page. */
+  infoSide?: "top" | "bottom";
 }
 
-export const HeaderCurrencySelect = ({ onDark = false }: HeaderCurrencySelectProps) => {
+export const HeaderCurrencySelect = ({ onDark = false, infoSide = "bottom" }: HeaderCurrencySelectProps) => {
   const code = useDisplayCurrency();
   const symbol = getCurrencySymbol(code);
 
@@ -44,7 +46,10 @@ export const HeaderCurrencySelect = ({ onDark = false }: HeaderCurrencySelectPro
       }}
     >
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex items-center gap-1 focus:outline-none">
+        <DropdownMenuTrigger
+          className="flex items-center gap-1 focus:outline-none"
+          aria-label="Currency to show prices in"
+        >
           <span
             className="font-lufga text-[13px] font-medium leading-none whitespace-nowrap sm:text-sm"
           >
@@ -52,42 +57,30 @@ export const HeaderCurrencySelect = ({ onDark = false }: HeaderCurrencySelectPro
           </span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-40">
-          {HEADER_CURRENCIES.map((option) => {
+        <DropdownMenuContent align="end" className="max-h-80 w-40 overflow-y-auto">
+          {HEADER_CURRENCIES.map((option, index) => {
             const optionSymbol = getCurrencySymbol(option);
             return (
-              <DropdownMenuItem
-                key={option}
-                onSelect={() => setDisplayCurrency(option)}
-                className="cursor-pointer justify-between"
-              >
-                <span className="font-medium">{option}</span>
-                <span className="text-muted-foreground">
-                  {optionSymbol !== option ? optionSymbol : ""}
-                </span>
-              </DropdownMenuItem>
+              <Fragment key={option}>
+                {index === POPULAR_CURRENCY_COUNT && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  onSelect={() => setDisplayCurrency(option)}
+                  className="cursor-pointer justify-between"
+                >
+                  <span className="font-medium">{option}</span>
+                  <span className="text-muted-foreground">
+                    {optionSymbol !== option ? optionSymbol : ""}
+                  </span>
+                </DropdownMenuItem>
+              </Fragment>
             );
           })}
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <TooltipProvider delayDuration={150}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="About currencies"
-              className="flex items-center justify-center opacity-60 transition-opacity hover:opacity-100 focus:outline-none"
-            >
-              <Info className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-[220px] text-xs">
-            Each listing is shown in the currency its seller entered. Prices are
-            not converted.
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <InfoHint label="About currencies" side={infoSide}>
+        {CURRENCY_CHOICE_NOTE}
+      </InfoHint>
     </div>
   );
 };

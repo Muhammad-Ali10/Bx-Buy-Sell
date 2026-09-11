@@ -1,3 +1,6 @@
+import { contactSellerStep } from "@/lib/contactSellerStep";
+import { openListingChat } from "@/lib/openListingChat";
+import { orUnknown } from "@/lib/emptyValue";
 import { isLockedValue } from "@/lib/listingLock";
 import {  } from "@/lib/financialTableUtils";
 import { Heart, Share2, Crown, Lock } from "lucide-react";
@@ -33,6 +36,12 @@ interface ListingCardProps {
   isPremium?: boolean;
   listingId?: string;
   sellerId?: string;
+  /**
+   * Leave out Contact Seller. The card also sits inside the chat's details
+   * panel, which is already the conversation with this seller — offering to
+   * start one from there only opened the same chat again.
+   */
+  hideContactSeller?: boolean;
   lockRedirectTo?: string;
   /** Photo is a blurred preview — overlay the unlock prompt. */
   imageLocked?: boolean;
@@ -51,12 +60,13 @@ const ListingCard = ({
   location,
   locationFlag,
   businessAge,
-  netProfit = "N/A",
-  revenue = "N/A",
+  netProfit,
+  revenue,
   managedByEx = false,
   isPremium = false,
   listingId,
   sellerId,
+  hideContactSeller = false,
   lockRedirectTo = "/register",
   imageLocked = false,
   imageLockType = null,
@@ -178,48 +188,33 @@ const ListingCard = ({
 
     setIsStartingChat(true);
     try {
-      // CRITICAL: Find or create chat room with this seller (merged conversation, not listing-specific)
-      console.log('📞 Contacting seller:', { sellerId, buyerId: user.id });
-      
-      // Try to get existing chat room with this seller (ignore listingId - merge all chats)
-      let chatResponse = await apiClient.getChatRoom(user.id, sellerId);
-      
-      let chatId: string;
-      
-      // Extract chat data - handle both wrapped and direct responses
-      const chatData = chatResponse.data?.data || chatResponse.data;
-      
-      if (chatResponse.success && chatData && chatData.id) {
-        // Chat room exists with this seller
-        chatId = chatData.id;
-        console.log('✅ Found existing chat room with seller:', { chatId, sellerId });
-      } else {
-        // Create new chat room (will be merged in conversation list)
-        console.log('🆕 Creating new chat room with seller:', sellerId);
-        const createResponse = await apiClient.createChatRoom(user.id, sellerId, listingId);
-        
-        // Extract create response data
-        const createData = createResponse.data?.data || createResponse.data;
-        
-        if (!createResponse.success || !createData?.id) {
-          // If creation fails, try to get it again
-          console.log('⚠️ Creation failed, trying to get chat room again...');
-          chatResponse = await apiClient.getChatRoom(user.id, sellerId);
-          const retryChatData = chatResponse.data?.data || chatResponse.data;
-          
-          if (chatResponse.success && retryChatData && retryChatData.id) {
-            chatId = retryChatData.id;
-            console.log('✅ Found chat room on retry:', { chatId, sellerId });
-          } else {
-            throw new Error(createResponse.error || "Failed to create chat room");
-          }
-        } else {
-          chatId = createData.id;
-          console.log('✅ Created new chat room:', { chatId, sellerId });
-        }
+      /*
+       * The confidentiality agreement comes first, as it does on the listing
+       * page. This card used to open the chat straight away, which let a buyer
+       * reach the seller without ever accepting it — and, where the seller
+       * approves buyers by hand, without the request the seller decides on.
+       */
+      const accessResponse: any = await apiClient.getMyConfidentialAccessStatus(listingId);
+      const access = accessResponse?.data?.data ?? accessResponse?.data ?? null;
+      const readable = accessResponse?.success !== false;
+      const step = contactSellerStep({
+        isOwner: user.id === sellerId,
+        hasAccess: readable && Boolean(access?.hasAccess),
+        isPending: readable && Boolean(access?.isPending),
+      });
+      if (step === "sign-agreement") {
+        navigate(`/listing/${listingId}?contact=1`);
+        return;
       }
 
-      // Navigate to chat page - no listingId in URL (merged conversation)
+      // The chat for this listing, found or made — never just "any chat with
+      // this seller". See lib/openListingChat.ts for why.
+      const chatId = await openListingChat(apiClient, {
+        buyerId: user.id,
+        sellerId,
+        listingId,
+      });
+
       navigate(`/chat?chatId=${chatId}&userId=${user.id}&sellerId=${sellerId}`);
       toast.success("Opening chat...");
     } catch (error: any) {
@@ -533,7 +528,7 @@ const ListingCard = ({
             <span className="font-lufga font-medium text-xs md:text-sm" style={{ fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>
               Location:
             </span>
-            <span className="font-lufga font-medium text-xs md:text-sm" style={{ fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', width: '200px',
+            <span title={location} className="font-lufga font-medium text-xs md:text-sm" style={{ fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000', width: '200px',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis' 
@@ -546,7 +541,7 @@ const ListingCard = ({
               Business Age:
             </span>
             <span className="font-lufga font-medium ml-1 text-xs md:text-sm" style={{ fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-              {businessAge || 'N/A'}
+              {orUnknown(businessAge)}
             </span>
           </div>
         </div>
@@ -557,7 +552,7 @@ const ListingCard = ({
               Net Profit:
             </span>
             <span className="font-lufga font-medium ml-1 text-xs md:text-sm" style={{ fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-              {netProfit || "N/A"}
+              {orUnknown(netProfit)}
             </span>
           </div>
           <div className="text-right">
@@ -565,39 +560,41 @@ const ListingCard = ({
               Revenue:
             </span>
             <span className="font-lufga font-medium ml-1 text-xs md:text-sm" style={{ fontSize: '14px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-              {revenue || "N/A"}
+              {orUnknown(revenue)}
             </span>
           </div>
         </div>
 
         <div className="flex gap-3 mt-auto">
-          <Button 
-            className="bg-black text-white rounded-full font-semibold hover:bg-black text-xs md:text-sm"
-            onClick={handleContactSeller}
-            disabled={isStartingChat || !sellerId}
-            style={{
-              width: '226.5px',
-              height: '44px',
-              gap: '10px',
-              borderRadius: '60px',
-              paddingTop: '12px',
-              paddingRight: '10px',
-              paddingBottom: '12px',
-              paddingLeft: '10px',
-              fontSize: '14px',
-              lineHeight: '140%',
-              letterSpacing: '0%'
-            }}
-          >
-            {isStartingChat ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                Starting...
-              </>
-            ) : (
-              'Contact Seller'
-            )}
-          </Button>
+          {!hideContactSeller && (
+            <Button 
+              className="bg-black text-white rounded-full font-semibold hover:bg-black text-xs md:text-sm"
+              onClick={handleContactSeller}
+              disabled={isStartingChat || !sellerId}
+              style={{
+                width: '226.5px',
+                height: '44px',
+                gap: '10px',
+                borderRadius: '60px',
+                paddingTop: '12px',
+                paddingRight: '10px',
+                paddingBottom: '12px',
+                paddingLeft: '10px',
+                fontSize: '14px',
+                lineHeight: '140%',
+                letterSpacing: '0%'
+              }}
+            >
+              {isStartingChat ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Starting...
+                </>
+              ) : (
+                'Contact Seller'
+              )}
+            </Button>
+          )}
           {/* A real link, not a button with a navigate() — that is what makes
               right-click, Ctrl+click and middle-click open it in a new tab. */}
           <Link
@@ -608,7 +605,8 @@ const ListingCard = ({
             }}
             className="font-lufga font-medium rounded-full text-black text-xs md:text-sm inline-flex items-center justify-center"
             style={{
-              width: '226.5px',
+              // Alone once Contact Seller is left out, so it takes the whole row.
+              width: hideContactSeller ? '100%' : '226.5px',
               height: '44px',
               gap: '10px',
               borderRadius: '60px',

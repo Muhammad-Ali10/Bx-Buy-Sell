@@ -3,16 +3,78 @@ import { AuthLayout } from "@/components/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api";
+
+/**
+ * Sign-up, step two: confirm the email address.
+ *
+ * This page used to only look the part — it waited a second and declared any
+ * code right, and nothing was ever emailed. Now the code goes to the address
+ * the account was made with, and the phone step only opens once it comes back
+ * right.
+ */
+const CODE_LENGTH = 6;
+
+/** The seconds in "Please wait 42 seconds…", or null. */
+const waitFrom = (message: string) => {
+  const match = /wait (\d+) seconds?/i.exec(message || "");
+  return match ? Number(match[1]) : null;
+};
 
 const VerifyOTP = () => {
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [otp, setOtp] = useState<string[]>(Array(CODE_LENGTH).fill(""));
   const [loading, setLoading] = useState(false);
+  const [resendIn, setResendIn] = useState(0);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const sentRef = useRef(false);
   const navigate = useNavigate();
+  const { user, loading: authLoading, refreshUser } = useAuth();
+
+  const send = async () => {
+    const response: any = await apiClient.sendEmailConfirmCode();
+    if (response?.success === false) {
+      // Asked again within the minute: the code already sent still works, so
+      // this is a countdown rather than a failure.
+      const wait = waitFrom(response.error || "");
+      if (wait) {
+        setResendIn(wait);
+        return;
+      }
+      toast.error(response.error || "Could not send the code.");
+      return;
+    }
+    const data = response?.data?.data ?? response?.data ?? {};
+    if (data.alreadyVerified) {
+      navigate("/phone-verification", { replace: true });
+      return;
+    }
+    setResendIn(60);
+  };
+
+  // Send the code once the account is known — not on every re-render.
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+    if ((user as any).is_email_verified) {
+      navigate("/phone-verification", { replace: true });
+      return;
+    }
+    if (sentRef.current) return;
+    sentRef.current = true;
+    void send();
+    inputRefs.current[0]?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user?.id]);
 
   useEffect(() => {
-    inputRefs.current[0]?.focus();
-  }, []);
+    if (resendIn <= 0) return;
+    const timer = window.setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendIn]);
 
   const handleChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
@@ -21,8 +83,7 @@ const VerifyOTP = () => {
     newOtp[index] = value.slice(-1);
     setOtp(newOtp);
 
-    // Auto-focus next input
-    if (value && index < 5) {
+    if (value && index < CODE_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus();
     }
   };
@@ -35,54 +96,56 @@ const VerifyOTP = () => {
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    const pastedData = e.clipboardData.getData("text").slice(0, 6);
+    const pastedData = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, CODE_LENGTH);
     const newOtp = [...otp];
-    
     for (let i = 0; i < pastedData.length; i++) {
-      if (/^\d$/.test(pastedData[i])) {
-        newOtp[i] = pastedData[i];
-      }
+      newOtp[i] = pastedData[i];
     }
-    
     setOtp(newOtp);
-    const lastFilledIndex = Math.min(pastedData.length - 1, 5);
-    inputRefs.current[lastFilledIndex]?.focus();
+    inputRefs.current[Math.min(pastedData.length, CODE_LENGTH - 1)]?.focus();
   };
 
   const handleContinue = async (e: React.FormEvent) => {
     e.preventDefault();
-    const otpValue = otp.join("");
-    
-    if (otpValue.length !== 6) {
-      toast.error("Please enter complete OTP code");
+    const code = otp.join("");
+    if (code.length !== CODE_LENGTH) {
+      toast.error("Please enter the complete code");
       return;
     }
 
     setLoading(true);
-
-    // Simulate verification
-    setTimeout(() => {
-      toast.success("Phone verified successfully!");
-      navigate("/buyer-signup");
+    try {
+      const response: any = await apiClient.confirmEmailCode(code);
+      if (response?.success === false) {
+        toast.error(response.error || "That code did not work.");
+        setOtp(Array(CODE_LENGTH).fill(""));
+        inputRefs.current[0]?.focus();
+        return;
+      }
+      await refreshUser();
+      toast.success("Email address confirmed");
+      navigate("/phone-verification");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
-  const handleResend = () => {
-    toast.success("New code sent!");
-    setOtp(["", "", "", "", "", ""]);
+  const handleResend = async () => {
+    if (resendIn > 0) return;
+    setOtp(Array(CODE_LENGTH).fill(""));
+    await send();
     inputRefs.current[0]?.focus();
   };
 
   return (
-    <AuthLayout currentStep={3} totalSteps={4}>
+    <AuthLayout currentStep={2} totalSteps={4}>
       <div className="space-y-6">
         <div className="space-y-2 text-center">
           <h1 className="text-5xl font-bold tracking-tight">OTP Verification</h1>
           <p className="text-muted-foreground text-lg">
             Check your inbox. We sent a code to
             <br />
-            <span className="font-semibold text-foreground">example@gmail.com</span>
+            <span className="font-semibold text-foreground">{user?.email || "your email address"}</span>
           </p>
         </div>
 
@@ -94,6 +157,8 @@ const VerifyOTP = () => {
                 ref={(el) => (inputRefs.current[index] = el)}
                 type="text"
                 inputMode="numeric"
+                autoComplete="one-time-code"
+                aria-label={`Digit ${index + 1}`}
                 maxLength={1}
                 value={digit}
                 onChange={(e) => handleChange(index, e.target.value)}
@@ -105,7 +170,7 @@ const VerifyOTP = () => {
 
           <Button
             type="submit"
-            disabled={loading || otp.some(digit => !digit)}
+            disabled={loading || otp.some((digit) => !digit)}
             className="w-full h-14 text-base font-semibold rounded-xl"
             variant="accent"
           >
@@ -117,9 +182,10 @@ const VerifyOTP = () => {
             <button
               type="button"
               onClick={handleResend}
-              className="font-semibold text-foreground hover:underline"
+              disabled={resendIn > 0}
+              className="font-semibold text-foreground hover:underline disabled:opacity-60 disabled:no-underline"
             >
-              Click to resend
+              {resendIn > 0 ? `Resend in ${resendIn}s` : "Click to resend"}
             </button>
           </p>
         </form>

@@ -2,6 +2,33 @@ import { Injectable, Logger } from '@nestjs/common';
 import Stripe from 'stripe';
 import { stripeConfig } from '../config/stripe.config';
 
+/**
+ * When the period Stripe is currently billing ends.
+ *
+ * Stripe moved this off the subscription and onto its items; on the API version
+ * this project pins (2026-01-28.clover) `subscription.current_period_end` is
+ * simply `undefined`. Reading it directly left every renewal date null — which
+ * is how "Renews in 20 Days" had nothing to count to — and where the result was
+ * fed straight into `new Date(x * 1000)` it produced an Invalid Date, which is
+ * worse than null because it reaches the database.
+ *
+ * A subscription can carry several items on different periods. The soonest is
+ * the one that matters: that is when the next invoice goes out.
+ */
+export function subscriptionPeriodEnd(subscription: any): Date | null {
+  const times: number[] = [];
+  if (typeof subscription?.current_period_end === 'number') {
+    times.push(subscription.current_period_end);
+  }
+  for (const item of subscription?.items?.data ?? []) {
+    if (typeof item?.current_period_end === 'number') {
+      times.push(item.current_period_end);
+    }
+  }
+  if (times.length === 0) return null;
+  return new Date(Math.min(...times) * 1000);
+}
+
 @Injectable()
 export class StripeService {
   private stripe: Stripe;
@@ -66,12 +93,20 @@ export class StripeService {
         sessionParams.customer_email = params.customerEmail;
       }
 
-      if (params.trialDays && params.trialDays > 0) {
-        sessionParams.subscription_data = {
-          trial_period_days: params.trialDays,
-          metadata: params.metadata || {},
-        };
-      }
+      /*
+       * Who bought what goes on the subscription too, not only on the checkout.
+       *
+       * It used to be copied across only when there was a trial, and there never
+       * is, so a buyer plan's subscription carried nothing to say whose it was
+       * or which plan it paid for. Once the checkout was forgotten, so was the
+       * owner.
+       */
+      sessionParams.subscription_data = {
+        metadata: params.metadata || {},
+        ...(params.trialDays && params.trialDays > 0
+          ? { trial_period_days: params.trialDays }
+          : {}),
+      };
 
       const session = await this.stripe.checkout.sessions.create(sessionParams);
       this.logger.log(`Checkout session created: ${session.id}`);

@@ -1,7 +1,12 @@
-import { Menu, ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Menu, ChevronDown, ChevronRight, GripVertical, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useAuth } from "@/hooks/useAuth";
 import { useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
+import { useListingAreaOrder, useSaveListingAreaOrder } from "@/hooks/useListingAreaOrder";
+import { isListingArea } from "@/lib/listingAreaOrder";
+import { SortableQuestionList } from "@/components/admin/content/SortableQuestionList";
 import { toast } from "sonner";
 import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -15,7 +20,6 @@ import {
   BrandInformationSvg,
   CategorySvg,
   ChatSvg,
-  ChatListSvg,
   ContentManagementSvg,
   DashboardSvg,
   DetectWordsSvg,
@@ -72,7 +76,9 @@ const menuItems: SidebarMenuItem[] = [
     subItems: [
       { id: "all-chats", label: "All Chats", icon: AllChatsSvg, path: "/admin/chats" },
       { id: "monitoring", label: "Monitoring Alerts", icon: MonitoringAlertsSvg, path: "/admin/monitoring-alerts" },
-      { id: "chat-list", label: "Chat List", icon: ChatListSvg, path: "/admin/chat-list", iconColorMode: "filter" },
+      // "Chat List" is off the menu: its search, assignment and assigned /
+      // unassigned filter all live on All Chats now. The page itself is still
+      // at /admin/chat-list.
       { id: "detect-words", label: "Detect Words", icon: DetectWordsSvg, path: "/admin/detect-words", iconColorMode: "filter" },
       { id: "analytics", label: "Analytics", icon: DashboardSvg, path: "/admin/chat-analytics" },
   
@@ -194,6 +200,90 @@ function hoverHandlers(isActive: boolean) {
 
 // ─── Sidebar content ──────────────────────────────────────────────────────────
 
+const SubItemButton = ({
+  sub,
+  active,
+  onClick,
+}: {
+  sub: SidebarSubItem;
+  active: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    onClick={onClick}
+    style={active ? activeItemStyle : inactiveItemStyle}
+    {...hoverHandlers(active)}
+  >
+    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      <SidebarIcon icon={sub.icon} active={active} mode={sub.iconColorMode} />
+      <span
+        className="font-lufga"
+        style={{ fontWeight: 500, fontSize: "20px", lineHeight: "150%", color: active ? ACTIVE_TEXT : INACTIVE_TEXT }}
+      >
+        {sub.label}
+      </span>
+    </div>
+  </button>
+);
+
+/**
+ * A Content Management area an administrator can drag into a new place.
+ *
+ * The grip sits in the indent left of the icon, so the labels stay lined up
+ * with the rows that do not move, and it is the only part that drags — a click
+ * anywhere else on the row still opens the area.
+ */
+const SortableSubItem = ({
+  sub,
+  active,
+  onClick,
+}: {
+  sub: SidebarSubItem;
+  active: boolean;
+  onClick: () => void;
+}) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: sub.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        position: "relative",
+        transform: CSS.Transform.toString(transform),
+        transition,
+        // Lifted while it moves, so it is not painted under its neighbours.
+        zIndex: isDragging ? 20 : undefined,
+        opacity: isDragging ? 0.9 : undefined,
+      }}
+    >
+      <button
+        type="button"
+        aria-label={`Drag to reorder ${sub.label}`}
+        title="Drag to reorder"
+        {...attributes}
+        {...listeners}
+        style={{
+          position: "absolute",
+          left: "-16px",
+          top: 0,
+          bottom: 0,
+          width: "16px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: INACTIVE_TEXT,
+          cursor: isDragging ? "grabbing" : "grab",
+          touchAction: "none",
+        }}
+      >
+        <GripVertical style={{ width: 14, height: 14 }} />
+      </button>
+      <SubItemButton sub={sub} active={active} onClick={onClick} />
+    </div>
+  );
+};
+
 const AdminSidebarContent = ({
   onClose,
   collapsed = false,
@@ -209,6 +299,8 @@ const AdminSidebarContent = ({
   const navigate = useNavigate();
   const { logout, user } = useAuth();
   const [expandedItems, setExpandedItems] = useState<string[]>(["chat", "content"]);
+  const areaOrder = useListingAreaOrder();
+  const saveAreaOrder = useSaveListingAreaOrder();
 
   const userRole = user?.role?.toUpperCase();
   const isModerator = userRole === "MONITER" || userRole === "MODERATOR";
@@ -231,6 +323,60 @@ const AdminSidebarContent = ({
   const handleNavigation = (path: string) => {
     navigate(path);
     onClose?.();
+  };
+
+  const renderSubItem = (sub: SidebarSubItem) => (
+    <SubItemButton
+      key={sub.id}
+      sub={sub}
+      active={isPathActive(location.pathname, sub.path)}
+      onClick={() => handleNavigation(sub.path)}
+    />
+  );
+
+  /**
+   * Content Management's rows, with the listing form's areas in the order an
+   * administrator arranged. Category and Packages keep their places; the areas
+   * between them drag, and the seller's form asks them in the same order.
+   *
+   * The questions' drag list does this job one level down, so it is reused
+   * here rather than copied.
+   */
+  const renderContentSubItems = (subItems: SidebarSubItem[]) => {
+    const firstArea = subItems.findIndex((sub) => isListingArea(sub.id));
+    if (firstArea < 0) return subItems.map(renderSubItem);
+
+    const pinnedTop = subItems.slice(0, firstArea);
+    const pinnedBottom = subItems.filter(
+      (sub, index) => index > firstArea && !isListingArea(sub.id),
+    );
+    const areas = areaOrder.flatMap((id) => subItems.filter((sub) => sub.id === id));
+
+    return (
+      <>
+        {pinnedTop.map(renderSubItem)}
+        <SortableQuestionList
+          items={areas}
+          onReorder={(ordered) =>
+            saveAreaOrder.mutate(ordered.map((sub) => sub.id).filter(isListingArea))
+          }
+        >
+          {/* A box of their own, so a dragged area stays among the areas and
+              cannot be dropped above Category or below Packages. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+            {areas.map((sub) => (
+              <SortableSubItem
+                key={sub.id}
+                sub={sub}
+                active={isPathActive(location.pathname, sub.path)}
+                onClick={() => handleNavigation(sub.path)}
+              />
+            ))}
+          </div>
+        </SortableQuestionList>
+        {pinnedBottom.map(renderSubItem)}
+      </>
+    );
   };
 
   const settingsActive = isPathActive(location.pathname, "/admin/settings");
@@ -407,29 +553,9 @@ const AdminSidebarContent = ({
                     gap: "2px",
                   }}
                 >
-                  {item.subItems!.map((sub) => {
-                    const subActive = isPathActive(location.pathname, sub.path);
-                    const subTextColor = subActive ? ACTIVE_TEXT : INACTIVE_TEXT;
-
-                    return (
-                      <button
-                        key={sub.id}
-                        onClick={() => handleNavigation(sub.path)}
-                        style={subActive ? activeItemStyle : inactiveItemStyle}
-                        {...hoverHandlers(subActive)}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <SidebarIcon icon={sub.icon} active={subActive} mode={sub.iconColorMode} />
-                          <span
-                            className="font-lufga"
-                            style={{ fontWeight: 500, fontSize: "20px", lineHeight: "150%", color: subTextColor }}
-                          >
-                            {sub.label}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                  {item.id === "content"
+                    ? renderContentSubItems(item.subItems!)
+                    : item.subItems!.map(renderSubItem)}
                 </div>
               )}
             </div>

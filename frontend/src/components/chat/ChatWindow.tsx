@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Send, Search, Video, MoreVertical, X, UserX, Trash2, User, PhoneOff, Archive, MessageSquare, Paperclip, Edit2, Check, XCircle, Pin, Info } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -11,7 +12,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { apiClient } from "@/lib/api";
 import { getCachedChatRoom, setCachedChatRoom } from "@/lib/chatRoomCache";
 import { getChatListingTitle } from "@/lib/chatListing";
-import { isSystemMessage, systemMessageText, isDealPrompt, readSystemMeta, POLICY_SENDER_NAME } from "@/lib/systemMessages";
+import { isSystemMessage, systemMessageText, messageSearchText, showsWelcomeNotices, isDealPrompt, readSystemMeta, POLICY_SENDER_NAME } from "@/lib/systemMessages";
 import DealProcessCard from "@/components/chat/DealProcessCard";
 import ChatWelcomeCards from "@/components/chat/ChatWelcomeCards";
 import StartDealProcessDialog from "@/components/chat/StartDealProcessDialog";
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Socket } from "socket.io-client";
 import { useAuth } from "@/hooks/useAuth";
+import { useUnconfirmedMessages } from "@/hooks/useUnconfirmedMessages";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import chatSearchIcon from "@/assets/chatsearch.svg";
 import videoCallIcon from "@/assets/vedio call.svg";
@@ -52,10 +54,24 @@ interface ChatWindowProps {
   sellerId: string;
   listingId?: string; // CRITICAL: Optional listingId to scope chat to specific listing
   refreshConversations?: () => void;
+  /** Set when the chat was opened from a search result: show what matched. */
+  initialSearchQuery?: string;
+  /** Opens the details panel where the page has no room to show it beside the chat. */
+  onOpenDetails?: () => void;
+  /**
+   * Write as the team, from the signed-in admin's own account.
+   *
+   * The admin's view of a member's conversations shows the thread as that
+   * member sees it, so `currentUserId` is the member. Anything typed there was
+   * sent in the member's name, which the server rightly refuses — the message
+   * showed, and was gone after the next refresh.
+   */
+  sendAsTeam?: boolean;
 }
 
-export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, listingId, refreshConversations }: ChatWindowProps) => {
+export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, listingId, refreshConversations, initialSearchQuery, onOpenDetails, sendAsTeam = false }: ChatWindowProps) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
   // Platform team only: admins and the monitors who police conversations.
   const isModerator =
@@ -69,6 +85,14 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   const [isConnected, setIsConnected] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Opened from a search in the chat list: land on the messages that matched
+  // rather than at the bottom of the thread.
+  useEffect(() => {
+    if (!initialSearchQuery) return;
+    setSearchQuery(initialSearchQuery);
+    setIsSearchOpen(true);
+  }, [initialSearchQuery]);
   const [isVideoCallDialogOpen, setIsVideoCallDialogOpen] = useState(false);
   const [incomingVideoCall, setIncomingVideoCall] = useState<{
     from: string;
@@ -105,8 +129,32 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   const pendingTempMessagesRef = useRef<Map<string, string>>(new Map()); // Track temp message IDs by content (for quick replacement)
   const userScrolledUpRef = useRef(false); // Track if user has manually scrolled up
   const shouldAutoScrollRef = useRef(true); // Track if we should auto-scroll
+  // A conversation opens at its latest message: 'waiting' for the history,
+  // 'pending' while it is being pinned there, 'done' once the reader has it.
+  const openAtLatestRef = useRef<'waiting' | 'pending' | 'done'>('waiting');
+  const openingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listenersRegisteredRef = useRef(false); // Track if socket listeners are already registered
   const processedMessageIdsRef = useRef<Set<string>>(new Set()); // Track all message IDs that have been processed to prevent duplicates
+
+  // Who this window speaks as: normally the person whose conversation it is;
+  // on the admin's view of someone else's chats, the admin, as the team. A ref,
+  // so socket handlers registered once still read the current value.
+  const outgoingSenderId = sendAsTeam ? currentUser?.id : currentUserId;
+  const outgoingSenderIdRef = useRef(outgoingSenderId);
+  outgoingSenderIdRef.current = outgoingSenderId;
+
+  // Messages on screen the server has not saved yet. One it refuses, or never
+  // confirms, is taken back down with a word, and typed text goes back in the box.
+  const unconfirmed = useUnconfirmedMessages((message, reason) => {
+    setMessages((prev) => prev.filter((m) => m.id !== message.tempId));
+    pendingTempMessagesRef.current.delete(message.content);
+    // A blocked message already has a notice in the thread saying why.
+    if (reason === 'blocked') return;
+    if (message.restorable) setNewMessage((current) => current || message.content);
+    toast.error(
+      reason ? `Your message could not be sent: ${reason}` : 'Your message could not be sent. Please try again.',
+    );
+  });
 
   // Play notification sound for incoming messages
   const playNotificationSound = () => {
@@ -360,9 +408,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       // update before chatRoom/messages do, so only cache when the loaded room
       // actually belongs to the current conversation — otherwise we'd write the
       // previous chat's data under the newly-selected chat's key (data mix-up).
-      const propsPair = [userId, sellerId].sort().join("-");
-      const roomPair = [chatRoom.userId, chatRoom.sellerId].sort().join("-");
-      if (propsPair === roomPair) {
+      // Compare the conversation, not the people. The same two people can
+      // share several conversations — one per listing — and a check on the
+      // pair let one of them be cached under another's id.
+      if (chatRoom.id === conversationId) {
         setCachedChatRoom(conversationId, { ...chatRoom, messages });
       }
     }
@@ -491,6 +540,12 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     }
   };
 
+  // The reader has the conversation in hand: stop pinning it to the latest
+  // message, so a late load never pulls them back down.
+  const endOpening = () => {
+    openAtLatestRef.current = 'done';
+  };
+
   // Scroll to bottom when messages change, but only if user is at bottom
   useEffect(() => {
     // CRITICAL: Only auto-scroll if:
@@ -499,6 +554,23 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     // Don't auto-scroll if user has scrolled up, even if they're close to bottom
     // Skip if messages are empty (initial state)
     if (messages.length === 0) return;
+
+    if (openAtLatestRef.current === 'pending') {
+      const pinToLatest = () => {
+        const box = messagesContainerRef.current;
+        if (box && openAtLatestRef.current !== 'done') box.scrollTop = box.scrollHeight;
+      };
+      pinToLatest();
+      // Once more after pictures in the thread have had a moment to take
+      // their height.
+      setTimeout(pinToLatest, 400);
+      // Opening ends a moment after the thread first shows, or as soon as the
+      // reader scrolls or touches it.
+      if (!openingTimerRef.current) {
+        openingTimerRef.current = setTimeout(endOpening, 2500);
+      }
+      return;
+    }
     
     if (shouldAutoScrollRef.current && isAtBottom()) {
       // Use requestAnimationFrame for better performance and to ensure DOM has updated
@@ -699,10 +771,18 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     // Clear pending temp messages when loading from DB (they're now in DB)
     pendingTempMessagesRef.current.clear();
     
-    // Scroll to bottom when initially loading messages from DB
-    // Only scroll if user hasn't manually scrolled up (should be true on initial load)
-    // Use requestAnimationFrame for better performance
-    // NOTE: Don't force scroll on initial load - let user control scroll position
+    // A conversation opens at its latest message; the messages effect pins it
+    // once the thread is on screen. It arrives in two goes — the chat list's
+    // one-message preview, then the full history — so every load while it is
+    // opening pins it again. `isAtBottom()` used to be the only test here, and
+    // a thread taller than its box starts at the top: every chat opened on its
+    // oldest messages under the two standing notices, and on a short window
+    // those notices were all there was room for. Once open, reloads keep to
+    // wherever the reader has scrolled.
+    if (openAtLatestRef.current !== 'done') {
+      openAtLatestRef.current = 'pending';
+      return;
+    }
     requestAnimationFrame(() => {
       // Only auto-scroll if user is already at bottom (don't force)
       if (shouldAutoScrollRef.current && isAtBottom()) {
@@ -918,6 +998,14 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     newSocket.on('error', (error: any) => {
       console.error('❌ Socket error:', error);
       toast.error(error.message || 'Socket connection error');
+    });
+
+    // A refused message comes back as an exception, never as the message. Take
+    // down whatever this window was still waiting on, and say why.
+    newSocket.removeAllListeners('exception');
+    newSocket.on('exception', (payload: any) => {
+      const reason = typeof payload?.message === 'string' ? payload.message : undefined;
+      unconfirmed.failAll(reason);
     });
 
     // Listen for incoming messages - only listen to ONE event type to prevent duplicates
@@ -1286,6 +1374,16 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
           console.warn('⚠️ Chat is blocked, ignoring message');
           return;
         }
+
+        // The server stopped what was just sent (contact details, a banned
+        // word) and put this notice in its place. What is still waiting is
+        // what it stopped; the notice itself says why.
+        if (
+          message.metadata?.kind === 'BLOCKED_MESSAGE' &&
+          message.metadata?.blockedSenderId === outgoingSenderIdRef.current
+        ) {
+          unconfirmed.failAll('blocked');
+        }
         
         // CRITICAL: Prevent duplicates - check multiple conditions
         setMessages(prev => {
@@ -1314,7 +1412,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
           
           // 3. CRITICAL: First check for temp message to replace (optimistic update)
           // If this is a message from current user, try to find and replace the temp message
-          if (message.senderId === currentUserId) {
+          // Writing as the team, the admin sends under their own id, not that
+          // of the member whose conversation is on screen.
+          const outgoingId = outgoingSenderIdRef.current;
+          if (message.senderId === outgoingId) {
             // First try to find by tracked temp message ID (fastest method)
             const trackedTempId = pendingTempMessagesRef.current.get(message.content);
             if (trackedTempId) {
@@ -1322,6 +1423,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
               if (tempMessageIndex !== -1) {
                 console.log('🔄 Replacing tracked temp message with real message:', trackedTempId, '→', message.id);
                 pendingTempMessagesRef.current.delete(message.content); // Remove from tracking
+                unconfirmed.confirm(trackedTempId);
                 const updated = [...prev];
                 updated[tempMessageIndex] = {
                   id: message.id,
@@ -1351,12 +1453,13 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             const tempMessageIndex = prev.findIndex(m => 
               m.id.startsWith('temp-') &&
               m.content === message.content &&
-              m.senderId === currentUserId &&
+              m.senderId === outgoingId &&
               Math.abs(new Date(m.createdAt).getTime() - new Date(message.createdAt).getTime()) < 15000
             );
           
             if (tempMessageIndex !== -1) {
               console.log('🔄 Replacing temp message with real message (fallback):', prev[tempMessageIndex].id, '→', message.id);
+              unconfirmed.confirm(prev[tempMessageIndex].id);
               // Remove from tracking if it was there
               pendingTempMessagesRef.current.delete(message.content);
               const updated = [...prev];
@@ -1379,7 +1482,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             const existingRealMessage = prev.find(m => 
               !m.id.startsWith('temp-') &&
               m.content === message.content &&
-              m.senderId === currentUserId &&
+              m.senderId === outgoingId &&
               Math.abs(new Date(m.createdAt).getTime() - new Date(message.createdAt).getTime()) < 2000
             );
             
@@ -1400,7 +1503,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             
             // For current user's messages: exclude temp messages (they should have been replaced above)
             // Check only real messages (non-temp) to avoid false positives
-            if (message.senderId === currentUserId) {
+            if (message.senderId === outgoingId) {
               return !m.id.startsWith('temp-') && isSameContentAndSender && isSameType && timeDiff < 5000;
             }
             // For admin messages from others: check type as well
@@ -1446,7 +1549,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             return prev;
           }
           
-          console.log('✅ Adding new message:', message.id, message.content.substring(0, 30), {
+          // `content` is null on the platform's own notices — a blocked message
+          // carries its wording in metadata, not here — so this log must not
+          // assume a string. It crashed the entire chat window when it did.
+          console.log('✅ Adding new message:', message.id, message.content?.substring(0, 30), {
             totalMessages: prev.length + 1,
             isFromMe: message.senderId === currentUserId
           });
@@ -1497,7 +1603,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         }
         
         // Play notification sound if message is from another user
-        if (message.senderId !== currentUserId) {
+        if (message.senderId !== currentUserId && message.senderId !== outgoingSenderIdRef.current) {
           playNotificationSound();
         }
         
@@ -1515,7 +1621,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     } catch (error) {
       console.error('Error parsing message:', error);
     }
-  }, [chatRoom?.id, conversationId, currentUserId, refreshConversations]); // Memoize with dependencies
+  }, [chatRoom?.id, conversationId, currentUserId, refreshConversations, unconfirmed]); // Memoize with dependencies
 
   // Handle file/image upload
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1555,13 +1661,15 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       const messageContent = isImage ? `📷 Image` : `📎 ${file.name}`;
       
       // Add optimistic message
+      const fileTempId = `temp-${Date.now()}-${Math.random()}`;
       const optimisticMessage: Message = {
-        id: `temp-${Date.now()}-${Math.random()}`,
+        id: fileTempId,
         content: messageContent,
-        senderId: currentUserId,
+        senderId: outgoingSenderId || currentUserId,
         createdAt: new Date().toISOString(),
         read: false,
-        type: isImage ? 'IMAGE' : 'FILE',
+        // The team's messages are all saved as ADMIN, attachments included.
+        type: sendAsTeam ? 'ADMIN' : isImage ? 'IMAGE' : 'FILE',
         fileUrl: fileUrl,
         sender: currentUser ? {
           id: currentUser.id,
@@ -1579,13 +1687,14 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         }
         return [...prev, optimisticMessage];
       });
+      unconfirmed.track({ tempId: fileTempId, content: messageContent, restorable: false });
       // Force scroll when sending own message
       scrollToBottom(true);
 
       // Send via WebSocket
       const messageData = {
         chatId: chatIdToUse,
-        senderId: currentUserId,
+        senderId: outgoingSenderId || currentUserId,
         content: messageContent,
         type: isImage ? 'IMAGE' : 'FILE',
         fileUrl: fileUrl,
@@ -1598,7 +1707,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         fileName: file.name
       });
       
-      socketRef.current.emit('send:message', messageData);
+      socketRef.current.emit(sendAsTeam ? 'message:send:admin' : 'send:message', messageData);
 
       // Refresh conversation list to update active state and last message
       if (refreshConversations) {
@@ -1715,10 +1824,11 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     const optimisticMessage: Message = {
       id: tempId,
       content: messageContent,
-      senderId: currentUserId,
+      // As the team, the message is the admin's own on screen too.
+      senderId: outgoingSenderId || currentUserId,
       createdAt: new Date().toISOString(),
       read: false,
-      type: 'TEXT',
+      type: sendAsTeam ? 'ADMIN' : 'TEXT',
       sender: currentUser ? {
         id: currentUser.id,
         first_name: currentUser.first_name || '',
@@ -1733,7 +1843,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       // Check if we already have a temp message with same content from current user (prevent double sends)
       const hasExistingTemp = prev.some(
         m => m.id.startsWith('temp-') && 
-        m.senderId === currentUserId && 
+        m.senderId === (outgoingSenderId || currentUserId) &&
         m.content === messageContent &&
         Math.abs(new Date(m.createdAt).getTime() - Date.now()) < 2000 // Within last 2 seconds
       );
@@ -1747,6 +1857,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       console.log('📝 Adding optimistic message:', tempId, messageContent.substring(0, 30));
       // Track this temp message for quick replacement
       pendingTempMessagesRef.current.set(messageContent, tempId);
+      unconfirmed.track({ tempId, content: messageContent, restorable: true });
       return [...prev, optimisticMessage];
     });
     // Force scroll when sending own message
@@ -1755,7 +1866,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     // Send via WebSocket
     const messageData = {
       chatId: chatIdToUse,
-      senderId: currentUserId,
+      senderId: outgoingSenderId || currentUserId,
       content: messageContent,
       type: 'TEXT',
       createdAt: new Date().toISOString()
@@ -1767,7 +1878,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       content: messageContent.substring(0, 30)
     });
     
-    socketRef.current.emit('send:message', messageData, (response: any) => {
+    socketRef.current.emit(sendAsTeam ? 'message:send:admin' : 'send:message', messageData, (response: any) => {
       // Reset flag in callback to ensure it's only reset after message is sent
       sendingMessageRef.current = false;
       console.log('✅ Message sent, reset sending flag');
@@ -1804,9 +1915,31 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     (m: any) => readSystemMeta(m).kind === 'DEAL_STARTED',
   );
 
+  /*
+   * Whether this is two members talking — the only conversations the deal
+   * notices belong in. Asked once and used for both places they appear: the
+   * pair at the head of the thread, and the prompt that repeats every twenty
+   * messages inside it.
+   */
+  const welcomeNoticesApply = showsWelcomeNotices({
+    viewerRole: currentUser?.role,
+    otherRole: otherUser?.role,
+  });
+
+  /*
+   * Search what the viewer can actually read.
+   *
+   * Not `content`: the platform's own notices keep theirs in metadata and
+   * store null, so reaching for it threw and took the whole window down as
+   * soon as a conversation contained a blocked message. Going through the
+   * rendered wording also means a search for "blocked" finds the notice, which
+   * reaching for `content` never could.
+   */
   const filteredMessages = searchQuery
-    ? messages.filter(msg =>
-        msg.content.toLowerCase().includes(searchQuery.toLowerCase())
+    ? messages.filter((msg) =>
+        messageSearchText(msg, currentUserId)
+          .toLowerCase()
+          .includes(searchQuery.toLowerCase()),
       )
     : messages;
 
@@ -2396,6 +2529,8 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         setHasConfidentialAccess(true);
         // The request has been answered, so the banner has nothing left to ask.
         setAccessRequestPending(false);
+        // And the request card at the top of the list goes with it.
+        queryClient.invalidateQueries({ queryKey: ["confidential-requests"] });
       } else {
         toast.error(response.error || "Failed to grant confidential access");
       }
@@ -2420,6 +2555,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       }
       toast.success('Request declined.');
       setAccessRequestPending(false);
+      queryClient.invalidateQueries({ queryKey: ["confidential-requests"] });
     } catch {
       toast.error('Could not decline the request. Please try again.');
     } finally {
@@ -2577,7 +2713,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     <div className="flex-1 flex flex-col bg-background min-w-0 overflow-x-hidden">
       {/* Chat Header */}
       <div className="border-b p-3 sm:p-3.5 md:p-4 flex items-center justify-between bg-card shadow-sm flex-shrink-0" style={{ paddingRight: '12px' }}>
-        <div className="flex flex-col min-w-0 flex-1 pr-2 pl-11 md:pl-0">
+        <div className="flex flex-col min-w-0 flex-1 pr-2 pl-14 md:pl-0">
           <h2
             className="truncate text-lg sm:text-2xl lg:text-sm xl:text-2xl text-black m-0 mb-[3px]"
             style={{
@@ -2593,7 +2729,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             {headerTitle}
           </h2>
           <p
-            className="text-base lg:text-[11px] xl:text-base text-black/50 m-0"
+            className="truncate text-base lg:text-[11px] xl:text-base text-black/50 m-0"
             style={{
               fontFamily: 'Lufga',
               fontWeight: 400,
@@ -2657,6 +2793,29 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
               }} 
             />
           </button>
+          {/* The details column sits beside the chat only from 1280px. Below
+              that it opens from here — otherwise it could not be reached. */}
+          {onOpenDetails && (
+            <button
+              type="button"
+              onClick={onOpenDetails}
+              aria-label="Chat details"
+              title="Chat details"
+              className="flex xl:hidden items-center justify-center"
+              style={{
+                width: '32px',
+                height: '32px',
+                padding: '6px',
+                borderRadius: '16px',
+                background: 'rgba(249, 251, 252, 1)',
+                border: 'none',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              <Info className="h-3.5 w-3.5" style={{ color: 'rgba(0, 0, 0, 1)' }} />
+            </button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -2740,8 +2899,11 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       {/* Chat Messages */}
       <div
         ref={messagesContainerRef}
-        className="flex-1 min-h-0 min-w-0 p-3 sm:p-4 overflow-y-auto overflow-x-hidden space-y-4"
+        className="flex-1 min-h-0 min-w-0 p-3 sm:p-4 overflow-y-auto overflow-x-hidden space-y-4 chat-scrollbar"
         onScroll={handleScroll}
+        onWheel={endOpening}
+        onTouchStart={endOpening}
+        onPointerDown={endOpening}
       >
         {/* Only the seller sees this, and only while the buyer is waiting. */}
         {isCurrentUserSeller && accessRequestPending && (
@@ -2790,13 +2952,16 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
           </div>
         )}
 
-        {/* The client's two standing notices. Replaces the single-line
-            warning that used to sit here and said the same thing.
+        {/* The client's two standing notices, on every conversation between two
+            members — which is what they asked for.
 
-            One of them invites the reader to start a deal process, so they are
-            shown only where there is a listing to deal on — a moderator writing
-            to a member has nothing attached, and the advice would be nonsense. */}
-        {Boolean(listingId || (chatRoom as any)?.listingId) && (
+            They used to appear only where a listing id was attached, which was
+            a stand-in for "is this two members trading" and a poor one: a chat
+            opened from Contact Seller carries no listing id in its link, so
+            forty percent of conversations here have none, and those people were
+            shown nothing at all. The question is who is in the room, so that is
+            what is asked now. */}
+        {welcomeNoticesApply && (
           <ChatWelcomeCards
             onStartDeal={() => setStartDealOpen(true)}
             dealStarted={dealStarted}
@@ -2878,7 +3043,9 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
              * sender is worked out — there is no sender to work out.
              */
             if (isDealPrompt(message)) {
-              if (dealStarted) return null;
+              // Not in a conversation with the platform team, and not once the
+              // deal has begun — the same two rules as the notices up top.
+              if (dealStarted || !welcomeNoticesApply) return null;
               return (
                 <div key={message.id} className="my-3">
                   <DealProcessCard onStartDeal={() => setStartDealOpen(true)} />
@@ -3845,6 +4012,8 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                 ? "Chat room not available"
                 : !isConnected
                 ? "Connecting... (you can still see messages)"
+                : sendAsTeam
+                ? "Message as the team"
                 : "Your message"
             }
             disabled={isLoadingChatRoom || !chatRoom?.id || isUploading}

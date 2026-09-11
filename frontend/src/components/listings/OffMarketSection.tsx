@@ -1,17 +1,16 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Lock } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { apiClient } from "@/lib/api";
-import { resolveListingTitle } from "@/lib/listingTitle";
-import { formatNumber } from "@/lib/formatNumber";
-import { getListingCurrencySymbol } from "@/lib/listingCurrency";
+import { OffMarketCard } from "@/components/listings/OffMarketCard";
 
 /**
- * Listings inside their early-access window, shown as a teaser carousel.
+ * Listings inside their early-access window, shown as a carousel.
  *
- * A listing is Pro-only for its first seven days and then goes public. Pro
- * members see the real cards here; everyone else sees the countdown and a
- * prompt, because the figures are precisely what the subscription buys.
+ * A listing is Premium-only for its first seven days and then goes public.
+ * Laid out as the client's design has it: a white panel on a grey band, three
+ * cards to a row, arrows sitting on the panel's edges, each card the feed's
+ * listing card with its photo behind a lock and a countdown to the day it
+ * goes public.
  */
 
 interface OffMarketListing {
@@ -28,39 +27,13 @@ interface OffMarketResponse {
   listings: OffMarketListing[];
 }
 
-const EARLY_ACCESS_DAYS = 7;
-
-/** How far through its off-market window a listing is, left to right. */
-const progressPercent = (daysRemaining: number) =>
-  Math.min(100, Math.max(4, ((EARLY_ACCESS_DAYS - daysRemaining) / EARLY_ACCESS_DAYS) * 100));
-
-const Countdown = ({ days }: { days: number }) => (
-  <div className="flex flex-col gap-2">
-    <p className="text-center text-sm font-medium">
-      Off-Market Ends in{" "}
-      <span className="text-[#7CB305]">
-        {days} {days === 1 ? "day" : "days"}
-      </span>
-    </p>
-    <div className="relative h-1.5 rounded-full bg-black/10">
-      <div
-        className="absolute inset-y-0 left-0 rounded-full bg-[rgba(198,254,31,1)]"
-        style={{ width: `${progressPercent(days)}%` }}
-      />
-      <span
-        className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border-2 border-white bg-black"
-        style={{ left: `calc(${progressPercent(days)}% - 6px)` }}
-      />
-    </div>
-    <div className="flex justify-between text-[11px] text-muted-foreground">
-      <span>Off Market</span>
-      <span>Goes Public</span>
-    </div>
-  </div>
-);
+/** Space between cards, in px — the step an arrow moves by includes it. */
+const GAP = 16;
 
 const OffMarketSection = () => {
   const [data, setData] = useState<OffMarketResponse | null>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: true, end: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +53,33 @@ const OffMarketSection = () => {
     };
   }, []);
 
+  /** Whether there is anything further left or right, for the arrows. */
+  const updateEdges = () => {
+    const row = rowRef.current;
+    if (!row) return;
+    setEdges({
+      start: row.scrollLeft <= 4,
+      end: row.scrollLeft + row.clientWidth >= row.scrollWidth - 4,
+    });
+  };
+
+  useEffect(() => {
+    updateEdges();
+    window.addEventListener("resize", updateEdges);
+    return () => window.removeEventListener("resize", updateEdges);
+  }, [data]);
+
+  /** One card along, whatever width the cards are at this screen size. */
+  const step = (direction: 1 | -1) => {
+    const row = rowRef.current;
+    if (!row) return;
+    const card = row.querySelector<HTMLElement>("[data-offmarket-card]");
+    row.scrollBy({
+      left: direction * (card ? card.offsetWidth + GAP : row.clientWidth),
+      behavior: "smooth",
+    });
+  };
+
   // Nothing new this week is a normal state, not an error — say nothing.
   if (!data || data.listings.length === 0) return null;
 
@@ -96,73 +96,66 @@ const OffMarketSection = () => {
         </p>
       </div>
 
-      <div className="flex gap-4 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
-        {data.listings.map((listing) => {
-          const symbol = getListingCurrencySymbol(listing);
-          const price = listing.locked
-            ? null
-            : listing.advertisement?.find((row: any) =>
-                /listing\s*price|asking\s*price|^\s*price\s*$/i.test(String(row?.question || "")),
-              )?.answer;
-
-          return (
-            <article
-              key={listing.id}
-              className="flex w-[280px] flex-shrink-0 flex-col gap-3 rounded-2xl border border-border bg-white p-4"
-            >
-              <div className="flex items-center justify-center">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/5">
-                  <Lock className="h-4 w-4 text-black/60" />
-                </span>
+      {/* The design's margins: 32px of grey around the panel, 28px inside it. */}
+      <div className="rounded-[28px] bg-[#F2F2F2] p-3 sm:px-8 sm:py-5">
+        <div className="relative rounded-[24px] bg-white px-4 py-3 sm:px-7">
+          {/* Room above the cards for the one under the pointer to grow into,
+              as the design's middle card does: a scrolling row clips
+              whatever sticks out of it. */}
+          <div
+            ref={rowRef}
+            onScroll={updateEdges}
+            className="flex snap-x snap-mandatory overflow-x-auto pt-9 pb-2 [&::-webkit-scrollbar]:hidden"
+            style={{ gap: `${GAP}px`, scrollbarWidth: "none" }}
+          >
+            {data.listings.map((listing) => (
+              <div
+                key={listing.id}
+                data-offmarket-card
+                className="w-[85%] shrink-0 snap-start sm:w-[calc((100%-16px)/2)] xl:w-[calc((100%-32px)/3)]"
+              >
+                <OffMarketCard listing={listing} />
               </div>
+            ))}
+          </div>
 
-              <Countdown days={listing.daysRemaining} />
-
-              {listing.locked ? (
-                <>
-                  <p className="text-sm font-medium">
-                    {listing.category?.[0]?.name || "New listing"}
-                  </p>
-                  {/* The price is shown on purpose — it is the reason to upgrade,
-                      and it goes public in a few days anyway. */}
-                  {typeof listing.askingPrice === "number" && listing.askingPrice > 0 ? (
-                    <p className="text-lg font-bold">${formatNumber(listing.askingPrice)}</p>
-                  ) : null}
-                  <p className="text-xs text-muted-foreground">
-                    The full listing and the seller unlock for Premium members.
-                  </p>
-                  <Link
-                    to="/pricing"
-                    className="mt-auto rounded-full bg-[rgba(198,254,31,1)] px-4 py-2 text-center text-sm font-medium text-black"
-                  >
-                    Join Premium
-                  </Link>
-                </>
-              ) : (
-                <>
-                  <p className="truncate text-sm font-medium" title={resolveListingTitle(listing)}>
-                    {resolveListingTitle(listing)}
-                  </p>
-                  {price ? (
-                    <p className="text-lg font-bold">
-                      {symbol}
-                      {formatNumber(price)}
-                    </p>
-                  ) : null}
-                  <Link
-                    to={`/listing/${listing.id}`}
-                    className="mt-auto rounded-full bg-[rgba(198,254,31,1)] px-4 py-2 text-center text-sm font-medium text-black"
-                  >
-                    View Listing
-                  </Link>
-                </>
-              )}
-            </article>
-          );
-        })}
+          {data.listings.length > 1 && (
+            <>
+              <ArrowButton side="left" disabled={edges.start} onClick={() => step(-1)} />
+              <ArrowButton side="right" disabled={edges.end} onClick={() => step(1)} />
+            </>
+          )}
+        </div>
       </div>
     </section>
   );
 };
+
+const ArrowButton = ({
+  side,
+  disabled,
+  onClick,
+}: {
+  side: "left" | "right";
+  disabled: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    aria-label={side === "left" ? "Previous listings" : "Next listings"}
+    onClick={onClick}
+    disabled={disabled}
+    // 50px with a 17px arrow, as in the design.
+    className={`absolute top-1/2 z-10 hidden h-[50px] w-[50px] -translate-y-1/2 items-center justify-center rounded-full bg-[#E4E4E4] text-black shadow-sm transition hover:bg-[#D8D8D8] disabled:cursor-default disabled:opacity-40 sm:flex ${
+      side === "left" ? "-left-[25px]" : "-right-[25px]"
+    }`}
+  >
+    {side === "left" ? (
+      <ArrowLeft className="h-[17px] w-[17px]" />
+    ) : (
+      <ArrowRight className="h-[17px] w-[17px]" />
+    )}
+  </button>
+);
 
 export default OffMarketSection;

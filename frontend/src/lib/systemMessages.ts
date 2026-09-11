@@ -24,7 +24,9 @@ export type SystemMessageKind =
   | "GUIDELINE_REMINDER"
   | "DEAL_PROMPT"
   | "DEAL_STARTED"
-  | "CONFIDENTIAL_ACCESS_APPROVED";
+  | "CONFIDENTIAL_ACCESS_REQUESTED"
+  | "CONFIDENTIAL_ACCESS_APPROVED"
+  | "CONFIDENTIAL_ACCESS_DECLINED";
 
 export interface SystemMessageMeta {
   kind?: SystemMessageKind;
@@ -33,6 +35,31 @@ export interface SystemMessageMeta {
   blockedSenderId?: string;
   requesterId?: string;
   atMessage?: number;
+}
+
+/**
+ * Whether a conversation gets the two standing notices at its head.
+ *
+ * Between two members, always: the warning about keeping the deal on the
+ * platform is true of every such conversation, and either of them may want to
+ * start the deal process. With the platform's own team — an admin or a
+ * moderator on one side — neither notice makes sense: telling somebody to keep
+ * the conversation on the platform while they are talking to the platform
+ * reads as a machine that has not noticed who it is speaking to, and there is
+ * no deal to begin with support.
+ *
+ * This used to be decided by whether the conversation had a listing attached,
+ * which was only ever a stand-in for the question and got it wrong both ways.
+ * Twenty of the forty-nine conversations in this database carry no listing id,
+ * and five of those are two members talking to each other — shown nothing,
+ * while the client asked for these on every new chat.
+ */
+export function showsWelcomeNotices(participants: {
+  viewerRole?: string | null;
+  otherRole?: string | null;
+}): boolean {
+  const isStaff = (role?: string | null) => role === "ADMIN" || role === "MONITER";
+  return !isStaff(participants.viewerRole) && !isStaff(participants.otherRole);
 }
 
 /** True when this row is the platform's periodic offer to begin a deal. */
@@ -65,11 +92,32 @@ const BLOCKED_FOR_RECIPIENT =
  * agreed or the page had simply refreshed. Written into the conversation so
  * both of them can see when it happened, and so it stays in the record.
  */
+// The client's own sentence, word for word.
 const CONFIDENTIAL_APPROVED_FOR_BUYER =
-  "The seller approved your request. The confidential details of this listing are now visible to you.";
+  "The seller has accepted your request. You can now view the confidential details of the listing.";
 
 const CONFIDENTIAL_APPROVED_FOR_SELLER =
   "You approved this buyer. They can now see the confidential details of your listing.";
+
+/**
+ * Written when a buyer asks, into the conversation they are then taken to.
+ * Without it they land in an empty chat with the listing's details still
+ * hidden and nothing to say why.
+ */
+const CONFIDENTIAL_REQUESTED_FOR_BUYER =
+  "Your request to view the confidential details has been sent to the seller. You'll see their answer here.";
+
+const CONFIDENTIAL_REQUESTED_FOR_SELLER =
+  "This buyer has asked to see the confidential details of your listing.";
+
+/**
+ * The other outcome. The client asked only for the acceptance, but a buyer who
+ * is refused and told nothing waits in that conversation indefinitely.
+ */
+const CONFIDENTIAL_DECLINED_FOR_BUYER =
+  "The seller has declined your request to view the confidential details of this listing.";
+
+const CONFIDENTIAL_DECLINED_FOR_SELLER = "You declined this buyer's request.";
 
 /**
  * The prompt in words, for anywhere that can only render a sentence.
@@ -120,6 +168,25 @@ export function isSystemMessage(message: any): boolean {
  * when the message is not one of ours, so callers can fall through to their
  * normal rendering.
  */
+/**
+ * The words a viewer could actually search for in one message.
+ *
+ * `content` is not always a string. The platform's own notices deliberately
+ * store it as null, because the two people in a conversation are told
+ * different things about the same event — the sender that their message was
+ * blocked, the other that something was withheld — and the wording is chosen
+ * from the metadata when the thread is drawn.
+ *
+ * Searching therefore has to ask for that wording rather than reach for
+ * `content`, which is what crashed the whole chat window the moment a
+ * conversation contained a blocked message.
+ */
+export function messageSearchText(message: any, viewerId?: string): string {
+  const rendered = systemMessageText(message, viewerId);
+  if (rendered) return rendered;
+  return typeof message?.content === 'string' ? message.content : '';
+}
+
 export function systemMessageText(message: any, viewerId?: string): string | null {
   const meta = readSystemMeta(message);
 
@@ -134,6 +201,18 @@ export function systemMessageText(message: any, viewerId?: string): string | nul
   }
 
   if (meta.kind === "DEAL_STARTED") return DEAL_STARTED;
+
+  if (meta.kind === "CONFIDENTIAL_ACCESS_REQUESTED") {
+    return viewerId && meta.buyerId === viewerId
+      ? CONFIDENTIAL_REQUESTED_FOR_BUYER
+      : CONFIDENTIAL_REQUESTED_FOR_SELLER;
+  }
+
+  if (meta.kind === "CONFIDENTIAL_ACCESS_DECLINED") {
+    return viewerId && meta.buyerId === viewerId
+      ? CONFIDENTIAL_DECLINED_FOR_BUYER
+      : CONFIDENTIAL_DECLINED_FOR_SELLER;
+  }
 
   if (meta.kind === "CONFIDENTIAL_ACCESS_APPROVED") {
     return viewerId && meta.buyerId === viewerId

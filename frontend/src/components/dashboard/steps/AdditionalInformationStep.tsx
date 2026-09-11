@@ -15,7 +15,6 @@ import { toast } from "sonner";
 import { uploadToCloudinary, uploadMultipleToCloudinary } from "@/lib/cloudinary";
 import {
   ALLOWED_ATTACHMENT_LABEL,
-  ATTACHMENT_ACCEPT,
   formatMaxSize,
   maxBytesFor,
   isAllowedAttachment,
@@ -783,6 +782,9 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
               </div>
             ) : (
               <div className="border-2 border-dashed border-border rounded-xl p-8 flex flex-col items-center justify-center hover:border-accent/50 transition-colors bg-muted/30">
+                {/* No `accept`. The dialog filtering a file out is what made a
+                    refusal silent — the seller picked nothing and nothing was
+                    said. The check in the handler refuses instead, out loud. */}
                 <input
                   type="file"
                   accept="image/*"
@@ -828,10 +830,8 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             <div className="border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center hover:border-accent/50 transition-colors bg-muted/30">
               <input
                 type="file"
-                accept={ATTACHMENT_ACCEPT}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  // `accept` is only a browser hint — this is the real check.
                   if (file) {
                     if (!isAllowedAttachment(file.name)) {
                       toast.error(`This file type is not supported. Allowed: ${ALLOWED_ATTACHMENT_LABEL}`);

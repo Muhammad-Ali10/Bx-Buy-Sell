@@ -4,25 +4,52 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { UpdateListingT } from './dto/update-listing.dto';
 import { ListingSchemaT } from './dto/create-listing.dto';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { NotificationService } from '../notification/notification.service';
+import { blockedListingNotice, listingTitleOf } from './listing-notices';
+import { ActivityLogService } from '../activity-log/activity-log.service';
+import {
+  formatDay,
+  listingPhrase,
+  packageName,
+  sentence,
+} from '../activity-log/activity-log.catalog';
 import { trimListingFeedRecord } from 'common/util/trim-listing-feed.util';
 import { normalizeDomainAnswer } from 'common/util/domain.util';
-import { StripeService } from '../subscription/stripe.service';
+import { StripeService, subscriptionPeriodEnd } from '../subscription/stripe.service';
+import { ensureStripeCustomer } from '../subscription/stripe-customer';
 import {
   ADDON_LABELS,
+  PACKAGE_LABELS,
   computePackageCharge,
   getAddonPrice,
+  getBillingCycle,
+  getPackageMonthlyPrice,
   getPricingTier,
+  priceOverCycle,
   readListingPriceFromAdvertisement,
   type AddonId,
   type BillingCycleId,
   type PackageId,
 } from './package-pricing';
-import { maskListingFor } from './listing-visibility';
+import {
+  canViewBlockedListing,
+  grantsConfidentialAccess,
+  hiddenListingStatuses,
+  maskListingFor,
+} from './listing-visibility';
+import { ListingAddonService } from './listing-addon.service';
+import { ListingFxService } from '../fx/listing-fx.service';
+import {
+  ensureRequestChat,
+  manualApprovalApplies,
+  postAccessNotice,
+} from './confidential-notice';
 
 type ViewerType = 'UNREGISTERED' | 'REGISTERED_FREE' | 'REGISTERED_PRO';
 
@@ -30,6 +57,33 @@ type ViewerContext = {
   userId?: string;
   viewerType: ViewerType;
   role?: string | null;
+};
+
+/**
+ * What has happened on a listing: who got in touch, and who is still waiting.
+ *
+ * Both are counted together because they read the same two tables, and a feed
+ * asking each of them separately would fetch every conversation twice.
+ */
+type ListingActivity = {
+  /**
+   * How many different people have contacted the seller.
+   *
+   * A person, not a message and not a conversation. The client was explicit:
+   * a buyer who writes ten times is still one request. On the live data that
+   * already matters — three listings have a buyer who opened more than one
+   * conversation about the same listing, so counting conversations would
+   * report 4 where the answer is 2.
+   */
+  requests: number;
+  /**
+   * How many conversations are waiting on the seller to reply.
+   *
+   * The last thing said was said by the buyer. Platform messages are ignored
+   * when deciding that — two conversations end with a blocked-message notice
+   * or a reminder, and a notice from the platform is not the seller replying.
+   */
+  unanswered: number;
 };
 
 @Injectable()
@@ -41,6 +95,14 @@ export class ListingService {
     private readonly db: PrismaService,
     private readonly subscriptionService: SubscriptionService,
     private readonly stripeService: StripeService,
+    /** The listing's placements, which are rows of their own. */
+    private readonly addons: ListingAddonService,
+    /** Tells an owner when the team blocks their listing. */
+    private readonly notifications: NotificationService,
+    /** What happens to a listing goes into its owner's log. */
+    @Optional() private readonly activityLog?: ActivityLogService,
+    /** Keeps what the listing comes to in other currencies up to date. */
+    @Optional() private readonly listingFx?: ListingFxService,
   ) {
     const parsed = Number.parseInt(
       process.env.LISTING_EARLY_ACCESS_DAYS ?? '7',
@@ -186,7 +248,7 @@ export class ListingService {
 
     // A row on its own is no longer permission — a buyer waiting on a seller
     // who vets by hand has one too, and must not see anything yet.
-    return access?.status === 'APPROVED';
+    return grantsConfidentialAccess(access?.status);
   }
 
   /**
@@ -202,6 +264,8 @@ export class ListingService {
     input: {
       packageId: PackageId;
       addon: AddonId;
+      /** The add-on's own cycle; independent of the package's. */
+      addonBillingCycle?: BillingCycleId;
       billingCycle: BillingCycleId;
       successUrl: string;
       cancelUrl: string;
@@ -223,52 +287,131 @@ export class ListingService {
       );
     }
 
+    /*
+     * Paying less waits; paying more starts now.
+     *
+     * The client's rule, and already the platform's for buyer plans: an
+     * upgrade is charged and takes effect at once, replacing what was there,
+     * while a downgrade lands at the end of the period the seller has already
+     * paid for. Taking the higher package away the moment they clicked would
+     * be keeping money for something they no longer have.
+     *
+     * Nothing is charged here and nothing is removed — the seller keeps what
+     * they bought until the date, and `applyDuePackageChange` moves them when
+     * it arrives.
+     */
+    const current = listing as any;
+    /*
+     * Committing to fewer months counts as paying less, so it waits too.
+     *
+     * Six-monthly to monthly leaves the seller on the same package with the
+     * same features — only the rhythm changes — so there is nothing to hand
+     * over early and no reason to refund months they chose and used. Ranking
+     * the packages alone missed this: same package, same rank, so it fell
+     * through to the paid path and charged a fresh month on top of one already
+     * paid for.
+     */
+    const wantedMonths = getBillingCycle(input.billingCycle).months;
+    const currentMonths = this.monthsInPackageCycle(current.packageBillingCycle);
+    const samePackage = input.packageId === current.selectedPackage;
+    const isDowngrade =
+      Boolean(current.packageActive) &&
+      (this.packageRank(input.packageId) < this.packageRank(current.selectedPackage) ||
+        (samePackage && wantedMonths < currentMonths));
+
+    if (isDowngrade) {
+      // Stripe's period end when we have it; otherwise the cycle they are on,
+      // so the date is never simply "today".
+      const fallbackEnd = new Date();
+      fallbackEnd.setMonth(
+        fallbackEnd.getMonth() + this.monthsInPackageCycle(current.packageBillingCycle),
+      );
+      const effectiveAt = current.packageExpiresAt
+        ? new Date(current.packageExpiresAt)
+        : fallbackEnd;
+
+      await this.db.listing.update({
+        where: { id: listingId },
+        data: {
+          pendingPackage: input.packageId,
+          pendingPackageCycle:
+            input.packageId === 'MINIMUM' ? null : input.billingCycle,
+          pendingPackageChangeAt: effectiveAt,
+        } as any,
+      });
+
+      return { scheduled: true, effectiveAt, checkoutUrl: null };
+    }
+
+    const addonCycle: BillingCycleId =
+      input.addon === 'NONE' ? 'MONTHLY' : input.addonBillingCycle || 'MONTHLY';
+
     const charge = computePackageCharge({
       listingPrice,
       packageId: input.packageId,
       addon: input.addon,
       billingCycle: input.billingCycle,
+      addonBillingCycle: addonCycle,
     });
 
-    const baseData = {
-      selectedPackage: input.packageId,
-      packageBillingCycle: input.packageId === 'MINIMUM' ? null : input.billingCycle,
-      packageAddons: input.addon === 'NONE' ? [] : [input.addon],
-      successFeePercent: charge.successFeePercent,
-    };
-
-    // Nothing to charge: the free plan is active immediately.
+    /*
+     * No add-on is written here.
+     *
+     * `packageAddons` is now a summary of the listing's `ListingAddon` rows and
+     * nothing else, and a row appears when the placement is paid for. Writing
+     * the seller's intention into it at checkout time put a placement on the
+     * listing before any money moved — and left it there if they closed the
+     * Stripe page.
+     */
+    // Nothing to charge: the free plan is active the moment it is chosen.
     if (charge.amountDueToday === 0) {
       await this.db.listing.update({
         where: { id: listingId },
-        data: { ...baseData, packageActive: true, packageExpiresAt: null } as any,
+        data: {
+          selectedPackage: input.packageId,
+          packageBillingCycle: input.packageId === 'MINIMUM' ? null : input.billingCycle,
+          successFeePercent: charge.successFeePercent,
+          packageActive: true,
+          packageExpiresAt: null,
+          // Choosing a plan settles any cancellation that was pending.
+          packageEndsAt: null,
+        } as any,
       });
       return { free: true, checkoutUrl: null };
     }
 
-    const user = await this.db.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    const existing = await this.db.userSubscription.findUnique({ where: { userId } });
-    let customerId = existing?.stripeCustomerId;
-    if (!customerId) {
-      const customer = await this.stripeService.createCustomer(
-        user.email,
-        `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
-        { userId },
-      );
-      customerId = customer.id;
-    }
+    const customerId = await ensureStripeCustomer(
+      this.db as any,
+      this.stripeService,
+      userId,
+    );
 
     // Stripe cannot mix billing intervals inside one subscription. When the
     // package runs 3/6-monthly and the add-on monthly, the add-on's first month
     // is charged on this invoice as a one-off — so the seller sees and pays the
     // exact total shown in the overview — and the webhook then starts its
     // monthly subscription from the following month.
-    const intervals = new Set(charge.lines.map((l) => l.intervalMonths));
-    const deferredAddon = intervals.size > 1;
+    const packageLine = charge.lines.find((l) => l.kind === 'package');
+    const addonLine = charge.lines.find((l) => l.kind === 'addon');
+    /*
+     * The add-on always ends up on a subscription of its own.
+     *
+     * Not merely when the two cycles differ, which is all Stripe strictly
+     * forces. The seller's page gives every placement its own renewal date and
+     * its own Cancel Subscription, and neither is possible while the placement
+     * shares a subscription with the package — cancelling one would cancel
+     * the listing's plan with it. So whenever both are bought together the
+     * add-on's first period is charged as a one-off on this invoice, which is
+     * exactly the total the seller was shown, and its own subscription starts
+     * where that period ends.
+     *
+     * An add-on bought alongside the free package is the exception: it is the
+     * only line on the invoice, so it is already a subscription of its own,
+     * and Stripe refuses a subscription made entirely of one-off lines.
+     */
+    const deferredAddon = Boolean(packageLine && addonLine);
     const checkoutLines = deferredAddon
-      ? charge.lines.map((l) => (l.intervalMonths === 1 ? { ...l, oneTime: true } : l))
+      ? charge.lines.map((l) => (l.kind === 'addon' ? { ...l, oneTime: true } : l))
       : charge.lines;
 
     const session = await this.stripeService.createDynamicCheckoutSession({
@@ -282,17 +425,28 @@ export class ListingService {
         packageId: input.packageId,
         addon: input.addon,
         billingCycle: input.billingCycle,
+        addonBillingCycle: addonCycle,
         successFeePercent: String(charge.successFeePercent),
         deferredAddon: deferredAddon ? '1' : '0',
+        // Whether this invoice contains the package at all. Without it the
+        // webhook files an add-on-only subscription under the package's id.
+        packagePaid: packageLine ? '1' : '0',
       },
     });
 
-    // Remember the selection now; `packageActive` only flips once Stripe confirms.
-    await this.db.listing.update({
-      where: { id: listingId },
-      data: baseData as any,
-    });
-
+    /*
+     * Nothing is written here.
+     *
+     * The selection used to be saved before the seller was sent to Stripe, so
+     * closing that page left the listing claiming a package and a billing cycle
+     * nobody had paid for. That is not only cosmetic: this page decides upgrade
+     * against downgrade by comparing the cycle in use, so a seller on monthly
+     * who opened the six-month option and walked away would afterwards have a
+     * move back to monthly treated as a downgrade and made to wait for it.
+     *
+     * Everything needed is in the session metadata, and the webhook writes it
+     * when the money actually arrives.
+     */
     return { free: false, checkoutUrl: session.url };
   }
 
@@ -301,27 +455,119 @@ export class ListingService {
    * listing would pay — its tier depends on its own asking price, so the menu
    * cannot show one shared price list.
    */
-  async getPackageState(listingId: string, userId: string) {
-    const listing = await this.db.listing.findUnique({
-      where: { id: listingId },
+  /** How long a package cycle runs, for working out when a downgrade lands. */
+  private monthsInPackageCycle(cycle?: string | null): number {
+    if (cycle === 'SIX_MONTH') return 6;
+    if (cycle === 'THREE_MONTH') return 3;
+    return 1;
+  }
+
+  /**
+   * Where a package sits, so an upgrade can be told from a downgrade.
+   *
+   * The seller's three packages rank the way the buyer's plans do, and the
+   * rule that hangs off this ranking is the same one: paying more starts at
+   * once, paying less waits for the period already paid for.
+   */
+  private packageRank(packageId?: string | null): number {
+    if (packageId === 'PREMIUM') return 2;
+    if (packageId === 'STARTER') return 1;
+    return 0; // MINIMUM, or nothing chosen yet
+  }
+
+  /**
+   * Move a listing onto a package it has already waited for.
+   *
+   * Applied when the state is read rather than by a job, which is how the
+   * add-on removal beside it works and how the buyer's own plan change works.
+   * A seller who never opens the page still gets the change the moment
+   * anything asks what package they are on.
+   */
+  private async applyDuePackageChange(listing: any): Promise<any> {
+    const due =
+      listing?.pendingPackage &&
+      listing?.pendingPackageChangeAt &&
+      new Date(listing.pendingPackageChangeAt).getTime() <= Date.now();
+    if (!due) return listing;
+
+    return this.db.listing.update({
+      where: { id: listing.id },
+      data: {
+        selectedPackage: listing.pendingPackage,
+        packageBillingCycle:
+          listing.pendingPackage === 'MINIMUM' ? null : listing.pendingPackageCycle,
+        // Minimum costs nothing, so nothing is being paid for any more.
+        packageActive: listing.pendingPackage !== 'MINIMUM',
+        pendingPackage: null,
+        pendingPackageCycle: null,
+        pendingPackageChangeAt: null,
+      },
       include: { advertisement: true },
     });
+  }
+
+  /**
+   * Drop a queued downgrade and keep the package as it is.
+   *
+   * A scheduled downgrade is otherwise locked in until the date, so one
+   * mis-click costs a seller the rest of their billing period. The buyer plans
+   * have had this escape from the start; there is no reason the seller side
+   * should not.
+   *
+   * Nothing is charged and nothing changes hands — the pending change is
+   * simply forgotten, and the seller stays on what they are already paying
+   * for.
+   */
+  async cancelScheduledPackageChange(listingId: string, userId: string) {
+    const listing = await this.db.listing.findUnique({ where: { id: listingId } });
     if (!listing) throw new NotFoundException('Listing not found');
     if (listing.userId !== userId) {
       throw new ForbiddenException('You can only manage your own listing.');
     }
+    if (!(listing as any).pendingPackage) {
+      throw new BadRequestException('There is no scheduled change to cancel.');
+    }
+
+    await this.db.listing.update({
+      where: { id: listingId },
+      data: {
+        pendingPackage: null,
+        pendingPackageCycle: null,
+        pendingPackageChangeAt: null,
+      } as any,
+    });
+
+    return { cancelled: true };
+  }
+
+  /**
+   * Everything the Manage Subscription page needs to draw one listing.
+   *
+   * Facts, not decisions: which package, which cycle, what is pending, which
+   * placements are held and when each renews. Which button each card shows is
+   * worked out in the browser, where all seventeen of the client's states are
+   * one pure function over exactly this data.
+   */
+  async getPackageState(listingId: string, userId: string) {
+    const found = await this.db.listing.findUnique({
+      where: { id: listingId },
+      include: { advertisement: true },
+    });
+    if (!found) throw new NotFoundException('Listing not found');
+    if (found.userId !== userId) {
+      throw new ForbiddenException('You can only manage your own listing.');
+    }
+
+    // A downgrade whose date has arrived is already true \u2014 apply it before
+    // answering, so nobody keeps a package they stopped paying for.
+    const listing = (await this.applyDuePackageChange(found)) as typeof found;
 
     const l = listing as any;
     const listingPrice = readListingPriceFromAdvertisement(listing.advertisement as any);
     const tier = getPricingTier(listingPrice ?? 0);
-    const activeAddon: AddonId = (l.packageAddons?.[0] as AddonId) || 'NONE';
 
-    // A cancelled add-on whose date has passed is simply gone.
-    const endsAt: Date | null = l.addonEndsAt ? new Date(l.addonEndsAt) : null;
-    const removalDue = endsAt !== null && endsAt.getTime() <= Date.now();
-    if (removalDue && activeAddon !== 'NONE') {
-      await this.finishAddonRemoval(listingId);
-    }
+    // Sweeps out placements whose cancelled period is over before reading them.
+    const addonRows = (await this.addons.forListing(listingId)) as any[];
 
     return {
       listingId,
@@ -329,137 +575,176 @@ export class ListingService {
       selectedPackage: l.selectedPackage ?? null,
       packageBillingCycle: l.packageBillingCycle ?? null,
       packageActive: Boolean(l.packageActive),
+      /** When the period being paid for ends and the next one begins. */
       packageExpiresAt: l.packageExpiresAt ?? null,
-      addon: removalDue ? 'NONE' : activeAddon,
-      /** Set when the add-on is cancelled but still running out its month. */
-      addonEndsAt: removalDue ? null : endsAt,
+      /**
+       * When the package stops for good, because the seller cancelled it.
+       *
+       * Different from `packageExpiresAt`, which is only where one paid period
+       * meets the next. This one says no next period is coming \u2014 and the page
+       * offers Reactivate until the day arrives.
+       */
+      packageEndsAt: l.packageEndsAt ?? null,
+
+      /**
+       * Every placement this listing pays for, one entry each.
+       *
+       * A list because a seller can hold the category page and the start page
+       * at the same time, each renewing on its own date and cancellable on its
+       * own. It used to be a single value, which is why the page could only
+       * ever show one.
+       */
+      addons: addonRows.map((row) => ({
+        addon: row.addon,
+        billingCycle: row.billingCycle,
+        status: row.status,
+        /** What "Renews in 42 Days" counts towards. Null when never paid. */
+        currentPeriodEnd: row.currentPeriodEnd ?? null,
+        /** Set once cancelled: what "Ends in 20 Days" counts towards. */
+        endsAt: row.endsAt ?? null,
+        pendingBillingCycle: row.pendingBillingCycle ?? null,
+        pendingChangeAt: row.pendingChangeAt ?? null,
+      })),
+
       options: (['CATEGORY_PAGE', 'START_PAGE', 'BUNDLE'] as const).map((id) => ({
         id,
         label: ADDON_LABELS[id],
         monthlyPrice: getAddonPrice(tier, id),
       })),
+
+      /*
+       * A change that has been asked for but has not landed yet \u2014 a downgrade,
+       * or a move to a shorter billing cycle. Sent so the page can say when it
+       * happens rather than showing the old package with no hint that it is
+       * about to change, which is how a seller ends up asking whether their
+       * click registered.
+       */
+      pendingPackage: l.pendingPackage ?? null,
+      pendingPackageCycle: l.pendingPackageCycle ?? null,
+      pendingPackageChangeAt: l.pendingPackageChangeAt ?? null,
+
+      /*
+       * What the packages cost for this listing. The price depends on the
+       * listing's own asking price, so it cannot be a table in the browser \u2014
+       * the add-on options above are sent for the same reason.
+       */
+      packageOptions: (['MINIMUM', 'STARTER', 'PREMIUM'] as const).map((id) => ({
+        id,
+        label: PACKAGE_LABELS[id],
+        monthlyPrice: getPackageMonthlyPrice(tier, id),
+      })),
     };
   }
 
-  /** Drop the placement once a cancelled add-on's paid month is over. */
-  private async finishAddonRemoval(listingId: string) {
-    await this.db.listing.update({
-      where: { id: listingId },
-      data: {
-        packageAddons: [],
-        addonEndsAt: null,
-        addonStripeSubscriptionId: null,
-        featuredOnCategoryPage: false,
-        featuredOnStartPage: false,
-      } as any,
-    });
-    this.logger.log(`Listing ${listingId}: add-on removal completed`);
-  }
-
   /**
-   * Add, replace or cancel a listing's add-on after the listing already exists.
+   * Stop the package renewing, leaving everything up until the paid period ends.
    *
-   * Three rules, chosen so the seller is never billed twice and never loses a
-   * day they paid for:
-   *  - Adding one is paid for now and live now.
-   *  - Cancelling keeps the placement until the paid month runs out.
-   *  - Replacing one starts the new placement now and refunds the remainder of
-   *    the old as Stripe credit against the next invoice.
+   * The seller cancelled; they did not ask for a refund. Nothing is taken away
+   * today, and `packageEndsAt` is what the page counts down to \u2014 and what
+   * `reactivatePackage` clears if they change their mind before it arrives.
+   *
+   * Placements are deliberately left alone. Each one is a separate purchase on
+   * its own subscription, and quietly killing a placement the seller is still
+   * paying for because they dropped the plan would be taking their money.
    */
-  async changeAddon(
-    listingId: string,
-    userId: string,
-    input: { addon: AddonId; successUrl: string; cancelUrl: string },
-  ) {
-    const listing = await this.db.listing.findUnique({
-      where: { id: listingId },
-      include: { advertisement: true },
-    });
+  async cancelPackage(listingId: string, userId: string) {
+    const listing = await this.db.listing.findUnique({ where: { id: listingId } });
     if (!listing) throw new NotFoundException('Listing not found');
     if (listing.userId !== userId) {
       throw new ForbiddenException('You can only manage your own listing.');
     }
 
     const l = listing as any;
-    const currentAddon: AddonId = (l.packageAddons?.[0] as AddonId) || 'NONE';
-    if (currentAddon === input.addon) {
-      throw new BadRequestException('That add-on is already on this listing.');
+    if (!l.packageActive || !l.selectedPackage || l.selectedPackage === 'MINIMUM') {
+      throw new BadRequestException('This listing has no paid package to cancel.');
+    }
+    if (l.packageEndsAt) {
+      throw new BadRequestException('That package is already cancelled.');
     }
 
-    // Cancelling: stop renewing, but leave the placement up until the month
-    // they already paid for is over.
-    if (input.addon === 'NONE') {
-      if (currentAddon === 'NONE') {
-        throw new BadRequestException('This listing has no add-on to cancel.');
-      }
-
-      let endsAt = new Date();
-      if (l.addonStripeSubscriptionId) {
-        const sub: any = await this.stripeService.cancelSubscription(
-          l.addonStripeSubscriptionId,
-          false,
-        );
-        if (sub?.current_period_end) endsAt = new Date(sub.current_period_end * 1000);
-      } else {
-        // No Stripe record (a free or legacy add-on): give the placement the
-        // rest of the current month rather than dropping it mid-view.
-        endsAt.setMonth(endsAt.getMonth() + 1);
-      }
-
-      await this.db.listing.update({
-        where: { id: listingId },
-        data: { addonEndsAt: endsAt } as any,
-      });
-
-      this.logger.log(
-        `Listing ${listingId}: add-on ${currentAddon} ends ${endsAt.toISOString()}`,
+    let endsAt: Date;
+    if (l.packageStripeSubscriptionId) {
+      const sub: any = await this.stripeService.cancelSubscription(
+        l.packageStripeSubscriptionId,
+        false,
       );
-      return { scheduled: true, addonEndsAt: endsAt, checkoutUrl: null };
+      endsAt =
+        subscriptionPeriodEnd(sub) ??
+        l.packageExpiresAt ??
+        this.endOfCurrentPackageCycle(l);
+    } else {
+      // No Stripe record: a plan set before payment was wired up. Give it the
+      // rest of its cycle rather than dropping it under the seller today.
+      endsAt = l.packageExpiresAt ?? this.endOfCurrentPackageCycle(l);
     }
 
-    const listingPrice = readListingPriceFromAdvertisement(listing.advertisement as any);
-    if (listingPrice === null) {
-      throw new BadRequestException(
-        'Please enter a listing price before choosing an add-on.',
-      );
-    }
-
-    const amount = getAddonPrice(getPricingTier(listingPrice), input.addon);
-    if (amount <= 0) throw new BadRequestException('That add-on is not available.');
-
-    const user = await this.db.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    const existing = await this.db.userSubscription.findUnique({ where: { userId } });
-    let customerId = existing?.stripeCustomerId;
-    if (!customerId) {
-      const customer = await this.stripeService.createCustomer(
-        user.email,
-        `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
-        { userId },
-      );
-      customerId = customer.id;
-    }
-
-    const session = await this.stripeService.createDynamicCheckoutSession({
-      customerId,
-      lineItems: [
-        { name: ADDON_LABELS[input.addon], amount, intervalMonths: 1 },
-      ],
-      successUrl: input.successUrl,
-      cancelUrl: input.cancelUrl,
-      // `addonOnly` matters: without it the webhook would treat this as a full
-      // package purchase and overwrite the package's own subscription id.
-      metadata: {
-        listingId,
-        userId,
-        addon: input.addon,
-        addonOnly: '1',
-        replacesAddonSubscriptionId: l.addonStripeSubscriptionId || '',
-      },
+    await this.db.listing.update({
+      where: { id: listingId },
+      data: {
+        packageEndsAt: endsAt,
+        // Cancelling settles any downgrade that was waiting: the whole plan is
+        // going, so where it was going to land no longer means anything.
+        pendingPackage: null,
+        pendingPackageCycle: null,
+        pendingPackageChangeAt: null,
+      } as any,
     });
 
-    return { scheduled: false, addonEndsAt: null, checkoutUrl: session.url };
+    this.logger.log(`Listing ${listingId}: package ends ${endsAt.toISOString()}`);
+    void this.listingPhraseFor(listingId).then((name) =>
+      this.activityLog?.record({
+        actorId: userId,
+        action: 'billing.package-cancelled',
+        entityType: 'listing',
+        entityId: listingId,
+        message: `Cancelled the ${packageName(l.selectedPackage)} package on ${name}; it runs until ${formatDay(endsAt)}`,
+      }),
+    );
+    return { scheduled: true, endsAt };
+  }
+
+  /**
+   * Un-cancel the package before its date arrives.
+   *
+   * Nothing is charged: the seller is inside a period they have already paid
+   * for, and all that changes is that another will follow it.
+   */
+  async reactivatePackage(listingId: string, userId: string) {
+    const listing = await this.db.listing.findUnique({ where: { id: listingId } });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.userId !== userId) {
+      throw new ForbiddenException('You can only manage your own listing.');
+    }
+
+    const l = listing as any;
+    if (!l.packageEndsAt) {
+      throw new BadRequestException('That package is not cancelled.');
+    }
+    if (new Date(l.packageEndsAt).getTime() <= Date.now()) {
+      // Past its date, so there is nothing left to resume. Buying it again is
+      // a payment, and a payment cannot happen behind a one-click button.
+      throw new BadRequestException(
+        'That package has already ended. Please choose a package again.',
+      );
+    }
+
+    if (l.packageStripeSubscriptionId) {
+      await this.stripeService.resumeSubscription(l.packageStripeSubscriptionId);
+    }
+
+    await this.db.listing.update({
+      where: { id: listingId },
+      data: { packageEndsAt: null } as any,
+    });
+    this.logger.log(`Listing ${listingId}: package reactivated`);
+    return { reactivated: true };
+  }
+
+  /** Never simply "today" \u2014 that would be an immediate cancellation in disguise. */
+  private endOfCurrentPackageCycle(listing: any): Date {
+    const date = new Date();
+    date.setMonth(date.getMonth() + this.monthsInPackageCycle(listing.packageBillingCycle));
+    return date;
   }
 
   /**
@@ -501,6 +786,7 @@ export class ListingService {
     return r === 'ADMIN' || r === 'MONITER' || r === 'MODERATOR';
   }
 
+
   async findAll(
     filters?: {
       status?: 'PUBLISH' | 'DRAFT' | 'SOLD' | 'BLOCKED';
@@ -526,10 +812,16 @@ export class ListingService {
     // A sold business is off the market: it disappears from the public feed
     // (All Listings) while the team can still find it in the admin views.
     if (!this.isStaffRole(resolvedViewer.role)) {
+      // An owner reading their own list — My Listings — still gets a listing
+      // the team blocked, so they can see that it was and why. Nobody else's
+      // list does.
+      const ownListings =
+        Boolean(resolvedViewer.userId) && filters?.userId === resolvedViewer.userId;
+      const hidden: string[] = hiddenListingStatuses(ownListings);
       where.status =
-        filters?.status && filters.status !== 'SOLD' && filters.status !== 'BLOCKED'
+        filters?.status && !hidden.includes(filters.status)
           ? filters.status
-          : { notIn: ['SOLD', 'BLOCKED'] };
+          : { notIn: hidden };
 
       // Blocking an account takes their businesses off the marketplace too;
       // otherwise a blocked seller keeps collecting enquiries they cannot answer.
@@ -643,18 +935,115 @@ export class ListingService {
     // One query for every listing this viewer already has access to, rather
     // than one lookup per row.
     // trimListingFeedRecord widens the record, so read the id back as a string.
-    const accessibleIds = await this.confidentialAccessIds(
-      rotatedListings.map((listing) => String(listing.id)),
-      resolvedViewer.userId,
-    );
+    const listingIds = rotatedListings.map((listing) => String(listing.id));
+    const [accessibleIds, activity] = await Promise.all([
+      this.confidentialAccessIds(listingIds, resolvedViewer.userId),
+      this.listingActivityFor(listingIds),
+    ]);
 
     return rotatedListings.map((listing) =>
-      maskListingFor(listing, {
-        userId: resolvedViewer.userId,
-        role: resolvedViewer.role,
-        hasConfidentialAccess: accessibleIds.has(String(listing.id)),
-      }),
+      maskListingFor(
+        {
+          ...listing,
+          // Nothing computed either of these before, so every card in the
+          // product read fields the API had never sent and fell back to zero.
+          requests_count: activity.get(String(listing.id))?.requests ?? 0,
+          unread_messages_count: activity.get(String(listing.id))?.unanswered ?? 0,
+        },
+        {
+          userId: resolvedViewer.userId,
+          role: resolvedViewer.role,
+          hasConfidentialAccess: accessibleIds.has(String(listing.id)),
+        },
+      ),
     );
+  }
+
+  /**
+   * Who contacted this listing, and who is still waiting on an answer.
+   *
+   * Nothing computed either of these before, so every card in the product read
+   * two fields the API had never sent and fell back to zero.
+   *
+   * Three kinds of conversation are not a request, and each exists in the live
+   * data: one nobody ever spoke in (a chat row can precede the first word),
+   * one where only the platform spoke (twenty messages have no sender at all —
+   * blocked-message notices and reminders), and one where the seller is also
+   * the buyer (eight of those).
+   *
+   * Batched, like the access lookup below it: a feed costs two queries rather
+   * than two per row.
+   */
+  private async listingActivityFor(
+    listingIds: string[],
+  ): Promise<Map<string, ListingActivity>> {
+    const activity = new Map<string, ListingActivity>();
+    if (listingIds.length === 0) return activity;
+
+    const chats = await this.db.chat.findMany({
+      where: { listingId: { in: listingIds } },
+      select: { id: true, listingId: true, userId: true, sellerId: true, status: true },
+    });
+    if (chats.length === 0) return activity;
+
+    const messages = await this.db.message.findMany({
+      where: { chatId: { in: chats.map((chat) => chat.id) }, senderId: { not: null } },
+      select: { chatId: true, senderId: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const humanMessages = new Map<string, { senderId: string | null }[]>();
+    for (const message of messages) {
+      // Checked here as well as in the query above. "Whether a person spoke
+      // last" is the rule this method exists for, and leaving it to the where
+      // clause alone puts the rule somewhere the method cannot see.
+      if (!message.senderId) continue;
+      const list = humanMessages.get(message.chatId) ?? [];
+      list.push(message);
+      humanMessages.set(message.chatId, list);
+    }
+
+    const people = new Map<string, Set<string>>();
+    const waiting = new Map<string, number>();
+
+    for (const chat of chats) {
+      if (!chat.listingId) continue;
+      if (chat.userId === chat.sellerId) continue; // the seller is not a buyer
+
+      const spoken = humanMessages.get(chat.id) ?? [];
+      if (!spoken.some((message) => message.senderId === chat.userId)) continue;
+
+      const buyers = people.get(chat.listingId) ?? new Set<string>();
+      buyers.add(chat.userId);
+      people.set(chat.listingId, buyers);
+
+      /*
+       * Waiting on the seller, one per conversation.
+       *
+       * The client's words: "As long as the last message was sent by the
+       * buyer and no reply was sent afterwards, it should count as an
+       * unanswered message" — one conversation in that state, one count,
+       * however many times the buyer wrote.
+       *
+       * Archived is excluded here but not from the request count above. This
+       * badge is a list of people waiting on a reply; if archiving a settled
+       * conversation did not clear it, a seller could never reach zero.
+       */
+      if (String(chat.status).toUpperCase() === 'ARCHIVED') continue;
+
+      const last = spoken[spoken.length - 1];
+      if (last?.senderId !== chat.userId) continue; // the seller answered last
+
+      waiting.set(chat.listingId, (waiting.get(chat.listingId) ?? 0) + 1);
+    }
+
+    for (const listingId of new Set([...people.keys(), ...waiting.keys()])) {
+      activity.set(listingId, {
+        requests: people.get(listingId)?.size ?? 0,
+        unanswered: waiting.get(listingId) ?? 0,
+      });
+    }
+    return activity;
   }
 
   /**
@@ -688,13 +1077,12 @@ export class ListingService {
    * The main feed simply drops these for everyone else, which is why the
    * teaser on All Listings needs its own way in.
    *
-   * Pro members (and staff) get the listings themselves. Everyone else gets a
-   * teaser: category, asking price and the countdown.
-   *
-   * The price is deliberately included. What Pro sells here is the ability to
-   * *act* first — the full listing and the seller — not secrecy about the
-   * price, which becomes public in a few days regardless. A card that shows
-   * only "new listing, 5 days left" gives nobody a reason to upgrade.
+   * Everyone gets the cards, masked exactly as the public feed masks them —
+   * the client's design shows the whole card, figures and all, behind a
+   * blurred photo and a countdown. What Pro sells here is the ability to *act*
+   * first: for everyone else each listing comes back `locked`, and opening it
+   * or reaching the seller leads to the plans instead. None of what is shown
+   * would stay secret anyway — the listing goes public in a few days.
    */
   async findOffMarket(viewer?: ViewerContext) {
     const resolvedViewer: ViewerContext = viewer || { viewerType: 'UNREGISTERED' };
@@ -737,25 +1125,6 @@ export class ListingService {
       resolvedViewer.viewerType === 'REGISTERED_PRO' ||
       this.isStaffRole(resolvedViewer.role);
 
-    if (!hasEarlyAccess) {
-      return {
-        total: listings.length,
-        hasEarlyAccess: false,
-        listings: listings.map((listing) => ({
-          id: listing.id,
-          category: (listing as any).category ?? [],
-          askingPrice: readListingPriceFromAdvertisement(
-            ((listing as any).advertisement ?? []) as Array<{
-              question?: string | null;
-              answer?: unknown;
-            }>,
-          ),
-          daysRemaining: daysLeft(listing.created_at),
-          locked: true,
-        })),
-      };
-    }
-
     const accessibleIds = await this.confidentialAccessIds(
       listings.map((listing) => listing.id),
       resolvedViewer.userId,
@@ -763,7 +1132,7 @@ export class ListingService {
 
     return {
       total: listings.length,
-      hasEarlyAccess: true,
+      hasEarlyAccess,
       listings: listings.map((listing) => ({
         ...maskListingFor(
           trimListingFeedRecord(listing as Record<string, any>),
@@ -773,8 +1142,15 @@ export class ListingService {
             hasConfidentialAccess: accessibleIds.has(listing.id),
           },
         ),
+        // Read out as well, for a card that has nothing else to go on.
+        askingPrice: readListingPriceFromAdvertisement(
+          ((listing as any).advertisement ?? []) as Array<{
+            question?: string | null;
+            answer?: unknown;
+          }>,
+        ),
         daysRemaining: daysLeft(listing.created_at),
-        locked: false,
+        locked: !hasEarlyAccess,
       })),
     };
   }
@@ -817,6 +1193,16 @@ export class ListingService {
       return null;
     }
 
+    // Blocked: off the market for everyone but its owner and the team. The
+    // page reads "no such listing" as Listing Not Found, which is where a
+    // shared link or an old bookmark should now land.
+    if (
+      listing.status === 'BLOCKED' &&
+      !canViewBlockedListing(listing, { userId: resolvedViewer.userId, role: resolvedViewer.role })
+    ) {
+      return null;
+    }
+
     if (resolvedViewer.viewerType !== 'REGISTERED_PRO') {
       const earlyAccessCutoff = new Date(
         Date.now() - this.earlyAccessDays * 24 * 60 * 60 * 1000,
@@ -828,6 +1214,12 @@ export class ListingService {
     }
 
     const normalizedListing = trimListingFeedRecord(listing as Record<string, any>);
+    // The same figures the feed carries, so a listing's own page and its card
+    // never disagree about how many people have been in touch.
+    const activity = await this.listingActivityFor([String(listing.id)]);
+    const own = activity.get(String(listing.id));
+    normalizedListing.requests_count = own?.requests ?? 0;
+    normalizedListing.unread_messages_count = own?.unanswered ?? 0;
 
     return maskListingFor(normalizedListing, {
       userId: resolvedViewer.userId,
@@ -893,6 +1285,8 @@ export class ListingService {
         userId: true,
         confidentialControl: true,
         approveBuyersManually: true,
+        selectedPackage: true,
+        packageActive: true,
       },
     });
     if (!listing) throw new NotFoundException('Listing not found');
@@ -913,7 +1307,9 @@ export class ListingService {
      * approve and nothing to tell the buyer they are waiting — which is what
      * used to happen: this returned "pending" and saved nothing at all.
      */
-    if (listing.approveBuyersManually === true) {
+    // The switch alone is not enough: the client's rule is a seller on Starter
+    // or Premium who switched it on, and the switch outlives the package.
+    if (manualApprovalApplies(listing)) {
       const existing = await this.db.listingConfidentialAccess.findUnique({
         where: { listingId_buyerId: { listingId, buyerId } },
         select: { status: true },
@@ -928,7 +1324,16 @@ export class ListingService {
         return { granted: false, pendingApproval: false, declined: true };
       }
 
-      const chatId = await this.findRequestChatId(listingId, buyerId, listing.userId);
+      /*
+       * The request gets its conversation now.
+       *
+       * It used to look for one and store null when there was none — and there
+       * never was, because the listing page's Contact Seller waits for access
+       * before it opens a chat, and this request is what stands in the way. So
+       * the seller's card opened nothing and carried no label or last message,
+       * and approving had nowhere to say so.
+       */
+      const chatId = await ensureRequestChat(this.db as any, listingId, buyerId, listing.userId);
 
       await this.db.listingConfidentialAccess.upsert({
         where: { listingId_buyerId: { listingId, buyerId } },
@@ -939,12 +1344,14 @@ export class ListingService {
           chatId,
           status: 'PENDING',
         },
-        // Kept up to date: a buyer who opens the conversation after asking
-        // should not leave the seller with a card that opens nothing.
-        update: { status: 'PENDING', ...(chatId ? { chatId } : {}) },
+        update: { status: 'PENDING', chatId },
       });
 
-      return { granted: false, pendingApproval: true };
+      // The buyer is taken into this conversation next; this tells them what
+      // they are waiting for.
+      await postAccessNotice(this.db as any, chatId, 'CONFIDENTIAL_ACCESS_REQUESTED', buyerId);
+
+      return { granted: false, pendingApproval: true, chatId };
     }
 
     // This listing does not vet buyers, so accepting the agreement is enough.
@@ -981,6 +1388,8 @@ export class ListingService {
     const rows = await this.db.listingConfidentialAccess.findMany({
       where: {
         status: 'PENDING',
+        // Never the seller's own listing: see ensureRequestChat.
+        buyerId: { not: sellerId },
         listing: { userId: sellerId },
       },
       include: {
@@ -1053,10 +1462,16 @@ export class ListingService {
       throw new BadRequestException('That request has already been decided.');
     }
 
+    const chatId = await ensureRequestChat(this.db as any, listingId, buyerId, sellerId);
+
     await this.db.listingConfidentialAccess.update({
       where: { listingId_buyerId: { listingId, buyerId } },
-      data: { status: 'DECLINED', decidedAt: new Date() },
+      data: { status: 'DECLINED', decidedAt: new Date(), chatId },
     });
+
+    // The buyer is in this conversation waiting for an answer. Without a word
+    // they would go on waiting.
+    await postAccessNotice(this.db as any, chatId, 'CONFIDENTIAL_ACCESS_DECLINED', buyerId);
 
     this.logger.log(`Listing ${listingId}: access declined for buyer ${buyerId}`);
     return { success: true };
@@ -1134,7 +1549,7 @@ export class ListingService {
      * state every existing request was in.
      */
     const noticeChat =
-      chatId ?? (await this.findRequestChatId(listingId, buyerId, sellerId)) ?? '';
+      chatId ?? (await ensureRequestChat(this.db as any, listingId, buyerId, sellerId));
 
     const granted = await this.db.listingConfidentialAccess.upsert({
       where: {
@@ -1175,30 +1590,10 @@ export class ListingService {
      * already imports this one — asking for it back would close a circle. The
      * message is two fields; the wording lives in the browser, keyed on `kind`.
      */
-    if (noticeChat) {
-      try {
-        const meta = { kind: 'CONFIDENTIAL_ACCESS_APPROVED', buyerId };
-        const already = await this.db.message.findFirst({
-          where: { chatId: noticeChat, type: 'SYSTEM', metadata: { equals: meta } },
-          select: { id: true },
-        });
-        if (!already) {
-          await this.db.message.create({
-            data: {
-              chatId: noticeChat,
-              senderId: null,
-              type: 'SYSTEM',
-              content: null,
-              read: false,
-              metadata: meta,
-            },
-          });
-        }
-      } catch (error) {
-        // A notice is not worth failing the approval it describes.
-        console.error('Failed to post confidential-access notice:', error);
-      }
-    }
+    // Written into the request's conversation and pushed to whoever has it
+    // open. There is always one now: a request that never had a conversation
+    // gets it here, which is where every approval so far had nowhere to go.
+    await postAccessNotice(this.db as any, noticeChat, 'CONFIDENTIAL_ACCESS_APPROVED', buyerId);
 
     return granted;
   }
@@ -1383,7 +1778,9 @@ export class ListingService {
       featuredOnStartPage: false,
       selectedPackage: body.selectedPackage ?? null,
       packageBillingCycle: body.packageBillingCycle ?? null,
-      packageAddons: Array.isArray(body.packageAddons) ? body.packageAddons : [],
+      // Placements are never taken from the request body: they are rows, and a
+      // row exists only once Stripe says it was paid for.
+      packageAddons: [],
       successFeePercent: body.successFeePercent ?? null,
       approveBuyersManually: this.canApproveBuyersManually(body.selectedPackage)
         ? (body.approveBuyersManually ?? null)
@@ -1493,6 +1890,7 @@ export class ListingService {
       key !== 'featuredOnStartPage' &&
       key !== 'selectedPackage' &&
       key !== 'packageBillingCycle' &&
+      key !== 'addonBillingCycle' &&
       key !== 'packageAddons' &&
       key !== 'successFeePercent' &&
       key !== 'approveBuyersManually'
@@ -1506,7 +1904,7 @@ export class ListingService {
     console.log('✅ Creating listing with data fields:', dataFields);
     console.log('📋 Full createData:', JSON.stringify(createData, null, 2));
 
-    return this.db.listing.create({
+    const created = await this.db.listing.create({
       data: createData,
       //   For Testing Include these
       include: {
@@ -1522,6 +1920,10 @@ export class ListingService {
         handover: true,
       },
     });
+
+    // Its price and figures in every currency, for filters and sorting.
+    await this.listingFx?.refreshQuietly(created.id);
+    return created;
   }
 
   async update(
@@ -1530,6 +1932,24 @@ export class ListingService {
     body: UpdateListingT,
     actorRole?: string | null,
   ) {
+    /*
+     * Only the listing's owner or the team may save it — the rule deleting
+     * already had. Nothing checked this here, and every save also handed the
+     * listing to whoever made it, so one request from any signed-in account
+     * could take a listing over. A team member blocking a listing took it out
+     * of its owner's My Listings the same way.
+     */
+    const existing = await this.db.listing.findUnique({
+      where: { id },
+      select: { userId: true, status: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('Listing not found');
+    }
+    if (!this.isStaffRole(actorRole) && existing.userId !== userId) {
+      throw new ForbiddenException('You can only edit your own listing.');
+    }
+
     // Marking a business as sold is a platform-team action, never the seller's.
     if (body.status === 'SOLD' && !this.isStaffRole(actorRole)) {
       throw new ForbiddenException(
@@ -1561,6 +1981,20 @@ export class ListingService {
       throw new ForbiddenException(
         'Only the platform team can block a listing.',
       );
+    }
+
+    // The owner is shown why, so a new block has to come with a reason. Saving
+    // a listing that is already blocked keeps the reason it was given.
+    if (body.status === 'BLOCKED' && !String(body.blockedReason ?? '').trim()) {
+      const current = await this.db.listing.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (current?.status !== 'BLOCKED') {
+        throw new BadRequestException(
+          'Say why this listing is being blocked — the owner is shown the reason.',
+        );
+      }
     }
 
     // A blocked listing may still be edited — the owner has to be able to fix
@@ -1716,10 +2150,9 @@ export class ListingService {
     // Build update data object - start with basic fields
     const updateData: any = {};
     
-    // Always include user connection
-    updateData.user = {
-      connect: { id: userId },
-    };
+    // The owner is never written here. This used to connect the listing to
+    // whoever was saving it, so a team member's save — a block, a sale, an
+    // assignment — moved the listing into the team member's own account.
     
     // Always include status if provided
     if (body.status) {
@@ -1729,6 +2162,7 @@ export class ListingService {
         // The business is sold, so the seller must stop being billed for it.
         updateData.soldAt = new Date();
         updateData.packageBillingCycle = null;
+        updateData.addonBillingCycle = null;
         updateData.packageActive = false;
         updateData.featuredOnCategoryPage = false;
         updateData.featuredOnStartPage = false;
@@ -1751,10 +2185,10 @@ export class ListingService {
     /**
      * Who on the team looks after this listing.
      *
-     * Written through the relation, not as a bare `responsibleId`. Every update
-     * already carries `user: { connect: … }`, and once a relation is addressed
-     * that way Prisma validates the whole payload as a checked input — where a
-     * foreign key written as a plain scalar is not a field at all. The call
+     * Written through the relation, not as a bare `responsibleId`. A save that
+     * also carries a nested write — brand, category, the answers — addresses a
+     * relation, and then Prisma validates the whole payload as a checked input,
+     * where a foreign key written as a plain scalar is not a field at all. The call
      * threw, the request came back 500, and nothing in it was saved: not the
      * assignment, and not whatever else the same save was carrying. Which is
      * why no listing has ever had anyone assigned to it.
@@ -1766,7 +2200,9 @@ export class ListingService {
     }
 
     if (body.status === 'BLOCKED') {
-      updateData.blockedReason = body.blockedReason || null;
+      // Only a new reason replaces the old one; a save without one keeps it.
+      const reason = String(body.blockedReason ?? '').trim();
+      if (reason) updateData.blockedReason = reason;
     } else if (body.status) {
       // Any other status means the block has been lifted; the note goes too.
       updateData.blockedReason = null;
@@ -1786,12 +2222,6 @@ export class ListingService {
 
     if (body.packageBillingCycle !== undefined) {
       updateData.packageBillingCycle = body.packageBillingCycle ?? null;
-    }
-
-    if (body.packageAddons !== undefined) {
-      updateData.packageAddons = Array.isArray(body.packageAddons)
-        ? body.packageAddons
-        : [];
     }
 
     if (body.successFeePercent !== undefined) {
@@ -1911,11 +2341,118 @@ export class ListingService {
       
       const managedByEx = (result as any).managed_by_ex;
       console.log(`✅ Listing ${id} updated successfully. managed_by_ex = ${managedByEx}`);
+
+      // A new price or new figures change what it comes to in other currencies.
+      await this.listingFx?.refreshQuietly(id);
+
+      // A new block reaches the owner straight away, with the reason. Without
+      // this they only found out if they happened to open My Listings.
+      if (body.status === 'BLOCKED' && existing.status !== 'BLOCKED') {
+        await this.tellOwnerListingBlocked(id, existing.userId, updateData.blockedReason);
+      }
+
+      void this.recordListingChange(
+        id,
+        existing,
+        body.status,
+        userId,
+        actorRole,
+        updateData.blockedReason,
+      );
+
       return result;
     } catch (error: any) {
       console.error('❌ Error updating listing:', error);
       console.error('Update data that caused error:', JSON.stringify(updateData, null, 2));
       throw error;
+    }
+  }
+
+  /**
+   * Tell a listing's owner that the team has blocked it, and why.
+   *
+   * Never fails the block itself: the listing is already off the market by the
+   * time this runs, and the owner still finds the reason in My Listings.
+   */
+  private async tellOwnerListingBlocked(listingId: string, ownerId: string, reason?: string | null) {
+    try {
+      const listing = await this.db.listing.findUnique({
+        where: { id: listingId },
+        select: { advertisement: true, brand: true },
+      });
+      await this.notifications.notify(ownerId, blockedListingNotice(listingTitleOf(listing), reason));
+    } catch (error) {
+      this.logger.warn(`Could not tell the owner that listing ${listingId} was blocked: ${error}`);
+    }
+  }
+
+  /** "the listing “Title”" for an id, for the activity log. */
+  private async listingPhraseFor(listingId: string): Promise<string> {
+    const listing = await this.db.listing
+      .findUnique({ where: { id: listingId }, select: { advertisement: true, brand: true } })
+      .catch(() => null);
+    return listingPhrase(listingTitleOf(listing));
+  }
+
+  /**
+   * A saved change in the owner's log, and in the team member's when it was
+   * them: published, blocked with the reason, unblocked, sold, taken off the
+   * marketplace, or edited. A listing saved step by step is one edit.
+   */
+  private async recordListingChange(
+    listingId: string,
+    before: { userId: string; status: string | null },
+    nextStatus: string | null | undefined,
+    actorId: string,
+    actorRole?: string | null,
+    blockedReason?: string | null,
+  ) {
+    if (!this.activityLog) return;
+    try {
+      const name = await this.listingPhraseFor(listingId);
+      const entry = {
+        actorId,
+        actorRole,
+        subjectUserId: before.userId,
+        entityType: 'listing',
+        entityId: listingId,
+      };
+      const becomes = (status: string) => nextStatus === status && before.status !== status;
+
+      if (becomes('BLOCKED')) {
+        await this.activityLog.record({
+          ...entry,
+          action: 'listing.blocked',
+          message: sentence(`${name} was blocked${blockedReason ? `: ${blockedReason}` : ''}`),
+        });
+      } else if (before.status === 'BLOCKED' && nextStatus && nextStatus !== 'BLOCKED') {
+        await this.activityLog.record({
+          ...entry,
+          action: 'listing.unblocked',
+          message: sentence(`${name} was unblocked`),
+        });
+      } else if (becomes('PUBLISH')) {
+        await this.activityLog.record({ ...entry, action: 'listing.published', message: `Published ${name}` });
+      } else if (becomes('SOLD')) {
+        await this.activityLog.record({
+          ...entry,
+          action: 'listing.sold',
+          message: sentence(`${name} was marked as sold`),
+        });
+      } else if (becomes('DRAFT')) {
+        await this.activityLog.record({
+          ...entry,
+          action: 'listing.unpublished',
+          message: `Took ${name} off the marketplace`,
+        });
+      } else {
+        await this.activityLog.recordUnlessRecent(
+          { ...entry, action: 'listing.edited', message: `Edited ${name}` },
+          15 * 60 * 1000,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(`Could not record the change to listing ${listingId}: ${error}`);
     }
   }
 

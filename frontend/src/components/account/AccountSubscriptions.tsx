@@ -10,6 +10,11 @@ import {
 } from "@/lib/chatListing";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 import { formatNumber } from "@/lib/formatNumber";
+import {
+  activeSubscriptionCount,
+  buyerPlanPriceText,
+  subscriptionBadge,
+} from "@/lib/accountSubscriptions";
 
 /**
  * A rough overview of what the member is paying for.
@@ -40,22 +45,12 @@ export const AccountSubscriptions = () => {
       const payload: any = response.data;
       const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
       /*
-       * Paying, not merely having chosen.
-       *
-       * Every published listing carries a `selectedPackage`, so filtering on
-       * that put all of them on a page headed "Manage Your Subscriptions" —
-       * nine of eleven here sitting on MINIMUM, which costs nothing.
-       *
-       * `packageActive` alone is not the test either: the free package is
-       * switched on the moment it is picked, while a paid one only flips once
-       * Stripe confirms the payment. So both conditions, together.
+       * Paying, not merely having chosen: a live paid package, or a placement
+       * bought for the listing. Every published listing carries a
+       * `selectedPackage`, most of them the free one.
        */
       return rows.filter(
-        (row: any) =>
-          row?.userId === user?.id &&
-          row?.selectedPackage &&
-          row.selectedPackage !== 'MINIMUM' &&
-          row.packageActive === true,
+        (row: any) => row?.userId === user?.id && activeSubscriptionCount(row) > 0,
       );
     },
     enabled: Boolean(user),
@@ -83,9 +78,7 @@ export const AccountSubscriptions = () => {
 
       <div className="mt-4 flex flex-col gap-3">
         {/* The listing as the member knows it — its own title, its own words,
-            its own price. This described the package instead: a sentence
-            written here rather than by the seller, and "minimum package" where
-            the asking price belongs. */}
+            its own price. */}
         {listings.map((listing: any) => {
           const price = getChatListingPrice(listing);
           const priceNumber = Number(String(price).replace(/[^0-9.\-]/g, ''));
@@ -93,32 +86,41 @@ export const AccountSubscriptions = () => {
           return (
             <Row
               key={listing.id}
-              image={getChatListingImage(listing)}
+              // The box is drawn even without a photo: the badge lives on it.
+              image={getChatListingImage(listing) || ""}
               title={getChatListingTitle(listing) || "Your listing"}
               description={getChatListingDescription(listing)}
-              badge="Active Subscription"
+              badge={subscriptionBadge(activeSubscriptionCount(listing))}
               amount={
                 Number.isFinite(priceNumber) && priceNumber > 0
                   ? `${getListingCurrencySymbol(listing)}${formatNumber(priceNumber)}`
                   : ""
               }
-              onManage={() => navigate("/my-listings")}
+              // Straight to this listing's package and placements, as the
+              // client asked; it went to the whole My Listings page.
+              onManage={() => navigate(`/manage-subscription/${listing.id}`)}
             />
           );
         })}
 
         {buyerPlanIsPaid && (
           <Row
+            avatar={user?.profile_pic || null}
+            avatarFallback={(user?.first_name || "B").charAt(0).toUpperCase()}
             title={`Buyer: ${planTitle} Plan`}
             description="Manage your buyer subscription, change your billing cycle, or upgrade and downgrade your plan."
-            amount={`$${formatNumber(planPrice)} monthly`}
+            amount={buyerPlanPriceText(
+              planPrice,
+              subscription?.billingCycle,
+              Number(subscription?.plan?.yearlyPrice ?? 0),
+            )}
             onManage={() => navigate("/manage-subscription")}
           />
         )}
       </div>
 
-      {/* Both halves can now be empty at once, and a heading with nothing
-          under it reads as a page that failed to load. */}
+      {/* Both halves can be empty at once, and a heading with nothing under
+          it reads as a page that failed to load. */}
       {listings.length === 0 && !buyerPlanIsPaid && (
         <p
           className="mt-4 mb-0 text-[12.5px] text-[#64748B]"
@@ -135,6 +137,8 @@ export const AccountSubscriptions = () => {
 
 const Row = ({
   image,
+  avatar,
+  avatarFallback,
   title,
   description,
   badge,
@@ -142,6 +146,9 @@ const Row = ({
   onManage,
 }: {
   image?: string;
+  /** The member's own picture, round, for the buyer plan — as in the design. */
+  avatar?: string | null;
+  avatarFallback?: string;
   title: string;
   description: string;
   badge?: string;
@@ -152,19 +159,41 @@ const Row = ({
     {image !== undefined && (
       <div
         className="relative shrink-0 overflow-hidden rounded-lg bg-black/5"
-        style={{ width: '78px', height: '58px' }}
+        style={{ width: '96px', height: '64px' }}
       >
         {image && (
           <img src={image} alt="" loading="lazy" className="h-full w-full object-cover" />
         )}
+        {/* Wraps rather than clipping: "2 Active Subscriptions" is wider
+            than the picture it sits on. */}
         {badge && (
           <span
-            className="absolute bottom-0 left-0 right-0 truncate bg-black/65 px-1 py-0.5 text-center text-[8.5px] text-white"
+            className="absolute bottom-0 left-0 right-0 bg-black/65 px-1 py-0.5 text-center text-[9px] leading-tight text-white"
             style={{ fontFamily: 'Lufga' }}
           >
             {badge}
           </span>
         )}
+      </div>
+    )}
+
+    {avatar !== undefined && (
+      <div className="flex shrink-0 justify-center" style={{ width: '96px' }}>
+        <div
+          className="flex items-center justify-center overflow-hidden rounded-full bg-black/5 text-[18px] font-semibold text-[#0F172A]"
+          style={{
+            width: '58px',
+            height: '58px',
+            boxShadow: '0 0 0 2px rgba(174, 243, 31, 1)',
+            fontFamily: 'Lufga',
+          }}
+        >
+          {avatar ? (
+            <img src={avatar} alt="" loading="lazy" className="h-full w-full object-cover" />
+          ) : (
+            avatarFallback
+          )}
+        </div>
       </div>
     )}
 

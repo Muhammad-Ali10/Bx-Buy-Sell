@@ -131,12 +131,27 @@ const Carousel = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
 );
 Carousel.displayName = "Carousel";
 
-const CarouselContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => {
+/**
+ * `containerClassName` reaches the clipping wrapper, which nothing could style
+ * before.
+ *
+ * The wrapper has no height of its own, so `h-full` on the track resolved
+ * against `auto` and the slides fell back to their content height. On the
+ * listing page that left the picture shorter than the 4:3 frame around it, and
+ * the category badge — pinned to the bottom of that frame — ended up sitting
+ * on the empty strip underneath, looking like a button below the image.
+ */
+interface CarouselContentProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Classes for the wrapper that clips the track. */
+  containerClassName?: string;
+}
+
+const CarouselContent = React.forwardRef<HTMLDivElement, CarouselContentProps>(
+  ({ className, containerClassName, ...props }, ref) => {
     const { carouselRef, orientation } = useCarousel();
 
     return (
-      <div ref={carouselRef} className="overflow-hidden">
+      <div ref={carouselRef} className={cn("overflow-hidden", containerClassName)}>
         <div
           ref={ref}
           className={cn("flex", orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col", className)}

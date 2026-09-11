@@ -56,7 +56,8 @@ export const TeamMemberStatistics = ({
     {
       label: "Activity log",
       value: data?.activityLog,
-      to: `/admin/settings?tab=activity&actor=${memberId}`,
+      // Their own page, on the Logs tab.
+      to: `/admin/users/${memberId}?tab=logs`,
     },
   ];
 

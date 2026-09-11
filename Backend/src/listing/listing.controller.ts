@@ -5,6 +5,7 @@ import {
   Get,
   Inject,
   Logger,
+  Optional,
   Param,
   Patch,
   Post,
@@ -14,6 +15,8 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ListingService } from './listing.service';
+import { ListingAddonService } from './listing-addon.service';
+import type { PaidAddonId } from './listing-addon.util';
 
 import { listingSchema, ListingSchemaDTO } from './dto/create-listing.dto';
 import { ZodValidationPipe } from 'common/validator/zod.validator';
@@ -23,6 +26,10 @@ import { subscriptionConfig } from '../config/stripe.config';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { CACHE_TTL } from 'common/config/cache.config';
 import { Public } from 'common/decorator/public.decorator';
+import { ActivityLogService } from '../activity-log/activity-log.service';
+import { listingPhrase, sentence } from '../activity-log/activity-log.catalog';
+import { requestOrigin } from '../activity-log/request-origin';
+import { listingTitleOf } from './listing-notices';
 
 @Controller('listing')
 export class ListingController {
@@ -36,7 +43,10 @@ export class ListingController {
 
   constructor(
     private readonly listingService: ListingService,
+    private readonly addonService: ListingAddonService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    /** Listings created and deleted go into the owner's log. */
+    @Optional() private readonly activityLog?: ActivityLogService,
   ) {}
 
   /**
@@ -238,6 +248,19 @@ export class ListingController {
       const data = await this.listingService.create(user.id, body);
       await this.clearListingCaches();
 
+      const created = data as any;
+      void this.activityLog?.record({
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'listing.created',
+        entityType: 'listing',
+        entityId: created?.id ?? null,
+        message: `Created ${listingPhrase(listingTitleOf(created))}${
+          created?.status === 'PUBLISH' ? ' and published it' : ''
+        }`,
+        ...requestOrigin(req),
+      });
+
       return data;
     } catch (error) {
       throw error;
@@ -352,6 +375,7 @@ export class ListingController {
       packageId: 'MINIMUM' | 'STARTER' | 'PREMIUM';
       addon?: 'NONE' | 'CATEGORY_PAGE' | 'START_PAGE' | 'BUNDLE';
       billingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
+      addonBillingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
     },
   ) {
     const { id: userId } = (req as any).user;
@@ -361,12 +385,20 @@ export class ListingController {
       packageId: body.packageId,
       addon: body.addon || 'NONE',
       billingCycle: body.billingCycle || 'MONTHLY',
+      addonBillingCycle: body.addonBillingCycle || 'MONTHLY',
       successUrl: `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${frontendUrl}/dashboard/listing/${id}`,
     });
 
     await this.clearListingCaches(id);
     return result;
+  }
+
+  @Post(':id/package/cancel-change')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id' })
+  async cancelScheduledPackageChange(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req as any).user?.id;
+    return this.listingService.cancelScheduledPackageChange(id, userId);
   }
 
   @Get(':id/package')
@@ -379,25 +411,84 @@ export class ListingController {
     return this.listingService.getPackageState(id, userId);
   }
 
-  @Post(':id/addon')
-  @ApiParam({ name: 'id', type: String, description: 'Listing Id', required: true })
-  @ApiOperation({
-    summary: "Add, replace or cancel a listing's add-on after it is published",
-  })
-  async changeAddon(
+  /**
+   * Buy a placement, or move one already held onto a different billing cycle.
+   *
+   * Addressed by placement rather than by listing, because a listing can hold
+   * more than one and each is bought, billed and cancelled on its own.
+   */
+  @Post(':id/addons/:addon')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id' })
+  @ApiParam({ name: 'addon', type: String, description: 'CATEGORY_PAGE | START_PAGE | BUNDLE' })
+  @ApiOperation({ summary: "Subscribe to one of a listing's placements" })
+  async subscribeAddon(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() body: { addon: 'NONE' | 'CATEGORY_PAGE' | 'START_PAGE' | 'BUNDLE' },
+    @Param('addon') addon: PaidAddonId,
+    @Body() body: { billingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH' },
   ) {
     const { id: userId } = (req as any).user;
     const frontendUrl = subscriptionConfig.frontendUrl;
 
-    const result = await this.listingService.changeAddon(id, userId, {
-      addon: body.addon,
+    const result = await this.addonService.subscribe(id, userId, {
+      addon,
+      billingCycle: body?.billingCycle || 'MONTHLY',
       successUrl: `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${frontendUrl}/my-listings`,
+      cancelUrl: `${frontendUrl}/listing/${id}/manage-subscription`,
     });
 
+    await this.clearListingCaches(id);
+    return result;
+  }
+
+  /** Stop one placement renewing; it stays up until the paid period is over. */
+  @Post(':id/addons/:addon/cancel')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id' })
+  @ApiParam({ name: 'addon', type: String })
+  async cancelAddon(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('addon') addon: PaidAddonId,
+  ) {
+    const { id: userId } = (req as any).user;
+    const result = await this.addonService.cancel(id, userId, addon);
+    await this.clearListingCaches(id);
+    return result;
+  }
+
+  /** Undo a cancellation before its date. Nothing is charged. */
+  @Post(':id/addons/:addon/reactivate')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id' })
+  @ApiParam({ name: 'addon', type: String })
+  async reactivateAddon(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('addon') addon: PaidAddonId,
+  ) {
+    const { id: userId } = (req as any).user;
+    const result = await this.addonService.reactivate(id, userId, addon);
+    await this.clearListingCaches(id);
+    return result;
+  }
+
+  /**
+   * Stop the package renewing. Everything stays until the paid period ends,
+   * and `package/reactivate` undoes it up until that day.
+   */
+  @Post(':id/package/cancel')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id' })
+  async cancelPackage(@Req() req: Request, @Param('id') id: string) {
+    const { id: userId } = (req as any).user;
+    const result = await this.listingService.cancelPackage(id, userId);
+    await this.clearListingCaches(id);
+    return result;
+  }
+
+  @Post(':id/package/reactivate')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id' })
+  async reactivatePackage(@Req() req: Request, @Param('id') id: string) {
+    const { id: userId } = (req as any).user;
+    const result = await this.listingService.reactivatePackage(id, userId);
     await this.clearListingCaches(id);
     return result;
   }
@@ -436,9 +527,21 @@ export class ListingController {
     const currentUser = (req as any).user;
     // Deleting cascades through the listing's chats and their messages, so who
     // is asking is checked before anything is removed.
-    await this.listingService.assertMayDelete(id, currentUser?.id, currentUser?.role);
+    const target = await this.listingService.assertMayDelete(id, currentUser?.id, currentUser?.role);
     const data = await this.listingService.delete(id);
     await this.clearListingCaches(id);
+
+    // In the owner's log, and in the team member's when it was them.
+    void this.activityLog?.record({
+      actorId: currentUser?.id ?? null,
+      actorRole: currentUser?.role ?? null,
+      subjectUserId: target?.userId ?? currentUser?.id ?? null,
+      action: 'listing.deleted',
+      entityType: 'listing',
+      entityId: id,
+      message: sentence(`${listingPhrase(listingTitleOf(data as any))} was deleted`),
+      ...requestOrigin(req),
+    });
     return data;
   }
 }

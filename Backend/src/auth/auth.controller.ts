@@ -17,6 +17,7 @@ import { Public, Authenticated } from 'common/decorator/public.decorator';
 import { ZodValidationPipe } from 'common/validator/zod.validator';
 import { ApiBody, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { Roles } from 'common/decorator/roles.decorator';
+import { requestOrigin } from 'src/activity-log/request-origin';
 
 import { RefreshSchema, RefreshSchemaDTO } from './dto/refresh.dto';
 import { verifyOtpSchema } from './dto/verify.dto';
@@ -30,23 +31,24 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiBody({ type: () => SignUpSchemaDTO })
   @Post('/signup')
-  async signUp(@Body(new ZodValidationPipe(signUpSchema)) body) {
-    return this.authService.signUp(body);
+  async signUp(@Req() req: any, @Body(new ZodValidationPipe(signUpSchema)) body) {
+    return this.authService.signUp(body, requestOrigin(req));
   }
 
   @HttpCode(HttpStatus.OK)
   @ApiBody({ type: () => SignInSchemaDTO })
   @Post('/signin')
-  signIn(@Body(new ZodValidationPipe(signInSchema)) body) {
-    return this.authService.signIn(body);
+  signIn(@Req() req: any, @Body(new ZodValidationPipe(signInSchema)) body) {
+    return this.authService.signIn(body, requestOrigin(req));
   }
 
   @HttpCode(HttpStatus.OK)
   @ApiParam({ name: 'id', description: 'User ID', type: String })
   @Get('logout/:id')
-  logout(@Param('id') id: string) {
-    console.log(id);
-    return this.authService.logout(id);
+  logout(@Param('id') id: string, @Req() req: any) {
+    const authorization = String(req?.headers?.authorization ?? '');
+    const accessToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined;
+    return this.authService.logout(id, requestOrigin(req), accessToken);
   }
 
   @HttpCode(HttpStatus.OK)
@@ -83,9 +85,22 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiBody({ type: () => UpdatePasswordDTO })
   @Put('/update-password')
-  updatePassword(@Body(new ZodValidationPipe(updatePasswordSchema)) body) {
+  updatePassword(@Req() req: any, @Body(new ZodValidationPipe(updatePasswordSchema)) body) {
     const { email, otp_code, new_password, confirm_password } = body;
-    return this.authService.updatePassword(email, otp_code, new_password, confirm_password);
+    return this.authService.updatePassword(
+      email,
+      otp_code,
+      new_password,
+      confirm_password,
+      requestOrigin(req),
+    );
+  }
+
+  /** Check a reset code without spending it; `update-password` spends it. */
+  @HttpCode(HttpStatus.OK)
+  @Put('/check-reset-code')
+  checkResetCode(@Body(new ZodValidationPipe(verifyOtpSchema)) body) {
+    return this.authService.checkResetCode(body.email, body.otp_code);
   }
 
   /**
@@ -111,6 +126,7 @@ export class AuthController {
       current_password,
       new_password,
       confirm_password,
+      requestOrigin(req),
     );
   }
 }

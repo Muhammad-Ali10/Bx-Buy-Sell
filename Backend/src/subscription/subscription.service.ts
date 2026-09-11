@@ -1,9 +1,19 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { StripeService } from './stripe.service';
+import { StripeService, subscriptionPeriodEnd } from './stripe.service';
+import { ensureStripeCustomer } from './stripe-customer';
 import { SubscriptionStatus, BillingCycle } from '@prisma/client';
 import { subscriptionConfig } from '../config/stripe.config';
 import { notDeleted } from '../prisma/soft-delete';
+import { ActivityLogService } from '../activity-log/activity-log.service';
+import { billedPhrase, formatDay } from '../activity-log/activity-log.catalog';
+
+/** A Stripe field holds an id, or the object itself when it was expanded. */
+const stripeId = (value: unknown): string | null =>
+  typeof value === 'string' ? value : ((value as { id?: string } | null)?.id ?? null);
+
+/** Holding a plan: paying for it, trialling it, or a payment being retried. */
+const HELD_STATUSES = ['active', 'trialing', 'past_due'];
 
 @Injectable()
 export class SubscriptionService {
@@ -12,7 +22,20 @@ export class SubscriptionService {
   constructor(
     private db: PrismaService,
     private stripeService: StripeService,
+    /** Plans bought, cancelled and kept go into the member's log. */
+    @Optional() private readonly activityLog?: ActivityLogService,
   ) {}
+
+  /** A plan event in the member's own log. Never fails the change itself. */
+  private recordPlan(userId: string, action: string, message: string) {
+    void this.activityLog?.record({
+      actorId: userId,
+      action,
+      entityType: 'subscription',
+      entityId: userId,
+      message,
+    });
+  }
 
   /**
    * Get user's current subscription
@@ -161,6 +184,20 @@ export class SubscriptionService {
       },
     });
 
+    if (target.slug === 'free') {
+      this.recordPlan(
+        userId,
+        'billing.plan-cancelled',
+        `Cancelled the ${subscription.plan.name} plan; it runs until ${formatDay(effectiveAt)}`,
+      );
+    } else {
+      this.recordPlan(
+        userId,
+        'billing.plan-change-scheduled',
+        `Scheduled a change to the ${target.name} plan${billedPhrase(billingCycle)} from ${formatDay(effectiveAt)}`,
+      );
+    }
+
     this.logger.log(
       `Scheduled change to ${target.slug}/${billingCycle} for ${userId} at ${effectiveAt.toISOString()}`,
     );
@@ -205,6 +242,14 @@ export class SubscriptionService {
         endDate: null,
       },
     });
+
+    this.recordPlan(
+      userId,
+      'billing.plan-resumed',
+      subscription.cancelledAt
+        ? `Kept the ${subscription.plan.name} plan after cancelling it`
+        : `Dropped a scheduled plan change; stays on the ${subscription.plan.name} plan`,
+    );
 
     this.logger.log(`Scheduled change cancelled for ${userId}`);
     return { success: true };
@@ -299,16 +344,31 @@ export class SubscriptionService {
       where: { userId },
     });
 
-    let customerId = subscription?.stripeCustomerId;
+    // The same customer the seller's listing purchases use: one person, one
+    // Stripe customer, whichever side of the platform they are paying for.
+    const customerId = await ensureStripeCustomer(
+      this.db as any,
+      this.stripeService,
+      userId,
+    );
 
-    // Create Stripe customer if doesn't exist
-    if (!customerId) {
-      const customer = await this.stripeService.createCustomer(
-        user.email,
-        `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
-        { userId },
+    /*
+     * One buyer plan at a time.
+     *
+     * Nothing stopped a second checkout, and while the account still read as
+     * free — the purchase had not been recorded — the plans page kept offering
+     * one. An account ended up billed for four plans at once. A dearer plan is
+     * still sold here, because that is how an upgrade is bought; the same plan
+     * or a cheaper one is not, since a downgrade or a new billing period is
+     * scheduled for the end of the paid period instead.
+     */
+    const held = await this.heldBuyerPlan(userId, customerId);
+    if (held && Number(plan.monthlyPrice) <= Number(held.monthlyPrice)) {
+      throw new BadRequestException(
+        held.id === plan.id
+          ? `You already have the ${held.title} plan. It can take a minute to appear on your account.`
+          : `You are on the ${held.title} plan. Moving to a cheaper plan is done under Manage Subscription and starts when your paid period ends.`,
       );
-      customerId = customer.id;
     }
 
     // No trial - charge immediately
@@ -338,58 +398,201 @@ export class SubscriptionService {
   }
 
   /**
-   * Handle successful checkout (called by webhook)
+   * Record a finished buyer-plan checkout. The Stripe webhook and the success
+   * page both call this; whichever arrives second finds the work already done.
    */
   async handleCheckoutComplete(session: any) {
     this.logger.log(`Handling checkout complete for session: ${session.id}`);
 
-    const { userId, planId, billingCycle } = session.metadata;
+    const { userId, planId, billingCycle } = session.metadata || {};
     if (!userId || !planId) {
       this.logger.error('Missing metadata in checkout session');
       return { success: false, error: 'Missing metadata' };
     }
 
-    const subscriptionId = session.subscription as string;
-    const customerId = session.customer as string;
+    /*
+     * An id, whichever way the session was fetched.
+     *
+     * The success page asked Stripe for the session with its subscription
+     * expanded, then handed that whole object on where an id belonged. Stripe
+     * refused it, the error was swallowed, and the page said "Subscription
+     * activated" all the same — so no buyer plan bought without the webhook
+     * running was ever recorded.
+     */
+    const subscriptionId = stripeId(session.subscription);
+    const customerId = stripeId(session.customer);
+    if (!subscriptionId) {
+      return { success: false, error: 'This checkout has no subscription yet' };
+    }
 
-    // Get Stripe subscription details
     const stripeSubscription = await this.stripeService.getSubscription(subscriptionId);
     const subData = stripeSubscription as any;
+    const previous = await this.db.userSubscription.findUnique({ where: { userId } });
 
-    // Create or update user subscription
+    const fields = {
+      planId,
+      stripeSubscriptionId: subscriptionId,
+      stripePriceId: subData.items.data[0].price.id,
+      stripeCurrentPeriodEnd: subscriptionPeriodEnd(subData),
+      status: subData.status.toUpperCase() as SubscriptionStatus,
+      billingCycle: billingCycle as BillingCycle,
+      trialEndsAt: subData.trial_end ? new Date(subData.trial_end * 1000) : null,
+    };
     await this.db.userSubscription.upsert({
       where: { userId },
       create: {
         userId,
-        planId,
-        stripeCustomerId: customerId,
-        stripeSubscriptionId: subscriptionId,
-        stripePriceId: subData.items.data[0].price.id,
-        stripeCurrentPeriodEnd: new Date(subData.current_period_end * 1000),
-        status: subData.status.toUpperCase() as SubscriptionStatus,
-        billingCycle: billingCycle as BillingCycle,
+        ...fields,
+        ...(customerId ? { stripeCustomerId: customerId } : {}),
         startDate: new Date(),
-        trialEndsAt: subData.trial_end
-          ? new Date(subData.trial_end * 1000)
-          : null,
       },
       update: {
-        planId,
-        stripeSubscriptionId: subscriptionId,
-        stripePriceId: subData.items.data[0].price.id,
-        stripeCurrentPeriodEnd: new Date(subData.current_period_end * 1000),
-        status: subData.status.toUpperCase() as SubscriptionStatus,
-        billingCycle: billingCycle as BillingCycle,
+        ...fields,
         cancelledAt: null,
         endDate: null,
-        trialEndsAt: subData.trial_end
-          ? new Date(subData.trial_end * 1000)
-          : null,
+        // A downgrade queued on the old plan does not carry over to the new one.
+        pendingPlanId: null,
+        pendingBillingCycle: null,
+        pendingChangeAt: null,
       },
     });
 
+    /*
+     * An upgrade is bought as a new subscription, so the one it replaces has to
+     * stop — otherwise the member pays for both, indefinitely. The unused days
+     * come back as credit on their next invoice. Done after the new one is
+     * recorded, so the cancellation's own webhook finds nothing of ours to undo.
+     */
+    const replaced = previous?.stripeSubscriptionId;
+    if (replaced && replaced !== subscriptionId && previous?.status !== 'CANCELLED') {
+      try {
+        await this.stripeService.cancelSubscription(replaced, true, true);
+        this.logger.log(`Buyer subscription ${replaced} replaced by ${subscriptionId}`);
+      } catch (error) {
+        this.logger.error(`Could not cancel replaced subscription ${replaced}:`, error);
+      }
+    }
+
+    // Into the member's log once: the webhook and the success page both land
+    // here for the same purchase, and the second finds it already saved.
+    if (previous?.stripeSubscriptionId !== subscriptionId) {
+      const plan = await this.db.plan
+        .findUnique({ where: { id: planId }, select: { name: true } })
+        .catch(() => null);
+      const changed = Boolean(previous?.stripeSubscriptionId) && previous?.status !== 'CANCELLED';
+      this.recordPlan(
+        userId,
+        'billing.plan-bought',
+        `${changed ? 'Changed to' : 'Bought'} the ${plan?.name ?? 'paid'} plan${billedPhrase(billingCycle)}`,
+      );
+    }
+
     this.logger.log(`Subscription activated for user: ${userId}`);
     return { success: true };
+  }
+
+  /**
+   * The success page's half of recording a checkout.
+   *
+   * Stripe tells the webhook too, but only where an endpoint is set up — and
+   * locally that meant only while the Stripe CLI happened to be running. This
+   * makes the purchase stick as soon as the member lands back on the site.
+   * Listing packages are left to the webhook, which knows how to switch them
+   * on; for those this only says what kind of purchase it was, so the page can
+   * send the member to the right place.
+   */
+  async syncCheckoutSession(userId: string, sessionId: string) {
+    if (!sessionId) return { success: false, error: 'No checkout to confirm.' };
+
+    let session: any;
+    try {
+      session = await this.stripeService.getStripe().checkout.sessions.retrieve(sessionId);
+    } catch {
+      this.logger.warn(`Could not fetch checkout session ${sessionId}`);
+      return { success: false, error: 'We could not find that checkout.' };
+    }
+
+    const meta = session.metadata || {};
+    if (meta.listingId) return { success: true, kind: 'listing' as const };
+
+    if (meta.userId !== userId) {
+      return { success: false, error: 'Only the account that paid can confirm this checkout.' };
+    }
+    const settled =
+      session.status === 'complete' &&
+      (session.payment_status === 'paid' || session.payment_status === 'no_payment_required');
+    if (!settled) {
+      return {
+        success: false,
+        error: 'The payment has not gone through yet. Please check again in a minute.',
+      };
+    }
+
+    try {
+      const result: { success: boolean; error?: string } =
+        await this.handleCheckoutComplete(session);
+      return result.success
+        ? { success: true, kind: 'buyer' as const }
+        : { success: false, error: result.error };
+    } catch (error) {
+      this.logger.error(`Could not record checkout ${sessionId}:`, error);
+      return {
+        success: false,
+        error:
+          'Your payment went through, but we could not record it yet. Please check again in a minute.',
+      };
+    }
+  }
+
+  /**
+   * The buyer plan this member is being billed for right now, if any.
+   *
+   * Stripe is asked first, because the record here is only as good as the last
+   * checkout that reached it — and it is exactly the unrecorded purchases this
+   * is looking for. A buyer plan is recognised by its plan's price, which also
+   * finds the ones bought before subscriptions carried their plan in metadata;
+   * a listing's package carries a listingId and is skipped. Only when Stripe
+   * cannot be reached does the saved record decide.
+   */
+  private async heldBuyerPlan(userId: string, customerId: string) {
+    const plans = await this.db.plan.findMany();
+    type PlanRow = (typeof plans)[number];
+    const paid = (p?: PlanRow | null) => (p && p.slug !== 'free' ? p : null);
+    const byId = new Map(plans.map((p) => [p.id, p]));
+    const byPrice = new Map<string, PlanRow>();
+    for (const p of plans) {
+      for (const id of [
+        p.stripeMonthlyPriceId,
+        p.stripeThreeMonthPriceId,
+        p.stripeSixMonthPriceId,
+        p.stripeYearlyPriceId,
+      ]) {
+        if (id) byPrice.set(id, p);
+      }
+    }
+
+    try {
+      const { data } = await this.stripeService
+        .getStripe()
+        .subscriptions.list({ customer: customerId, limit: 100 });
+      const held = data
+        .filter((sub: any) => HELD_STATUSES.includes(sub.status) && !sub.metadata?.listingId)
+        .map((sub: any) =>
+          paid(byId.get(sub.metadata?.planId) ?? byPrice.get(sub.items?.data?.[0]?.price?.id)),
+        )
+        .filter((p): p is PlanRow => Boolean(p));
+      held.sort((x, y) => Number(y.monthlyPrice) - Number(x.monthlyPrice));
+      return held[0] ?? null;
+    } catch {
+      this.logger.warn(`Could not list Stripe subscriptions for ${customerId}; using the saved record`);
+      const row = await this.db.userSubscription.findUnique({
+        where: { userId },
+        include: { plan: true },
+      });
+      return row && HELD_STATUSES.includes(String(row.status).toLowerCase())
+        ? paid(row.plan)
+        : null;
+    }
   }
 
   /**
@@ -420,6 +623,13 @@ export class SubscriptionService {
         endDate: immediately ? new Date() : subscription.stripeCurrentPeriodEnd,
       },
     });
+
+    const runsUntil = immediately ? null : formatDay(subscription.stripeCurrentPeriodEnd);
+    this.recordPlan(
+      userId,
+      'billing.plan-cancelled',
+      `Cancelled the ${subscription.plan.name} plan${runsUntil ? `; it runs until ${runsUntil}` : ''}`,
+    );
 
     this.logger.log(`Subscription cancelled for user: ${userId} (immediately: ${immediately})`);
 
@@ -457,6 +667,8 @@ export class SubscriptionService {
         endDate: null,
       },
     });
+
+    this.recordPlan(userId, 'billing.plan-resumed', 'Kept their plan after cancelling it');
 
     this.logger.log(`Subscription resumed for user: ${userId}`);
     return { success: true };

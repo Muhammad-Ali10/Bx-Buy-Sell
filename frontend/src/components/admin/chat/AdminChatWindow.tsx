@@ -15,6 +15,7 @@ import { format } from "date-fns";
 import { formatAdminMessageTime } from "@/lib/timeFormatter";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { useUnconfirmedMessages } from "@/hooks/useUnconfirmedMessages";
 import { useNavigate } from "react-router-dom";
 import { resolveListingTitle } from "@/lib/listingTitle";
 import { Socket } from "socket.io-client";
@@ -56,6 +57,14 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
+  // A message the server refused used to stay on screen as though it had gone.
+  const unconfirmed = useUnconfirmedMessages((message, reason) => {
+    setMessages((prev) => prev.filter((m) => m.id !== message.tempId));
+    if (message.restorable) setNewMessage((current) => current || message.content);
+    toast.error(
+      reason ? `Your message could not be sent: ${reason}` : 'Your message could not be sent. Please try again.',
+    );
+  });
 
   const markAllMessagesAsRead = async (chatId: string) => {
     if (!chatId) return;
@@ -182,6 +191,12 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
       }
     });
 
+    // A refused message comes back as an exception, never as the message.
+    newSocket.on('exception', (payload: any) => {
+      const reason = typeof payload?.message === 'string' ? payload.message : undefined;
+      unconfirmed.failAll(reason);
+    });
+
     // Listen for messages
     newSocket.on('message', (data: string) => {
       try {
@@ -207,6 +222,7 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
               
               if (tempMessageIndex !== -1) {
                 console.log('🔄 Replacing temp message with real message:', prev[tempMessageIndex].id, '→', message.id);
+                unconfirmed.confirm(prev[tempMessageIndex].id);
                 // Replace temp message with real message
                 const updated = [...prev];
                 updated[tempMessageIndex] = {
@@ -431,6 +447,7 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
       };
 
       setMessages(prev => [...prev, tempMessage]);
+      unconfirmed.track({ tempId: tempMessage.id, content: tempMessage.content || '', restorable: true });
       setNewMessage("");
       scrollToBottom();
     } catch (error) {
@@ -480,10 +497,11 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
         type: isImage ? 'IMAGE' : 'FILE',
       });
 
+      const fileTempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       setMessages((previous) => [
         ...previous,
         {
-          id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          id: fileTempId,
           content,
           senderId: user.id,
           createdAt: new Date().toISOString(),
@@ -500,6 +518,7 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
           },
         } as Message,
       ]);
+      unconfirmed.track({ tempId: fileTempId, content, restorable: false });
       scrollToBottom();
     } catch (error: any) {
       console.error('Error uploading file:', error);

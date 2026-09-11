@@ -1,96 +1,91 @@
-import group112Preview from "@/assets/Group_112-removebg-preview (1).png";
-import group1597885285 from "@/assets/Group 1597885285.png";
+import reportsPhone from "@/assets/reports-insights-phone-2x.png";
+import downloadAppCard from "@/assets/download-app-card-2x.png";
 
+/**
+ * "Reports & Insights", laid out as on the Figma home page (node 187:69719).
+ *
+ * At 1920px the columns are 930px and 860px with a 16px gap and 57px either
+ * side; the lime card is 860 × 1190 and the two cards beside it share its
+ * height. The section used to sit in a 1152px box, which is what made the
+ * tiles look squeezed.
+ *
+ * Both pictures are Figma's own exports at twice their size, so they stay
+ * sharp on high-density screens. The right one is the whole lime card with
+ * the phone and its shadow: exported alone, the phone's shading renders black
+ * instead of over the lime. Its corners carry the lime and the shadow on
+ * rather than being cut round, so the card's own rounding can clip it at any
+ * size without leaving an edge.
+ */
 const Features = () => {
   return (
     <section className="bg-black text-white py-12 sm:py-16 md:py-20">
-        <div className="container mx-auto px-4 sm:px-6">
-        <div className="grid md:grid-cols-2 items-center max-w-6xl mx-auto" style={{ gap: '20px' }}>
-          {/* Left Section - Reports & Insights Text with QR Code */}
-          <div 
-            className="text-left flex flex-col"
-            style={{
-              maxWidth: '100%',
-              gap: '20px'
-            }}
-          >
-            {/* First Content Container */}
+      <div className="mx-auto w-full max-w-[1870px] px-4 sm:px-6 lg:px-8">
+        <div className="grid gap-4 md:grid-cols-[930fr_860fr]">
+          {/* Two rows of equal height, as in Figma. A flex column shared the
+              height out by content instead: 631px and 533px at 1920. */}
+          <div className="grid min-w-0 grid-rows-[1fr_1fr] gap-4 md:gap-[26px]">
+            {/* Reports & Insights */}
             <div
-              className="w-full rounded-[20px] sm:rounded-[40px] md:rounded-[60px] lg:rounded-[80px] p-6 sm:p-8 md:p-10 flex flex-col justify-center min-h-[300px] sm:min-h-[400px] md:min-h-[500px] lg:min-h-[582px]"
-              style={{
-                backgroundColor: 'rgba(24, 24, 26, 1)',
-                opacity: 1
-              }}
+              className="flex flex-col justify-center gap-4 min-h-[280px] rounded-[20px] p-6 sm:min-h-[360px] sm:gap-6 sm:rounded-[40px] sm:p-10 md:rounded-[60px] lg:rounded-[80px] xl:justify-start xl:gap-[31px] xl:pb-12 xl:pl-[84px] xl:pr-12 xl:pt-[99px]"
+              style={{ backgroundColor: "rgb(24, 24, 26)" }}
             >
-              <h2 
-                className="text-white mb-4 sm:mb-6 font-lufga text-[28px] sm:text-[36px] md:text-[44px] lg:text-[54px]"
-                style={{
-                  fontWeight: 400,
-                  lineHeight: '150%',
-                  letterSpacing: '0%',
-                  verticalAlign: 'middle'
-                }}
+              <h2
+                className="font-lufga text-white text-[28px] sm:text-[36px] md:text-[36px] lg:text-[44px] xl:text-[54px]"
+                style={{ fontWeight: 400, lineHeight: 1.5 }}
               >
                 Reports & Insights
               </h2>
-              <p 
-                className="text-white font-lufga text-base sm:text-lg md:text-xl lg:text-2xl"
-                style={{
-                  fontWeight: 400,
-                  lineHeight: '150%',
-                  letterSpacing: '0%',
-                  verticalAlign: 'middle'
-                }}
+              <p
+                className="font-lufga max-w-[668px] text-base sm:text-lg lg:text-xl xl:text-2xl"
+                style={{ fontWeight: 400, lineHeight: 1.5, color: "rgba(255, 255, 255, 0.5)" }}
               >
-                Our detailed dashboard insights clear up most questions early on — so you can focus on what really matters. With key metrics presented clearly, users spend less time searching and more time deciding.
+                Our detailed dashboard insights clear up most questions early on — so you can focus on what really matters. With key metrics presented clearly, users spend less time searching and more time deciding
               </p>
             </div>
-            {/* QR Code Image below text */}
-            <div 
-              className="w-full rounded-[20px] sm:rounded-[40px] md:rounded-[60px] lg:rounded-[80px] overflow-hidden flex items-center justify-center min-h-[300px] sm:min-h-[400px] md:min-h-[500px] lg:min-h-[582px]"
-              style={{
-                backgroundColor: 'rgba(19, 100, 255, 1)',
-                opacity: 1
-              }}
+
+            {/* Download the app */}
+            <div
+              className="flex items-center justify-center overflow-hidden min-h-[300px] rounded-[20px] p-6 sm:min-h-[400px] sm:rounded-[40px] md:min-h-[460px] md:rounded-[60px] lg:rounded-[80px]"
+              style={{ backgroundColor: "#1364ff" }}
             >
-              <img 
-                src={group1597885285} 
-                alt="Download Mobile App" 
+              <img
+                src={downloadAppCard}
+                alt="Download Mobile App"
+                width={370}
+                height={411}
+                // Full width up to its designed 370px. A fixed 370px width
+                // kept the column from narrowing, so on a phone the whole
+                // section ran off the right edge of the screen.
+                className="block h-auto w-full max-w-[370px]"
                 loading="lazy"
                 decoding="async"
-                sizes="(max-width: 768px) 100vw, 50vw"
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  width: 'auto',
-                  height: 'auto',
-                  objectFit: 'contain',
-                  display: 'block'
-                }}
               />
             </div>
           </div>
 
-          {/* Right Section - Mobile App on Green Background */}
-          <div 
-            className="w-full rounded-[20px] sm:rounded-[40px] md:rounded-[60px] lg:rounded-[80px] overflow-hidden flex items-center justify-center min-h-[400px] sm:min-h-[600px] md:min-h-[800px] lg:min-h-[1000px] xl:min-h-[1190px]"
-            style={{
-              backgroundColor: 'rgba(198, 254, 30, 1)',
-              opacity: 1
-            }}
+          {/* The app on lime. The card keeps Figma's 860:1190 shape, and
+              stretches with the row when the cards beside it need more room. */}
+          <div
+            className="relative w-full min-w-0 aspect-[860/1190] overflow-hidden rounded-[20px] sm:rounded-[40px] md:self-stretch md:rounded-[60px] lg:rounded-[80px]"
+            style={{ backgroundColor: "#c6fe1e" }}
           >
-            <img 
-              src={group112Preview} 
-              alt="Reports & Insights App" 
-              className="w-auto h-auto max-h-[300px] sm:max-h-[500px] md:max-h-[700px] lg:max-h-[900px] object-contain"
+            {/* Anchored to the bottom: the phone's shadow runs off the
+                bottom and right edges, so any spare room has to go at the
+                top, where the picture is plain lime. Centred, it left a
+                visible line where the shadow stopped. */}
+            <img
+              src={reportsPhone}
+              alt="Reports & Insights App"
+              width={860}
+              height={1190}
+              className="absolute inset-0 h-full w-full object-contain object-bottom"
               loading="lazy"
               decoding="async"
-              sizes="(max-width: 768px) 100vw, 50vw"
             />
           </div>
         </div>
       </div>
-      </section>
+    </section>
   );
 };
 

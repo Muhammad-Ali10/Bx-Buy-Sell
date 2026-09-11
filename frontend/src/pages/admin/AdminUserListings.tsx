@@ -58,6 +58,7 @@ export default function AdminUserListings() {
                   key={listing.id}
                   id={listing.id}
                   title={listing.title}
+                  description={listing.description}
                   price={listing.price}
                   image_url={listing.image_url || "/placeholder.svg"}
                   status={listing.status}
@@ -67,6 +68,9 @@ export default function AdminUserListings() {
                   requests_count={listing.requests_count}
                   unread_messages_count={listing.unread_messages_count}
                   onUpdate={refetch}
+                  // Someone else's listing: a checkout here would bill the
+                  // administrator rather than the seller.
+                  isOwnerView={false}
                 />
               ))}
             </div>

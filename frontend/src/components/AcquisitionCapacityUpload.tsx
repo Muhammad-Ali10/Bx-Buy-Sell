@@ -173,7 +173,9 @@ export const AcquisitionCapacityUpload = () => {
 
       {submitted ? (
         <Submitted
-          onBackToDashboard={() => navigate("/dashboard")}
+          // Back to Account Details, where Verify Now was pressed. `/dashboard`
+          // is the create-listing wizard, which is where this used to land.
+          onBackToDashboard={() => navigate("/profile")}
           onSubmitMore={() => setSubmitted(false)}
         />
       ) : (

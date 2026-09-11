@@ -6,9 +6,10 @@ import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { ListingModule } from 'src/listing/listing.module';
+import { ActivityLogModule } from 'src/activity-log/activity-log.module';
 
 @Module({
-  imports: [RedisAdapterModule, MessageQueueModule, PrismaModule, ListingModule],
+  imports: [RedisAdapterModule, MessageQueueModule, PrismaModule, ListingModule, ActivityLogModule],
   providers: [ChatGateway, ChatService],
   controllers: [ChatController],
   exports: [ChatService],

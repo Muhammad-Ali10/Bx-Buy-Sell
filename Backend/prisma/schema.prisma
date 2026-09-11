@@ -99,6 +99,25 @@ enum PaymentStatus {
   REFUNDED
 }
 
+/// Where a member's invoices are addressed.
+///
+/// Kept apart from the profile address: a company and its VAT number are
+/// billing details, not personal ones, and a business may be billed somewhere
+/// other than where its owner lives. Copied to the Stripe customer on save, so
+/// the invoices Stripe issues from then on carry it.
+type InvoiceAddress {
+  company    String?
+  vat_number String?
+  first_name String?
+  last_name  String?
+  street     String?
+  zip_code   String?
+  city       String?
+  state      String?
+  /// ISO 3166-1 alpha-2: the only form Stripe prints.
+  country    String?
+}
+
 model User {
   id                   String          @id @default(uuid()) @map("_id")
   first_name           String?
@@ -107,6 +126,21 @@ model User {
   /// address makes every account but the oldest unreachable at sign-in, which
   /// looks like "the password change did nothing".
   email                String          @unique
+
+  /// The one Stripe customer this person is billed as.
+  ///
+  /// It used to live only on `UserSubscription`, a row that exists only for
+  /// people who bought a buyer plan — so a seller buying listing packages got
+  /// a new Stripe customer on every checkout, and with it a new card to enter
+  /// and a credit balance they could never spend. It belongs to the person.
+  ///
+  /// Not unique, though it is one-to-one in practice: MongoDB counts every
+  /// absent value as the same value, so a unique index here refuses the second
+  /// user who has not bought anything yet. Two people cannot land on one
+  /// customer anyway — it is looked up by the user's own email address.
+  stripeCustomerId     String?
+  /// Where invoices are addressed. See InvoiceAddress.
+  invoice_address      InvoiceAddress?
   business_name        String?
   contact_name         String?
   phone                String?
@@ -120,6 +154,12 @@ model User {
   refresh_token        String?
   password_hash        String
   otp_code             String?
+  /// When `otp_code` stops working. It proves someone reads this inbox — to
+  /// confirm the address, or to reset a password — and once it is emailed a
+  /// code with no expiry is a key for ever.
+  otp_expires_at       DateTime?
+  /// Wrong guesses at the current `otp_code`.
+  otp_attempts         Int             @default(0)
   profile_pic          String?
   is_online            Boolean?        @default(false)
   last_offline         DateTime?
@@ -313,17 +353,30 @@ model MonitoringAlert {
 }
 
 model ActivityLog {
-  id         String   @id @default(uuid()) @map("_id")
-  actorId    String?
-  actorRole  Role?
-  action     String
-  entityType String
-  entityId   String?
-  message    String
-  ipAddress  String?
-  createdAt  DateTime @default(now())
+  id            String   @id @default(uuid()) @map("_id")
+  actorId       String?
+  actorRole     Role?
+  /// The member the entry is about: the actor for what they did themselves,
+  /// the member for what the team did to them, empty for team work about no
+  /// one in particular. A member's Logs tab lists both sides.
+  subjectUserId String?
+  action        String
+  entityType    String
+  entityId      String?
+  /// A short line saying what happened. Before September 2026 this held the
+  /// whole submitted form, passwords included;
+  /// scripts/strip-activity-log-secrets.js cleans those.
+  message       String
+  ipAddress     String?
+  /// The browser's description of itself.
+  userAgent     String?
+  createdAt     DateTime @default(now())
 
   actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([actorId, createdAt])
+  @@index([subjectUserId, createdAt])
+  @@index([createdAt])
 }
 
 model Favourite {
@@ -401,6 +454,7 @@ model Listing {
   category                    ListingCategory[]
   tools                       ListingTool[]
   financials                  Revenue[]
+  attachments                 Attachment[]
   statistics                  ListingQuestion[]           @relation("StatisticQuestion")
   productQuestion             ListingQuestion[]           @relation("ProductQuestion")
   managementQuestion          ListingQuestion[]           @relation("ManageQuestion")
@@ -431,15 +485,47 @@ model Listing {
   // them while the listing itself stays public.
   packageActive               Boolean?
   packageExpiresAt            DateTime?
+  /// Set when the seller cancels the package: the day it actually stops.
+  ///
+  /// Not the same as `packageExpiresAt`, which is simply when the period being
+  /// paid for ends and a new one begins. This one says no new period is coming,
+  /// while the seller keeps everything until the date. Reactivating clears it.
+  packageEndsAt               DateTime?
   packageStripeSubscriptionId String?
   addonStripeSubscriptionId   String?
+  // How often the add-on renews. Its own cycle, not the package's: the two are
+  // chosen separately and Stripe cannot hold both intervals in one subscription.
+  addonBillingCycle           String?
   // A cancelled add-on keeps its placement until the month it was paid for
   // runs out. This is when that happens; null means no removal is pending.
   addonEndsAt                 DateTime?
+
+  /// A downgrade takes effect at the end of the paid period, not on the click.
+  ///
+  /// The same rule the buyer plans already follow: an upgrade is paid for and
+  /// starts at once, a downgrade waits until the period the seller has already
+  /// paid for runs out. Until then they keep what they bought, the page can say
+  /// when the change lands, and they can still change their mind — none of
+  /// which is possible without remembering the pending change.
+  pendingPackage            String?
+  pendingPackageCycle       String?
+  pendingPackageChangeAt    DateTime?
+  /// The placements this listing is paying for. See `ListingAddon`.
+  ///
+  /// `packageAddons` above is kept in step with these rows so the admin panel
+  /// and the feed keep reading the field they already read; these rows are the
+  /// truth, that array is the summary.
+  addons                      ListingAddon[]
   confidentialAccesses        ListingConfidentialAccess[]
   Favourite                   Favourite[]
   chats                       Chat[]                      @relation // CRITICAL: Link to chats for this listing
   reports                     MonitoringAlert[]           @relation("AlertListing")
+  /// The currency the seller prices and reports in (ISO code). Copied from the
+  /// financial table on every save; USD for a listing that never chose one.
+  currency                    String?
+  /// Its money in every currency, worked out ahead of time so filters and
+  /// sorting never touch a live rate. See `src/fx/listing-fx.ts`.
+  fx                          Json?
   created_at                  DateTime                    @default(now())
   updated_at                  DateTime                    @updatedAt
   deleted_at                  DateTime?
@@ -744,6 +830,19 @@ model AdminFinancial {
   updated_at DateTime @updatedAt
 }
 
+/// The order the listing form asks its areas in, as an administrator arranged
+/// them by dragging in the Content Management menu.
+///
+/// A single document, id "default". Category and Packages are not in it: they
+/// keep the first and last places whatever the rest do. The id is fixed rather
+/// than generated, so there is nothing to look up and no index to create.
+model ListingAreaOrder {
+  id         String   @id @map("_id")
+  /// Content Management slugs, first to last — `brand-info`, `tools`, …
+  areas      String[] @default([])
+  updated_at DateTime @updatedAt
+}
+
 model Question {
   id          String     @id @default(uuid()) @map("_id")
   question    String
@@ -785,6 +884,10 @@ model Chat {
   @@index([userId])
   @@index([sellerId])
   @@index([responsibleId])
+  /// Every card in the feed asks "how many people contacted this listing", so
+  /// this is read once per listing per page load. Without it that question is
+  /// a collection scan.
+  @@index([listingId])
 }
 
 /// One person's own view of one conversation.
@@ -810,7 +913,9 @@ model ChatLabel {
   pinned     Boolean        @default(false)
   /// When it was pinned, so several pinned chats keep a sensible order.
   pinned_at  DateTime?
-  chat       Chat           @relation(fields: [chatId], references: [id])
+  /// Goes with its conversation. Without it, deleting a listing — which takes
+  /// its conversations with it — was refused outright.
+  chat       Chat           @relation(fields: [chatId], references: [id], onDelete: Cascade)
   user       User           @relation(fields: [userId], references: [id])
   created_at DateTime       @default(now())
   updated_at DateTime       @updatedAt
@@ -822,7 +927,8 @@ model ChatLabel {
 
 model Message {
   id        String      @id @default(uuid()) @map("_id")
-  chat      Chat        @relation(fields: [chatId], references: [id])
+  /// Goes with its conversation, for the same reason as ChatLabel.chat.
+  chat      Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
   chatId    String
   // Optional because the platform itself posts messages — a blocked-message
   // notice, the periodic reminder — and those have no human behind them.
@@ -876,7 +982,8 @@ model ChatMonitor {
   viewedAt DateTime @default(now())
 
   chatId String
-  Chat   Chat   @relation("MoniteredChat", fields: [chatId], references: [id])
+  /// Goes with its conversation, for the same reason as ChatLabel.chat.
+  Chat   Chat   @relation("MoniteredChat", fields: [chatId], references: [id], onDelete: Cascade)
 
   @@index([chatId, monitorId])
 }
@@ -1001,4 +1108,115 @@ model Payment {
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+}
+
+/// A document attached to a listing, held privately.
+///
+/// Attachments used to be nothing but a URL inside a question's answer, and
+/// that URL was public: a contract or a P&L could be read by anyone holding
+/// the link, with no account at all. The bytes still live on the CDN, but the
+/// asset is delivered privately and reaching it goes through the API, which
+/// applies the same rule that decides whether the page itself is unblurred.
+///
+/// Listing photos are deliberately not here. They are meant to be public, and
+/// putting them behind a login would empty every card on the marketplace.
+model Attachment {
+  id        String @id @default(uuid()) @map("_id")
+  listingId String
+
+  /// What the seller called the file, kept as they typed it.
+  ///
+  /// The name used to be read back out of the URL, which is why a `.jpeg`
+  /// arrived as `.jpg` and a name with punctuation came back hyphenated. The
+  /// URL is a storage detail; this is the file's name.
+  fileName String
+  mimeType String?
+  bytes    Int?
+
+  /// Where the bytes are: the CDN's id, and which pipeline delivers it.
+  publicId     String
+  resourceType String @default("raw")
+  /// "authenticated" once migrated; "upload" while a file is still public.
+  deliveryType String @default("authenticated")
+
+  /// The question whose answer this file belongs to, so an older answer that
+  /// stores a URL can still be matched to the row that replaced it.
+  questionId String?
+  /// The public URL this file used to live at, kept only so the migration can
+  /// find and rewrite the answers that still point there.
+  legacyUrl String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([publicId])
+}
+
+/// One placement the seller is paying for, on a subscription of its own.
+///
+/// This used to be a single set of fields on the listing — `packageAddons[0]`
+/// with one Stripe id, one billing cycle and one end date beside it — which
+/// could only ever describe one placement at a time. The client's design shows
+/// a seller holding the category page and the start page together, each
+/// renewing on its own date and each cancellable on its own, so each one needs
+/// its own row.
+model ListingAddon {
+  id        String @id @default(uuid()) @map("_id")
+  listingId String
+
+  /// CATEGORY_PAGE | START_PAGE | BUNDLE.
+  addon String
+
+  /// MONTHLY | THREE_MONTH | SIX_MONTH — its own, never the package's.
+  billingCycle String @default("MONTHLY")
+
+  /// ACTIVE while it renews; ENDING once cancelled but still running out the
+  /// period already paid for. The row goes only when that period is over.
+  status String @default("ACTIVE")
+
+  stripeSubscriptionId String?
+
+  /// When Stripe bills it next — what "Renews in 42 Days" counts towards.
+  currentPeriodEnd DateTime?
+
+  /// The day a cancelled placement actually goes. Null while it is renewing.
+  endsAt DateTime?
+
+  /// A move to a shorter cycle, waiting for the period already paid for.
+  ///
+  /// Going from six months to monthly changes nothing about the placement
+  /// itself, only how often it is billed — so there is no reason to refund
+  /// and restart. The current period runs out and the new rhythm starts after
+  /// it, which is the same rule the packages follow for a downgrade.
+  pendingBillingCycle String?
+  pendingChangeAt     DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  /// One row per placement per listing. Buying the same one again updates this
+  /// row instead of adding a second, so a retried webhook cannot bill twice.
+  @@unique([listingId, addon])
+  @@index([listingId])
+}
+
+/// The European Central Bank's euro reference rates, one document per working
+/// day.
+///
+/// `rates` maps a currency code to how many units of it one euro bought that
+/// day: { "USD": 1.1616, "GBP": 0.85915, … }. Keyed by code, never by position:
+/// the ECB's list changes over time — currencies are added, some are dropped —
+/// so a currency that was not quoted on a day is simply absent from that day.
+/// Weekends and holidays have no document at all; nothing is filled in.
+model FxDay {
+  id         String   @id @default(uuid()) @map("_id")
+  /// The ECB's date, at midnight UTC.
+  day        DateTime @unique
+  rates      Json
+  created_at DateTime @default(now())
 }

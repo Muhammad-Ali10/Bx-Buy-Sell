@@ -207,36 +207,14 @@ export class SubscriptionController {
     return this.subscriptionService.getSubscriptionStats();
   }
 
+  /**
+   * Record a finished checkout when the member lands back on the site, and say
+   * whether it was a buyer plan or a listing's package.
+   */
   @Roles(['USER', 'SELLER', 'ADMIN'])
   @Post('sync-session')
-  @ApiOperation({ summary: 'Manually sync checkout session (for local testing)' })
-  async syncSession(@Body() body: { sessionId: string }) {
-    try {
-      console.log('🔄 Syncing session:', body.sessionId);
-      const session = await this.stripeService.getStripe().checkout.sessions.retrieve(body.sessionId, {
-        expand: ['subscription'],
-      });
-      
-      console.log('📊 Session status:', session.payment_status, 'Subscription:', session.subscription);
-      
-      if (session.payment_status === 'paid' && session.subscription) {
-        const result = await this.subscriptionService.handleCheckoutComplete(session);
-        console.log('✅ Subscription synced:', result);
-        return { success: true, message: 'Subscription activated' };
-      } else {
-        console.warn('⚠️ Payment not completed or no subscription');
-        return { 
-          success: false, 
-          error: 'Payment not completed',
-          details: {
-            paymentStatus: session.payment_status,
-            hasSubscription: !!session.subscription,
-          }
-        };
-      }
-    } catch (error: any) {
-      console.error('❌ Sync error:', error);
-      return { success: false, error: error.message };
-    }
+  @ApiOperation({ summary: 'Record a finished checkout from the success page' })
+  async syncSession(@Req() req: any, @Body() body: { sessionId: string }) {
+    return this.subscriptionService.syncCheckoutSession(req.user.id, body?.sessionId);
   }
 }

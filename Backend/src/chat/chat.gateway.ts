@@ -13,10 +13,15 @@ import { Socket, Server } from 'socket.io';
 import { MessageQueueService } from 'src/message-queue/message-queue.service';
 import { RedisAdapterService } from 'src/redis-adapter/redis-adapter.service';
 import { ChatService } from './chat.service';
+import { registerChatBroadcaster } from './chat-broadcast';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { z } from 'zod';
 import parsePhoneNumberFromString from 'libphonenumber-js';
 import { JwtService } from '@nestjs/jwt';
+import { Optional } from '@nestjs/common';
+import { ActivityLogService } from 'src/activity-log/activity-log.service';
+import { socketOrigin } from 'src/activity-log/request-origin';
+import { listingTitleOf } from 'src/listing/listing-notices';
 
 @WebSocketGateway({ 
   cors: { 
@@ -61,10 +66,22 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     private readonly chatService: ChatService,
     private readonly db: PrismaService,
     private readonly jwtService: JwtService,
+    /** Messages sent and blocked go into the sender's log. */
+    @Optional() private readonly activityLog?: ActivityLogService,
   ) {}
 
   private isStaffRole(role?: string | null) {
     return role === 'ADMIN' || role === 'MONITER' || role === 'STAFF';
+  }
+
+  /** "about “Title”", or how a conversation without a listing is described. */
+  private async conversationLabel(listingId?: string | null): Promise<string> {
+    if (!listingId) return 'in a direct conversation';
+    const listing = await this.db.listing
+      .findUnique({ where: { id: listingId }, select: { advertisement: true, brand: true } })
+      .catch(() => null);
+    const title = listingTitleOf(listing);
+    return title ? `about “${title}”` : 'about a listing';
   }
 
   private async ensureChatAccess(chatId: string, userId: string | null, role?: string | null) {
@@ -117,6 +134,12 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
 
   async afterInit(server: Server) {
+    // Let the parts of the API that cannot import this gateway still reach the
+    // people in a conversation — the listing module posts confidential-access
+    // notices. See chat-broadcast.ts.
+    registerChatBroadcaster((room, event, payload) =>
+      (this.io ?? server).to(room).emit(event, payload),
+    );
     this.io = server;
     console.log('🚀 WebSocket Gateway initialized');
     try {
@@ -529,6 +552,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         throw new WsException('Unauthorized sender');
       }
 
+      // A message saved before this point is a repeat, not a new one.
+      const receivedAt = Date.now();
+
       // Validate content (prevent emails/phone numbers)
       const schema = z.string().email();
       const isValid = (message.content as string).split(' ').findIndex((el) => {
@@ -572,6 +598,19 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         if (notice) {
           this.io.to(message.chatId).emit('message', JSON.stringify(notice));
         }
+
+        // The sender's log says a message was stopped, and why; not what it said.
+        void this.activityLog?.record({
+          actorId: message.senderId,
+          actorRole: socketUserRole,
+          action: 'message.blocked',
+          entityType: 'chat',
+          entityId: message.chatId,
+          message: sharesContactDetails
+            ? 'A message was blocked: it contained contact details'
+            : 'A message was blocked: it contained a prohibited word',
+          ...socketOrigin(client),
+        });
         return;
       }
 
@@ -706,6 +745,24 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       // The sender is already in the room, so they receive it via this single room broadcast
       // NO additional emits - this is the ONLY emit for this message
       this.io.to(message.chatId).emit('message', messageString);
+
+      // Into the sender's log once it is delivered: that they wrote, and about
+      // which listing. Never the text.
+      if (savedMessage.createdAt.getTime() >= receivedAt) {
+        const kind =
+          message.type === 'IMAGE' ? 'a photo' : message.type === 'FILE' ? 'a file' : 'a message';
+        void this.conversationLabel(chatRoom?.listingId).then((about) =>
+          this.activityLog?.record({
+            actorId: message.senderId,
+            actorRole: socketUserRole,
+            action: 'message.sent',
+            entityType: 'chat',
+            entityId: message.chatId,
+            message: `Sent ${kind} ${about}`,
+            ...socketOrigin(client),
+          }),
+        );
+      }
 
       // Every twentieth message between the two of them, the platform repeats
       // the reminder. Posted after the message it follows, so it reads as a
@@ -935,6 +992,20 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       // CRITICAL: Broadcast ONLY to the specific room - SINGLE EMIT ONLY
       const messageString = JSON.stringify(messagePayload);
       this.io.to(message.chatId).emit('message', messageString);
+
+      // The team member's own log: they wrote as the team, and where.
+      void this.conversationLabel(chatRoom?.listingId).then((about) =>
+        this.activityLog?.record({
+          actorId: message.senderId,
+          actorRole: adminUser.role,
+          subjectUserId: null,
+          action: 'message.team-sent',
+          entityType: 'chat',
+          entityId: message.chatId,
+          message: `Wrote as the team ${about}`,
+          ...socketOrigin(client),
+        }),
+      );
       
       // Emit to monitor room for admin/monitor dashboard updates
       this.io.to('monitor-room').emit('monitor:chat_updated', {

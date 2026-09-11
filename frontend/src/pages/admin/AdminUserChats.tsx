@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useParams } from "react-router-dom";
 import { apiClient } from "@/lib/api";
+import { resolveListingTitle } from "@/lib/listingTitle";
 import { toast } from "sonner";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
@@ -21,6 +22,29 @@ export default function AdminUserChats() {
     sellerId: string;
     listingId?: string;
   } | null>(null);
+
+  /*
+   * Many listings have no conversation at all — nobody has written about them
+   * yet. Arriving from one of those, the page showed the owner's whole list and
+   * "Select a conversation", which read as the Chat button having failed to
+   * find it. It says what is true instead, and names the listing.
+   */
+  const [listingHasNoChats, setListingHasNoChats] = useState(false);
+  const [listingTitle, setListingTitle] = useState("");
+  useEffect(() => {
+    if (!listingHasNoChats || !autoSelectListingId) return;
+    let cancelled = false;
+    (async () => {
+      const response = await apiClient.getSecureListingById(autoSelectListingId);
+      const listing = (response as any)?.data?.data ?? (response as any)?.data;
+      if (!cancelled && response.success && listing) {
+        setListingTitle(resolveListingTitle(listing, ""));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [listingHasNoChats, autoSelectListingId]);
 
   // "Chat" in the users table lands here with ?direct=1, meaning: open my own
   // conversation with this person. It must not be a listing thread — a support
@@ -69,7 +93,7 @@ export default function AdminUserChats() {
           {/* Conversation List */}
           <div
             className={`
-              ${selectedConversation ? "hidden md:flex" : "flex"} 
+              ${selectedConversation ? "hidden md:flex" : "flex"}
               flex-col w-full md:w-[280px] lg:w-[300px] xl:w-[320px] flex-shrink-0
             `}
             style={{
@@ -91,6 +115,7 @@ export default function AdminUserChats() {
                 userId={id}
                 refreshTrigger={listRefreshKey ?? selectedConversation}
                 autoSelectListingId={autoSelectListingId}
+                onAutoSelectMissing={() => setListingHasNoChats(true)}
               />
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -118,10 +143,24 @@ export default function AdminUserChats() {
                 key={selectedConversation}
                 conversationId={selectedConversation}
                 currentUserId={id || chatRoomData.userId}
+                // The admin reads this person's conversation as they see it,
+                // but what is written here goes in as the team, from the
+                // admin's own account. Sent in the person's name, the server
+                // refused it and it vanished on the next refresh.
+                sendAsTeam
                 userId={chatRoomData.userId}
                 sellerId={chatRoomData.sellerId}
                 listingId={chatRoomData.listingId}
               />
+            ) : listingHasNoChats ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+                <p className="text-base font-medium text-foreground">
+                  {listingTitle
+                    ? `Nobody has written about "${listingTitle}" yet.`
+                    : "Nobody has written about this listing yet."}
+                </p>
+                <p className="text-sm">Its conversations appear here once a buyer gets in touch.</p>
+              </div>
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground">
                 Select a conversation to view messages
@@ -142,7 +181,12 @@ export default function AdminUserChats() {
                 overflow: "hidden",
               }}
             >
+              {/* Keyed like the chat window beside it, so each conversation
+                  gets a fresh panel. Without it the panel stayed mounted and
+                  kept showing the first listing it was given for every
+                  conversation opened after. */}
               <ChatDetails
+                key={selectedConversation}
                 conversationId={selectedConversation}
                 userId={chatRoomData.userId}
                 sellerId={chatRoomData.sellerId}

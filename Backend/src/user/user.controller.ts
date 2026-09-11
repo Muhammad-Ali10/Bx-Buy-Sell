@@ -11,9 +11,11 @@ import {
   HttpException,
   HttpStatus,
   Query,
+  Optional,
 } from '@nestjs/common';
 import { PhoneVerificationService } from './phone-verification.service';
 import { EmailChangeService } from './email-change.service';
+import { InboxCodeService } from './inbox-code.service';
 import { UserService } from './user.service';
 import { ZodValidationPipe } from 'common/validator/zod.validator';
 import {
@@ -34,6 +36,9 @@ import {
 } from './dto/add-user.dto';
 import { LogAction } from 'common/decorator/action.decorator';
 import { logSchema } from 'common/validator/logSchema.validator';
+import { ActivityLogService } from 'src/activity-log/activity-log.service';
+import { describeAccountChanges } from 'src/activity-log/account-changes';
+import { requestOrigin } from 'src/activity-log/request-origin';
 @Roles(['ADMIN', 'MONITER', 'STAFF'])
 @Controller('user')
 export class UserController {
@@ -41,8 +46,49 @@ export class UserController {
     private userService: UserService,
     private readonly phoneVerification: PhoneVerificationService,
     private readonly emailChange: EmailChangeService,
+    private readonly inboxCode: InboxCodeService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    /** Account edits and confirmations go into the member's log. */
+    @Optional() private readonly activityLog?: ActivityLogService,
   ) {}
+
+  /**
+   * What an edit of an account changed, in the log: a role, a password, the ID
+   * check or which details, never their values. A form sent back unchanged, or
+   * a change of presence alone, writes nothing.
+   */
+  private recordAccountChanges(req: any, targetId: string, before: any, body: Record<string, unknown>) {
+    if (!this.activityLog) return;
+    const actor = req?.user;
+    const origin = requestOrigin(req);
+    for (const change of describeAccountChanges(before, body, actor?.id !== targetId)) {
+      void this.activityLog.record({
+        actorId: actor?.id ?? null,
+        actorRole: actor?.role ?? null,
+        subjectUserId: targetId,
+        action: change.action,
+        entityType: 'user',
+        entityId: targetId,
+        message: change.message,
+        ...origin,
+      });
+    }
+  }
+
+  /** Something the signed-in member confirmed about their own account. */
+  private recordOwn(req: any, result: unknown, action: string, message: string) {
+    const actor = req?.user;
+    if (!actor?.id || (result as { success?: boolean } | null)?.success === false) return;
+    void this.activityLog?.record({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action,
+      entityType: 'user',
+      entityId: actor.id,
+      message,
+      ...requestOrigin(req),
+    });
+  }
 
   @Get('/')
   async findAll(@Query('nocache') nocache?: string) {
@@ -228,8 +274,9 @@ export class UserController {
     return payload;
   }
 
+  // Logged by what changed (see recordAccountChanges), not by @LogAction: this
+  // one route carries profile edits, role and password changes and presence.
   @Patch('update-by-admin/:id')
-  @LogAction(logSchema('update-by-admin', 'user'))
   @ApiParam({ name: 'id', description: 'User ID', type: String })
   @ApiBody({ type: () => UserAdminUpdateSchemaDTO })
   async updateUserByAdmin(
@@ -274,9 +321,11 @@ export class UserController {
       }
     }
 
+    const before = await this.userService.findOneByID(id);
     const payload = await this.userService.updateUser(id, body);
     await this.cacheManager.del(`${this.constructor.name}`);
     await this.cacheManager.del(`${this.constructor.name}:${id}`);
+    this.recordAccountChanges(req, id, before, body);
     return payload;
   }
 
@@ -303,18 +352,22 @@ export class UserController {
     return payload;
   }
 
+  // Logged by what changed (see recordAccountChanges): the profile page sends
+  // every field each time, so the form alone says nothing about what changed.
   @Roles(['ADMIN', 'MONITER', 'USER', 'STAFF'])
   @Patch(':id')
-  @LogAction(logSchema('update', 'user'))
   @ApiBody({ type: () => UserUpdateSchemaDTO })
   @ApiParam({ name: 'id', description: 'User ID', type: String })
   async updateUser(
+    @Req() req: any,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UserUpdateSchema)) body,
   ) {
+    const before = await this.userService.findOneByID(id);
     const payload = await this.userService.updateUser(id, body);
     await this.cacheManager.del(`${this.constructor.name}`);
     await this.cacheManager.del(`${this.constructor.name}:${id}`);
+    this.recordAccountChanges(req, id, before, body);
     return payload;
   }
 
@@ -344,8 +397,10 @@ export class UserController {
   @Roles(['USER', 'SELLER', 'ADMIN', 'MONITER'])
   @Post('me/phone/verify')
   @ApiOperation({ summary: 'Confirm the SMS code and save the number' })
-  verifyPhoneCode(@Req() req: any, @Body() body: { code: string }) {
-    return this.phoneVerification.verifyCode(req?.user?.id, body?.code);
+  async verifyPhoneCode(@Req() req: any, @Body() body: { code: string }) {
+    const result = await this.phoneVerification.verifyCode(req?.user?.id, body?.code);
+    this.recordOwn(req, result, 'profile.phone-verified', 'Phone number verified');
+    return result;
   }
 
   /**
@@ -362,8 +417,30 @@ export class UserController {
   @Roles(['USER', 'SELLER', 'ADMIN', 'MONITER'])
   @Post('me/email/verify')
   @ApiOperation({ summary: 'Confirm the code and switch the address' })
-  verifyEmailCode(@Req() req: any, @Body() body: { code: string }) {
-    return this.emailChange.verifyCode(req?.user?.id, body?.code);
+  async verifyEmailCode(@Req() req: any, @Body() body: { code: string }) {
+    const result = await this.emailChange.verifyCode(req?.user?.id, body?.code);
+    this.recordOwn(req, result, 'profile.email-changed', 'Changed their email address');
+    return result;
+  }
+
+  /**
+   * Confirm the address the account already has: straight after signing up,
+   * and from Account Details for accounts made before sign-up asked for it.
+   */
+  @Roles(['USER', 'SELLER', 'ADMIN', 'MONITER'])
+  @Post('me/email/confirm/send-code')
+  @ApiOperation({ summary: "Email a code to the account's own address" })
+  sendConfirmCode(@Req() req: any) {
+    return this.inboxCode.sendConfirmation(req?.user?.id);
+  }
+
+  @Roles(['USER', 'SELLER', 'ADMIN', 'MONITER'])
+  @Post('me/email/confirm')
+  @ApiOperation({ summary: 'Check the code and mark the address confirmed' })
+  async confirmEmail(@Req() req: any, @Body() body: { code: string }) {
+    const result = await this.inboxCode.confirm(req?.user?.id, body?.code);
+    this.recordOwn(req, result, 'profile.email-verified', 'Email address confirmed');
+    return result;
   }
 
   /**
