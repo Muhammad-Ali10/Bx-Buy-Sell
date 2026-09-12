@@ -41,8 +41,8 @@ export const HeaderCurrencySelect = ({ onDark = false, infoSide = "bottom" }: He
     <div
       className="flex items-center gap-1 rounded-full pl-3 pr-2 py-1.5"
       style={{
-        background: onDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
-        color: onDark ? "rgba(255, 255, 255, 1)" : "rgba(0, 0, 0, 1)",
+        background: onDark ? "#D8D8D8" : "D8D8D8",
+        color: onDark ? "#000000" : "#000000",
       }}
     >
       <DropdownMenu>

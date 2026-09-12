@@ -39,12 +39,12 @@ const LOOKING_FOR_OPTIONS: {
   category?: string;
   to?: string;
 }[] = [
-  { label: "E-Commerce", category: "E-Commerce" },
-  { label: "Service Business", category: "Service Business" },
-  { label: "Software Business", category: "Software" },
-  { label: "Other", category: "Other" },
-  { label: "I want to Sell my Business", to: "/dashboard" },
-];
+    { label: "E-Commerce", category: "E-Commerce" },
+    { label: "Service Business", category: "Service Business" },
+    { label: "Software Business", category: "Software" },
+    { label: "Other", category: "Other" },
+    { label: "I want to Sell my Business", to: "/dashboard" },
+  ];
 
 interface HeroProps {
   searchQuery: string;
@@ -190,29 +190,29 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
        back to the dark-on-light look it has everywhere else. */
     <section
       data-dark-hero
-      className="relative bg-primary text-primary-foreground pt-20 sm:pt-24 md:pt-32 pb-0 overflow-visible"
+      className="relative bg-[#F4F4F4] text-primary-foreground pt-20 sm:pt-24 md:pt-32 pb-0 overflow-visible"
     >
-      <div className="container mx-auto px-4 sm:px-6 relative z-10">
+      <div className="container mx-auto  mt-24 px-4 sm:px-6 relative z-10">
         <div className="max-w-5xl mx-auto text-center mb-8 sm:mb-12 animate-fade-in">
-          <h1 className="font-lufga font-medium text-[32px] sm:text-[48px] md:text-[64px] lg:text-[85px] leading-[120%] text-center mb-4 sm:mb-6 px-2">
+          <h1 className="font-lufga font-medium text-[32px] sm:text-[48px] md:text-[64px] lg:text-[85px] leading-[120%] text-center mb-4 sm:mb-6 px-2 text-black">
             Buy & Sell Companies<br className="hidden sm:block" /> <span className="sm:hidden"> </span>in 3 simple Steps
           </h1>
-          <p className="text-base sm:text-lg md:text-xl mb-4 sm:mb-6 text-primary-foreground/90 max-w-3xl mx-auto leading-relaxed px-4">
+          <p className="text-base sm:text-lg md:text-xl mb-4 sm:mb-6  max-w-3xl mx-auto leading-relaxed px-4 text-black">
             Join the #1 platform for buying & selling companies. Discover, connect, and exchange with ease—your journey starts here today!
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6 mb-8 sm:mb-12 text-xs sm:text-sm px-4">
             <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-primary-foreground rounded-full" />
-              <span>Secure Payments with EXPay</span>
+              <div className="w-1.5 h-1.5 bg-black rounded-full" />
+              <span className="text-black">Secure Payments with EXPay</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-primary-foreground rounded-full" />
-              <span>Simple 3-step process</span>
+              <div className="w-1.5 h-1.5 bg-black rounded-full" />
+              <span className="text-black">Simple 3-step process</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-primary-foreground rounded-full" />
-              <span>Start in 1 Minute</span>
+              <div className="w-1.5 h-1.5 bg-black rounded-full" />
+              <span className="text-black">Start in 1 Minute</span>
             </div>
           </div>
 
@@ -222,16 +222,15 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
               later in the document at z-10, painted straight over the lower
               half of the list and swallowed three of the five clicks. */}
           <div className="relative z-30 max-w-4xl mx-auto mb-8 sm:mb-12 px-4">
-            <div className="bg-primary-foreground/5 backdrop-blur-xl rounded-[10px] px-3 sm:px-6 py-2 border border-primary-foreground/5">
+            <div className="bg-[#E5E5E5] backdrop-blur-xl rounded-[10px] px-3 sm:px-6 py-2 border border-primary-foreground/5">
               <div className="flex gap-2 sm:gap-3 items-center">
                 {/* The chevron used to be a picture of a control. Clicking the
                     field now opens the list it always promised — and typing
                     still works, so the free-text search is not lost. */}
                 <div className="relative flex-1 min-w-0" ref={fieldRef}>
-                  <div className={`bg-primary-foreground/10 rounded-[10px] flex items-center px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-5 border transition-all ${
-                    isSearchFocused ? 'border-accent shadow-glow' : 'border-transparent'
-                  }`}>
-                    <Layers className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-4 text-primary-foreground/80 flex-shrink-0" />
+                  <div className={`bg-black/5 rounded-[10px] flex items-center px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-5 border border-black/10 transition-all ${isSearchFocused ? 'border-accent shadow-glow' : 'border-black/10'
+                    }`}>
+                    <Layers className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-4 text-black flex-shrink-0" />
                     <input
                       type="text"
                       value={selected ? selected.label : searchQuery}
@@ -249,7 +248,7 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
                       placeholder="What Are You Looking For?"
                       aria-expanded={menuOpen}
                       aria-haspopup="listbox"
-                      className="flex-1 bg-transparent text-primary-foreground placeholder:text-primary-foreground/60 outline-none text-sm sm:text-base md:text-lg min-w-0"
+                      className="flex-1 bg-transparent text-black placeholder:text-black outline-none text-sm sm:text-base md:text-lg min-w-0"
                     />
                     <button
                       type="button"
@@ -258,9 +257,8 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
                       className="ml-2 sm:ml-4 flex-shrink-0"
                     >
                       <ChevronDown
-                        className={`w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground/80 transition-transform ${
-                          menuOpen ? 'rotate-180' : ''
-                        }`}
+                        className={`w-4 h-4 sm:w-5 sm:h-5 text-black transition-transform ${menuOpen ? 'rotate-180' : ''
+                          }`}
                       />
                     </button>
                   </div>
@@ -296,7 +294,7 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
                     aria-label="Filters"
                     aria-expanded={filterOpen}
                     onClick={() => setFilterOpen((open) => !open)}
-                    className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-xl sm:rounded-2xl bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border-0 transition-all"
+                    className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-xl sm:rounded-2xl bg-black/5 hover:bg-black/5  text-black border border-black/10 transition-all"
                   >
                     <SlidersHorizontal className="w-5 h-5 sm:w-6 sm:h-6" />
                   </Button>
@@ -402,9 +400,9 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
                     </div>
                   )}
                 </div>
-                <Button 
-                  variant="accent" 
-                  size="icon" 
+                <Button
+                  variant="accent"
+                  size="icon"
                   onClick={handleSearch}
                   className="h-12 w-12 sm:h-14 sm:w-14 rounded-[10px] shadow-lg hover:scale-105 transition-transform flex-shrink-0"
                 >
@@ -418,7 +416,7 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
               "Trending Topics" with nothing after it looks broken. */}
           {trendingTopics.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 px-4">
-              <span className="text-xs sm:text-sm text-primary-foreground/70 mr-2">Trending Topics</span>
+              <span className="text-xs sm:text-sm font-medium text-black/80 mr-2">Trending Topics</span>
               {trendingTopics.map((topic) => (
                 <Button
                   key={topic.name}
@@ -427,11 +425,11 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
                   onClick={() =>
                     navigate(`/all-listings?category=${encodeURIComponent(topic.name)}`)
                   }
-                  className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border border-primary-foreground/20 rounded-full px-3 py-1.5 sm:px-5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+                  className="bg-black text-primary-foreground hover:text-white hover:bg-black rounded-full px-3 py-1.5 sm:px-5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
                 >
                   {topic.name}
                   {/* Stroked with currentColor, so it stays white with the label. */}
-                  <ArrowUpSvg className="w-3 h-3 sm:w-4 sm:h-4 ml-1 sm:ml-2" />
+                  <ArrowUpSvg className="w-3 h-3 sm:w-4 sm:h-4 ml-1 sm:ml-2 text-[#C6FE1F]" />
                 </Button>
               ))}
             </div>
@@ -439,27 +437,27 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
 
           <div className="relative w-full max-w-7xl mx-auto mt-4 sm:mt-8 flex items-end justify-center mb-0 px-4">
             {/* Large center image - positioned at bottom */}
-            <img 
-              src={heroCard1} 
-              alt="Dashboard" 
+            <img
+              src={heroCard1}
+              alt="Dashboard"
               className="w-full z-10"
               decoding="async"
               sizes="(max-width: 768px) 100vw, 1200px"
             />
-            
+
             {/* Small image - top left corner of big image - hidden on mobile, visible on tablet+ */}
-            <img 
-              src={heroCard3} 
-              alt="Archived Chats" 
+            <img
+              src={heroCard3}
+              alt="Archived Chats"
               className="hidden sm:block absolute left-4 sm:left-2 md:left-4 top-0 w-48 sm:w-56 md:w-72 hover:scale-105 transition-transform z-20"
               decoding="async"
               sizes="(max-width: 1024px) 40vw, 320px"
             />
-            
+
             {/* Small image - top right corner of big image - hidden on mobile, visible on tablet+ */}
-            <img 
-              src={heroCard2} 
-              alt="Chat Details" 
+            <img
+              src={heroCard2}
+              alt="Chat Details"
               className="hidden sm:block absolute right-0 sm:-right-2 md:right-0 -top-4 w-52 sm:w-64 md:w-80 hover:scale-105 transition-transform z-20"
               decoding="async"
               sizes="(max-width: 1024px) 45vw, 360px"
@@ -467,6 +465,32 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
           </div>
         </div>
       </div>
+         <div className="absolute inset-0 pointer-events-none z-0" aria-hidden="true">
+          {[
+            { top: "4%", right: "12%", color: "#E5E5E5" },
+            { top: "3%", right: "34%", color: "#E5E5E5" },
+            { top: "7%", left: "45%", color: "#E5E5E5" },
+            { top: "3%", left: "28%", color: "#E5E5E5" },
+            { top: "10%", left: "0%", color: "#E5E5E5" },
+            { top: "40%", left: "0%", color: "#E5E5E5" },
+            { top: "20%", left: "10%", color: "#C6FE1F" },
+            { top: "17%", right: "10%", color: "#000000" },
+          ].map((box, index) => (
+            <span
+              key={index}
+              className="absolute   backdrop-blur-[2px]"
+              style={{
+                top: box.top,
+                left: box.left,
+                right: box.right,
+                backgroundColor: box.color,
+                width: 90,
+                height: 80,
+              }}
+            />
+          ))}
+        </div> 
+
     </section>
   );
 };

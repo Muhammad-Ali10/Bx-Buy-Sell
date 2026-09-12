@@ -82,7 +82,7 @@ const THEME = {
       border: "1px solid rgba(0, 0, 0, 0.05)",
       backdropFilter: "blur(10px)",
     },
-    chip: { background: "rgba(0, 0, 0, 0.05)", color: "rgba(0, 0, 0, 0.7)" },
+    chip: { background: "#D8D8D8", color: "rgba(0, 0, 0, 0.7)" },
     circle: { background: "rgba(0, 0, 0, 0.1)" },
     ink: "rgba(0, 0, 0, 1)",
     text: "text-black",
@@ -95,7 +95,7 @@ const THEME = {
       border: "1px solid rgba(0, 0, 0, 0.05)",
       backdropFilter: "blur(10px)",
     },
-    chip: { background: "rgba(255, 255, 255, 0.1)", color: "rgba(255, 255, 255, 0.9)" },
+    chip: { background: "#D8D8D8", color: "#000000/70" },
     circle: { background: "rgba(255, 255, 255, 0.12)" },
     ink: "rgba(255, 255, 255, 1)",
     text: "text-white",
@@ -401,7 +401,7 @@ const Header = ({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className={`rounded-full font-lufga ${t.text} ${t.hover}`}
+                  className={`bg-[#C6FE1F] rounded-full font-lufga `}
                   asChild
                 >
                   <Link to="/login">Login</Link>

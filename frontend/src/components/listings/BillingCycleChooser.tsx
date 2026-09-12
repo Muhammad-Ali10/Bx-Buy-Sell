@@ -34,11 +34,11 @@ export const BillingCycleChooser = ({
 }) => (
   <div
     className={flush ? "overflow-hidden rounded-b-2xl" : "mt-4 overflow-hidden rounded-2xl"}
-    style={{ background: "#18181A" }}
+    style={{ background: "rgba(249, 250, 251, 0.1)" }}
     onClick={(event) => event.stopPropagation()}
   >
     {!flush && (
-      <h2 className="m-0 px-3 py-2.5 text-xs font-semibold text-white">
+      <h2 className="m-0 px-3 py-2.5 text-xs font-semibold text-black/80 uppercase tracking-wide">
         Select Billing Cycle
       </h2>
     )}
@@ -54,15 +54,15 @@ export const BillingCycleChooser = ({
             className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left disabled:opacity-60"
             style={{ background: selected ? "rgba(255,255,255,0.08)" : "transparent" }}
           >
-            <span className="flex items-center gap-2 text-xs text-white">
+            <span className="flex items-center gap-2 text-xs text-black/70">
               <span
-                className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full border border-white/70"
+                className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full border border-black/70"
                 aria-hidden
               >
                 {selected && (
                   <span
                     className="h-1.5 w-1.5 rounded-full"
-                    style={{ background: "rgba(197, 253, 31, 1)" }}
+                    style={{ background: "#000000" }}
                   />
                 )}
               </span>
@@ -71,7 +71,7 @@ export const BillingCycleChooser = ({
             {/* Nothing next to Monthly, as the design has it — "No discount"
                 were our own words, not theirs. */}
             {cycle.discountPercent > 0 && (
-              <span className="text-[11px] text-white">
+              <span className="text-[11px] text-black/70">
                 {cycle.discountPercent}% Discount
               </span>
             )}
