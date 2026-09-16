@@ -243,7 +243,7 @@ const MyListings = () => {
 
       <div className="flex-1 w-full flex flex-col min-w-0 lg:ml-[240px] xl:ml-[280px]">
         {/* Header - Shared across all tabs */}
-        <Header inColumn dark />
+        <Header inColumn />
 
         {/* Search and Add Button Section - Only visible on My Listings tab */}
         <div className="w-full flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 px-4 sm:px-6 md:px-8 lg:px-10 pt-6 sm:pt-8 md:pt-10 pb-4 sm:pb-6 md:pb-8">

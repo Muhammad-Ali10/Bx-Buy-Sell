@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUpdateBrandQuestion } from "@/hooks/useUpdateBrandQuestion";
 import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
@@ -37,6 +38,8 @@ export const EditBrandQuestionDialog = ({ open, onOpenChange, question }: EditBr
   const [questionText, setQuestionText] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState(""); // For SELECT type - comma separated options
+  /** The administrator's note for the seller, shown under this question in Create Listing. */
+  const [hintText, setHintText] = useState("");
   const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateBrandQuestion();
 
@@ -58,6 +61,7 @@ export const EditBrandQuestionDialog = ({ open, onOpenChange, question }: EditBr
         setOptions("");
       }
       setRequired(question.required !== false);
+      setHintText((question as any).hint ?? "");
     }
   }, [question]);
 
@@ -88,6 +92,7 @@ export const EditBrandQuestionDialog = ({ open, onOpenChange, question }: EditBr
         id: question.id,
         question: questionText.trim(),
         answer_type: questionType,
+        hint: hintText.trim(),
         option: optionsArray.length > 0 ? optionsArray : undefined,
         required,
       },
@@ -142,6 +147,15 @@ export const EditBrandQuestionDialog = ({ open, onOpenChange, question }: EditBr
           )}
 
           {/* Answer Type Section */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-black">Create Listing Text Hint</Label>
+            <Textarea
+              value={hintText}
+              onChange={(e) => setHintText(e.target.value)}
+              placeholder="Enter hint text to help users understand this question..."
+              className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
+            />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="edit-answerType" className="text-foreground">Answer Type</Label>
             <Select value={questionType} onValueChange={setQuestionType}>

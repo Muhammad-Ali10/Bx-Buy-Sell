@@ -1220,3 +1220,41 @@ model FxDay {
   rates      Json
   created_at DateTime @default(now())
 }
+
+/// A sign-up waiting for its emailed code.
+///
+/// Nothing is registered until the code comes back right: only then is a User
+/// made from this row, and the row deleted. An abandoned sign-up leaves no
+/// account behind, and signing up again with the address starts it over.
+model PendingSignup {
+  id             String    @id @default(uuid()) @map("_id")
+  email          String    @unique
+  first_name     String
+  last_name      String
+  password_hash  String
+  business_name  String?
+  otp_code       String?
+  otp_expires_at DateTime?
+  otp_attempts   Int       @default(0)
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+}
+
+/// A sentence for one figure on the published ad, written by an administrator.
+///
+/// Every other ⓘ on an ad belongs to a question and takes its wording from the
+/// question's `publicHint`. The summary figures are worked out rather than
+/// answered — the margin from the P&L table, the multiples from the asking
+/// price, the age from the starting date — so no question stands behind them,
+/// and their sentences used to live in the page's code where nobody could edit
+/// them.
+///
+/// One row per figure, the id being the page's own name for it. A figure
+/// nobody has written about has no row at all, and the page keeps the sentence
+/// it came with.
+model AdFieldHint {
+  /// The figure's key, such as `profitMargin`. Fixed by the page, never generated.
+  id         String   @id @map("_id")
+  text       String
+  updated_at DateTime @updatedAt
+}

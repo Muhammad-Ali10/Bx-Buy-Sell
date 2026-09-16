@@ -173,8 +173,19 @@ export default function AdminUserDetails() {
           // Fetch payment method if user has active subscription
           if (data.stripeCustomerId && data.status === 'ACTIVE') {
             const pmResponse = await (apiClient as any).request(`/subscription/payment-method/${id}`);
-            if (pmResponse.success && pmResponse.data) {
-              setPaymentMethod(pmResponse.data);
+            /*
+             * The body arrives wrapped twice. The controller returns its own
+             * `{ success, data }`, and the global ResponseInterceptor puts a
+             * `{ status, timestamp, path, data }` around that; the api client
+             * peels off only the outer one. Taking `pmResponse.data` therefore
+             * stored the controller's envelope, not the card — every field
+             * read undefined, and `brand.charAt(0)` threw before the tab could
+             * paint. `??` keeps a null card null, and falls back to the single
+             * -wrapped shape if the interceptor ever stops double-wrapping.
+             */
+            const card = pmResponse?.data?.data ?? pmResponse?.data;
+            if (pmResponse.success && card?.brand) {
+              setPaymentMethod(card);
             }
           }
         }
@@ -1043,7 +1054,12 @@ export default function AdminUserDetails() {
               >
                 <div style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Card Type</div>
                 <div style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-                  {paymentMethod ? (paymentMethod.brand.charAt(0).toUpperCase() + paymentMethod.brand.slice(1)) : '-'}
+                  {/* Guard the brand itself, not just the card: a payment
+                      method without one crashed the whole tab. The card row
+                      above has always read `paymentMethod?.brand?.`. */}
+                  {paymentMethod?.brand
+                    ? paymentMethod.brand.charAt(0).toUpperCase() + paymentMethod.brand.slice(1)
+                    : '-'}
                 </div>
                 <div style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Card Holder</div>
                 <div style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
@@ -1051,7 +1067,11 @@ export default function AdminUserDetails() {
                 </div>
                 <div style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Expire</div>
                 <div style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-                  {paymentMethod ? `${String(paymentMethod.expMonth).padStart(2, '0')}/${paymentMethod.expYear}` : '-'}
+                  {/* Stripe leaves these null on a non-card method, and
+                      String(null) printed a literal "null/null" here. */}
+                  {paymentMethod?.expMonth && paymentMethod?.expYear
+                    ? `${String(paymentMethod.expMonth).padStart(2, '0')}/${paymentMethod.expYear}`
+                    : '-'}
                 </div>
                 <div style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Card Number</div>
                 <div style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>

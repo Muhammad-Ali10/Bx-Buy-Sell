@@ -74,7 +74,10 @@ async function main() {
       where: { id: request.id },
       data: { chatId },
     });
-    await postAccessNotice(db, chatId, 'CONFIDENTIAL_ACCESS_REQUESTED', request.buyerId);
+    // Filling a gap, so never a second one: this script may be run again.
+    await postAccessNotice(db, chatId, 'CONFIDENTIAL_ACCESS_REQUESTED', request.buyerId, {
+      onlyIfMissing: true,
+    });
     console.log(`      done: ${chatId}`);
   }
 

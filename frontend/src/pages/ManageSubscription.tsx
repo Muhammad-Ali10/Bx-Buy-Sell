@@ -282,25 +282,34 @@ const ManageSubscription = () => {
               screens rather than one screen full of caveats.
 
               Two separate pills rather than one segmented control: the design
-              has them as a choice of who you are, not as a switch. */}
-          {/* <div className="mt-7 flex justify-center gap-3">
-            {(["BUYER", "SELLER"] as Audience[]).map((a) => (
-              <button
-                key={a}
-                type="button"
-                onClick={() => setAudience(a)}
-                className="rounded-lg px-6 py-2.5 text-[13px] font-medium transition-colors"
-                style={{
-                  fontFamily: "Lufga",
-                  background: audience === a ? LIME : "#FFFFFF",
-                  color: "#0F172A",
-                  border: audience === a ? `1px solid ${LIME}` : "1px solid #E2E8F0",
-                }}
-              >
-                {a === "BUYER" ? "I'm A Buyer" : "I'm A Seller"}
-              </button>
-            ))}
-          </div> */}
+              has them as a choice of who you are, not as a switch.
+
+              These were commented out, and the seller's side of this page went
+              with them: the choice starts on "buyer", and nothing else on the
+              screen could change it, so a seller arriving here was shown the
+              buyer's plans and had no way to reach their own screen. They are
+              left out only where a listing was named, because then the page is
+              about that listing's package and there is nothing to choose. */}
+          {!listingId && (
+            <div className="mt-7 flex justify-center gap-3">
+              {(["BUYER", "SELLER"] as Audience[]).map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setAudience(a)}
+                  className="rounded-lg px-6 py-2.5 text-[13px] font-medium transition-colors"
+                  style={{
+                    fontFamily: "Lufga",
+                    background: audience === a ? LIME : "#FFFFFF",
+                    color: "#0F172A",
+                    border: audience === a ? `1px solid ${LIME}` : "1px solid #E2E8F0",
+                  }}
+                >
+                  {a === "BUYER" ? "I'm A Buyer" : "I'm A Seller"}
+                </button>
+              ))}
+            </div>
+          )}
 
           {listingId ? (
             /*
@@ -385,7 +394,7 @@ const ManageSubscription = () => {
       <div className="flex min-h-screen bg-background">
         <ListingsSidebar />
         <div className="flex-1 w-full flex flex-col min-w-0 lg:ml-[240px] xl:ml-[280px]">
-          <Header inColumn dark />
+          <Header inColumn />
           {content}
         </div>
       </div>
@@ -647,7 +656,7 @@ const PlanCard = ({
             )}
             {openAction === "DOWNGRADE" && (
               <ActionButton tone="red" busy={busy} onClick={onDowngrade}>
-                {isFree ? "Cancel Subscription" : `Confirm Downgrade to ${plan.title}`}
+                {`Confirm Downgrade to ${plan.title}`}
               </ActionButton>
             )}
             {openAction === "MANAGE" && !isFree && (
@@ -693,8 +702,14 @@ const PlanCard = ({
             Upgrade to {plan.title}
           </ActionButton>
         ) : (
+          // Minimum is a plan like any other, so moving to it reads as the
+          // downgrade it is. It said "Cancel Subscription", which named the
+          // consequence rather than the act — and the act is the same one the
+          // other cards offer: the paid plan runs to the end of its period and
+          // Minimum takes over. Cancelling still has its own button, inside
+          // the current plan's Manage panel.
           <ActionButton tone="red-outline" busy={busy} onClick={onOpen}>
-            {isFree ? "Cancel Subscription" : `Downgrade to ${plan.title}`}
+            {`Downgrade to ${plan.title}`}
           </ActionButton>
         )}
       </div>

@@ -6,7 +6,7 @@ import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
 import { normalizeDomainAnswer } from "@/lib/domainUtils";
 import { serializeMediaUrls } from "@/lib/mediaUtils";
-import { isQuestionRequired } from "@/lib/questionRequired";
+import { isQuestionHidden, isQuestionRequired } from "@/lib/questionRequired";
 import { usePlans } from "@/hooks/usePlans";
 import {
   Ban,
@@ -162,21 +162,19 @@ export const PackagesStep = ({
     const categoryValue = formData.category;
     if (isEmpty(categoryValue)) missing.push("Category");
 
-    /** A conditional question the seller never saw cannot be missing. */
-    const isHidden = (q: any) => {
-      if (!q?.dependsOnQuestionId) return false;
-      const parent = String(formData[q.dependsOnQuestionId] ?? "").trim().toLowerCase();
-      const expected = String(q.dependsOnValue ?? "").trim().toLowerCase();
-      return expected ? parent !== expected : parent === "";
-    };
-
     const checkSet = (questions: any[] | undefined, answers: Record<string, any>) => {
       (questions || []).forEach((q: any) => {
         // One shared rule, so this cannot disagree with the step that asked.
         if (!isQuestionRequired(q)) return;
         const type = String(q?.answer_type || "").toUpperCase();
         if (["PHOTO", "PHOTO_UPLOAD", "FILE", "FILE_UPLOAD"].includes(type)) return;
-        if (isHidden(q)) return;
+        /*
+         * Likewise for whether the seller was shown it at all. A question the
+         * step folded away cannot be missing from a form that never asked it —
+         * this used to know only about configured dependencies, and refused to
+         * publish over the two inventory follow-ups the step hides by wording.
+         */
+        if (isQuestionHidden(q, answers, questions || [])) return;
         if (isEmpty(answers?.[q.id])) missing.push(q.question || "Required field");
       });
     };
@@ -645,6 +643,9 @@ export const PackagesStep = ({
           Please enter a listing price before accessing the Packages section. Pricing is
           calculated automatically based on the listing price you provide
         </div>
+        <Button variant="ghost" className="mt-6" onClick={onBack}>
+          Back
+        </Button>
       </div>
     );
   }

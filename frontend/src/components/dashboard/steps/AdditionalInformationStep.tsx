@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { hintPlaceholder, QuestionHint } from "@/components/dashboard/QuestionHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PrefixedNumberInput } from "@/components/dashboard/PrefixedNumberInput";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,6 +14,7 @@ import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
 import { toast } from "sonner";
 import { uploadToCloudinary, uploadMultipleToCloudinary } from "@/lib/cloudinary";
+import { isQuestionHidden } from "@/lib/questionRequired";
 import {
   ALLOWED_ATTACHMENT_LABEL,
   formatMaxSize,
@@ -81,55 +83,6 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     const text = (questionText || "").toLowerCase();
     const key = Object.keys(FIXED_SPLIT_ROWS).find((k) => text.includes(k));
     return key ? FIXED_SPLIT_ROWS[key] : null;
-  };
-
-  const isInventoryQuestion = (questionText: string) => {
-    const text = (questionText || "").toLowerCase();
-    return text.includes("do you have inventory");
-  };
-
-  const isInventoryDependentQuestion = (questionText: string) => {
-    const text = (questionText || "").toLowerCase();
-    return (
-      text.includes("inventory value") ||
-      text.includes("how much") ||
-      text.includes("included in the price")
-    );
-  };
-
-  const getInventoryAnswer = (questions: any[]) => {
-    const inventoryQuestion = questions.find((q: any) => isInventoryQuestion(q?.question));
-    if (!inventoryQuestion) return null;
-    return formData[inventoryQuestion.id];
-  };
-
-  const isInventoryYes = (value: any) => {
-    return value === "yes" || value === "true" || value === true;
-  };
-
-  const normalizeAnswerForMatch = (value: any): string => {
-    const s = String(value ?? "").trim().toLowerCase();
-    if (s === "true") return "yes";
-    if (s === "false") return "no";
-    return s;
-  };
-
-  // A question is hidden when its admin-configured dependency isn't satisfied.
-  // Falls back to the legacy inventory keyword rule if no dependency is set,
-  // so existing questions keep behaving exactly as before.
-  const isQuestionHidden = (question: any, questions: any[]): boolean => {
-    if (question?.dependsOnQuestionId) {
-      const parentAnswer = formData[question.dependsOnQuestionId];
-      const expected = normalizeAnswerForMatch(question.dependsOnValue);
-      const actual = normalizeAnswerForMatch(parentAnswer);
-      if (!expected) return !actual; // no value set -> just require an answer
-      return actual !== expected;
-    }
-    const inventoryAnswer = getInventoryAnswer(questions);
-    return (
-      isInventoryDependentQuestion(question.question) &&
-      !isInventoryYes(inventoryAnswer)
-    );
   };
 
   const normalizeSplitRow = (row: any) => {
@@ -227,7 +180,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     
     // Check if all questions have answers
     questionsToValidate.forEach((question: any) => {
-      if (isQuestionHidden(question, questionsToValidate)) {
+      if (isQuestionHidden(question, formData, questionsToValidate)) {
         return;
       }
 
@@ -411,6 +364,9 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     if (isSplitQuestion(question.question)) {
       const rows = normalizeSplitValue(question.id, question.question);
       const total = rows.reduce((sum: number, row: any) => sum + (Number(row?.percent) || 0), 0);
+      // Fixed-segment questions (Customer Type) own their rows, so there is
+      // nothing to add — a new row would be dropped on the next render anyway.
+      const hasFixedRows = fixedRowsFor(question.question) !== null;
 
       return (
         <div
@@ -547,43 +503,53 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
               </div>
             ))}
           </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
-            <button
-              type="button"
-              onClick={() => {
-                const next = [...rows, { percent: "", name: "" }];
-                setFormData({ ...formData, [question.id]: next });
-              }}
-              style={{
-                height: "26px",
-                width: "fit-content",
-                borderRadius: "4px",
-                paddingTop: "3px",
-                paddingRight: "12px",
-                paddingBottom: "3px",
-                paddingLeft: "12px",
-                gap: "4px",
-                background: "rgba(241, 241, 241, 1)",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                border: "none",
-                cursor: "pointer",
-              }}
-            >
-              <span
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: hasFixedRows ? "flex-end" : "space-between",
+              flexWrap: "wrap",
+              gap: "10px",
+            }}
+          >
+            {!hasFixedRows && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = [...rows, { percent: "", name: "" }];
+                  setFormData({ ...formData, [question.id]: next });
+                }}
                 style={{
-                  fontFamily: "Lufga",
-                  fontWeight: 500,
-                  fontSize: "14px",
-                  lineHeight: "140%",
-                  letterSpacing: "0%",
-                  color: "rgba(0, 0, 0, 1)",
+                  height: "26px",
+                  width: "fit-content",
+                  borderRadius: "4px",
+                  paddingTop: "3px",
+                  paddingRight: "12px",
+                  paddingBottom: "3px",
+                  paddingLeft: "12px",
+                  gap: "4px",
+                  background: "rgba(241, 241, 241, 1)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "none",
+                  cursor: "pointer",
                 }}
               >
-                Add
-              </span>
-            </button>
+                <span
+                  style={{
+                    fontFamily: "Lufga",
+                    fontWeight: 500,
+                    fontSize: "14px",
+                    lineHeight: "140%",
+                    letterSpacing: "0%",
+                    color: "rgba(0, 0, 0, 1)",
+                  }}
+                >
+                  Add
+                </span>
+              </button>
+            )}
             <span
               style={{
                 fontFamily: "Lufga",
@@ -617,46 +583,33 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
       case "NUMBER":
         const affix = getNumberAffix(question.question);
         return (
-          <div className="relative">
-            {affix.prefix && (
-              <span
-                style={{
-                  position: "absolute",
-                  left: "12px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "rgba(0,0,0,0.5)",
-                  fontSize: "18px",
-                  fontFamily: "Lufga",
-                  fontWeight: 400,
-                  lineHeight: "140%",
-                }}
-              >
-                {affix.prefix}
-              </span>
-            )}
-            <Input
-              type="text"
-              inputMode="numeric"
-              value={value}
-              onChange={(e) => {
-                let v = sanitizeNumberInput(e.target.value);
-                if (affix.prefix === "%") v = clampPercent(v);
-                setFormData({ ...formData, [question.id]: v });
-              }}
-              placeholder={hintPlaceholder(question, "Enter a number")}
-              className="h-11 sm:h-12 border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none"
-              style={{
-                background: "rgba(250, 250, 250, 1)",
-                borderRadius: "12px",
-                paddingLeft: affix.prefix ? "36px" : undefined,
-                paddingRight: affix.suffix ? "28px" : undefined,
-                outline: "none",
-                boxShadow: "none",
-                appearance: "textfield",
-              }}
-            />
-          </div>
+          <PrefixedNumberInput
+            prefix={affix.prefix}
+            prefixStyle={{
+              color: "rgba(0,0,0,0.5)",
+              fontSize: "18px",
+              fontFamily: "Lufga",
+              fontWeight: 400,
+              lineHeight: "140%",
+            }}
+            type="text"
+            inputMode="numeric"
+            value={value}
+            onChange={(e) => {
+              let v = sanitizeNumberInput(e.target.value);
+              if (affix.prefix === "%") v = clampPercent(v);
+              setFormData({ ...formData, [question.id]: v });
+            }}
+            placeholder={hintPlaceholder(question, "Enter a number")}
+            className="h-11 sm:h-12 border-none focus:ring-0 focus:border-transparent hover:border-transparent focus-visible:ring-0 focus-visible:outline-none"
+            style={{
+              background: "rgba(250, 250, 250, 1)",
+              borderRadius: "12px",
+              outline: "none",
+              boxShadow: "none",
+              appearance: "textfield",
+            }}
+          />
         );
       
       case "TEXTAREA":
@@ -925,7 +878,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             </div>
           ) : (
             statisticQuestions.map((question: any) => {
-              if (isQuestionHidden(question, statisticQuestions)) {
+              if (isQuestionHidden(question, formData, statisticQuestions)) {
                 return null;
               }
 
@@ -955,7 +908,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             </div>
           ) : (
             productQuestions.map((question: any) => {
-              if (isQuestionHidden(question, productQuestions)) {
+              if (isQuestionHidden(question, formData, productQuestions)) {
                 return null;
               }
 
@@ -985,7 +938,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             </div>
           ) : (
             managementQuestions.map((question: any) => {
-              if (isQuestionHidden(question, managementQuestions)) {
+              if (isQuestionHidden(question, formData, managementQuestions)) {
                 return null;
               }
 

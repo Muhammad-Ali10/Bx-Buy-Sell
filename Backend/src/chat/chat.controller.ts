@@ -487,18 +487,23 @@ export class ChatController {
       chat.userId,
     );
 
-    await this.chatService.createSystemTimelineMessage(
-      chatId,
-      currentUser.id,
-      'Seller has revoked access to confidential listing details.',
-      {
-        eventType: 'CONFIDENTIAL_ACCESS_REVOKED',
-        listingId: chat.listingId,
-        buyerId: chat.userId,
-        sellerId: chat.sellerId,
+    // Only when something was actually taken away. Pressing Revoke on a buyer
+    // who has no access changes nothing, and the conversation should not say
+    // it happened.
+    if (revokeResult?.revoked) {
+      await this.chatService.createSystemTimelineMessage(
         chatId,
-      },
-    );
+        currentUser.id,
+        'Seller has revoked access to confidential listing details.',
+        {
+          eventType: 'CONFIDENTIAL_ACCESS_REVOKED',
+          listingId: chat.listingId,
+          buyerId: chat.userId,
+          sellerId: chat.sellerId,
+          chatId,
+        },
+      );
+    }
 
     return {
       success: true,

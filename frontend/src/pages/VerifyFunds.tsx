@@ -44,7 +44,7 @@ const VerifyFunds = () => {
           heading disappears behind it. The bar sits inside this column, so the
           same margin places it too. */}
       <div className="flex-1 min-w-0 md:w-auto lg:ml-[240px] xl:ml-[280px]">
-        <Header inColumn dark />
+        <Header inColumn />
 
         <main className="px-4 pb-10 sm:px-6 lg:px-10">
           <div className="mx-auto w-full max-w-5xl">

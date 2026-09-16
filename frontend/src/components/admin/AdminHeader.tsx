@@ -20,6 +20,6 @@ interface AdminHeaderProps {
  * bar handles what the panel needs — the sidebar trigger on the screens where
  * that sidebar is hidden, and an account menu pointing at admin destinations.
  */
-export const AdminHeader = (_props: AdminHeaderProps) => <Header admin dark />;
+export const AdminHeader = (_props: AdminHeaderProps) => <Header admin />;
 
 export default AdminHeader;

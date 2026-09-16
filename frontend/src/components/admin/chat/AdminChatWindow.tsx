@@ -16,11 +16,11 @@ import { formatAdminMessageTime } from "@/lib/timeFormatter";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useUnconfirmedMessages } from "@/hooks/useUnconfirmedMessages";
-import { useNavigate } from "react-router-dom";
 import { resolveListingTitle } from "@/lib/listingTitle";
 import { Socket } from "socket.io-client";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import chatSearchIcon from "@/assets/chatsearch.svg";
+import { ChatMessageBody } from "@/components/chat/ChatMessageBody";
 
 interface Message {
   id: string;
@@ -56,7 +56,6 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
   const [isConnected, setIsConnected] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
-  const navigate = useNavigate();
   // A message the server refused used to stay on screen as though it had gone.
   const unconfirmed = useUnconfirmedMessages((message, reason) => {
     setMessages((prev) => prev.filter((m) => m.id !== message.tempId));
@@ -397,6 +396,9 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
           createdAt: msg.createdAt,
           read: msg.read || false,
           type: msg.type,
+          // Without this a photograph arrived as the word "image" and nothing
+          // else: the address it lives at was left behind in the mapping.
+          fileUrl: msg.fileUrl ?? null,
           sender: msg.sender
         })));
       }
@@ -594,8 +596,9 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
           </h2>
           {/* "3 Members, 1 online" was two hard-coded numbers with a TODO
               beside them — the same figures on every conversation, whoever was
-              actually there. The draft asks for the two names here, each opening
-              that person's record. */}
+              actually there. The two names stood here next, until the client
+              asked for them on the right instead: the Details panel names both
+              people, and each opens that person's record. */}
           <p
             className="text-base lg:text-[11px] xl:text-base text-black/50 m-0 truncate"
             style={{
@@ -605,33 +608,7 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
               letterSpacing: '0%',
             }}
           >
-            <span className="mr-1.5">Chat History</span>
-            {conversation.user?.id && (
-              <>
-                <span className="mx-1">·</span>
-                <button
-                  type="button"
-                  className="underline underline-offset-2 hover:text-black transition-colors"
-                  onClick={() => navigate(`/admin/users/${conversation.user.id}`)}
-                  title={`Open ${buyerName}`}
-                >
-                  {buyerName}
-                </button>
-              </>
-            )}
-            {conversation.seller?.id && (
-              <>
-                <span className="mx-1">↔</span>
-                <button
-                  type="button"
-                  className="underline underline-offset-2 hover:text-black transition-colors"
-                  onClick={() => navigate(`/admin/users/${conversation.seller.id}`)}
-                  title={`Open ${sellerName}`}
-                >
-                  {sellerName}
-                </button>
-              </>
-            )}
+            Chat History
           </p>
         </div>
         <div className="flex items-center flex-shrink-0" style={{ gap: '4px' }}>
@@ -960,18 +937,11 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
                       </div>
                     </div>
 
-                    {/* Message content */}
-                    <p 
-                      className="chat-message-text-desktop"
-                      style={{ 
-                        color: 'rgba(0, 0, 0, 1)',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        margin: 0,
-                      }}
-                    >
-                      {message.content}
-                    </p>
+                    {/* What was sent: a picture, a file, or words. */}
+                    <ChatMessageBody
+                      message={message}
+                      style={{ color: 'rgba(0, 0, 0, 1)' }}
+                    />
 
                     {/* Timestamp at bottom right */}
                     <div
@@ -1031,18 +1001,11 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
                       position: 'relative',
                     }}
                   >
-                    {/* Message content */}
-                    <p 
-                      className="chat-message-text-desktop"
-                      style={{ 
-                        color: 'rgba(0, 0, 0, 1)',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        margin: 0,
-                      }}
-                    >
-                      {message.content}
-                    </p>
+                    {/* What was sent: a picture, a file, or words. */}
+                    <ChatMessageBody
+                      message={message}
+                      style={{ color: 'rgba(0, 0, 0, 1)' }}
+                    />
 
                     {/* Timestamp at bottom right */}
                     <div

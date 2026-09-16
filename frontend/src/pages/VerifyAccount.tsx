@@ -35,7 +35,7 @@ const VerifyAccount = () => {
           heading disappears behind it. The bar sits inside this column, so the
           same margin places it too. */}
       <div className="flex-1 min-w-0 md:w-auto lg:ml-[240px] xl:ml-[280px]">
-        <Header inColumn dark />
+        <Header inColumn />
 
         {/* The same component the Account Details tab renders, so the sidebar
             link keeps working and there is only one version of this screen. */}

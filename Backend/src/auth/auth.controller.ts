@@ -60,8 +60,8 @@ export class AuthController {
 
   @HttpCode(HttpStatus.OK)
   @Put('verify-otp')
-  verifyOTP(@Body(new ZodValidationPipe(verifyOtpSchema)) body) {
-    return this.authService.verifyOTP(body);
+  verifyOTP(@Req() req: any, @Body(new ZodValidationPipe(verifyOtpSchema)) body) {
+    return this.authService.verifyOTP(body, requestOrigin(req));
   }
 
   @HttpCode(HttpStatus.OK)

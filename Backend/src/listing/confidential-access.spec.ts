@@ -39,6 +39,7 @@ describe('ListingService confidential access requests', () => {
         findUnique: jest.fn(async () => ({
           id: LISTING,
           userId: SELLER,
+          advertisement: [{ question: 'Title', answer: 'Test Title' }],
           confidentialControl: true,
           approveBuyersManually: true,
           selectedPackage: 'PREMIUM',
@@ -55,6 +56,11 @@ describe('ListingService confidential access requests', () => {
         update: jest.fn(async ({ data }: any) => {
           store.access = { ...store.access, ...data };
           return store.access;
+        }),
+        deleteMany: jest.fn(async () => {
+          const had = store.access ? 1 : 0;
+          store.access = null;
+          return { count: had };
         }),
       },
       chat: {
@@ -90,8 +96,15 @@ describe('ListingService confidential access requests', () => {
         }),
       },
     };
-    const service = new ListingService(db as any, {} as any, {} as any, {} as any, {} as any);
-    return { db, store, service };
+    const notifications = { notify: jest.fn(async () => ({})) };
+    const service = new ListingService(
+      db as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      notifications as any,
+    );
+    return { db, store, service, notifications };
   };
 
   const kinds = (store: { messages: any[] }) => store.messages.map((m) => m.metadata.kind);
@@ -177,6 +190,131 @@ describe('ListingService confidential access requests', () => {
       expect(store.chats).toHaveLength(1);
       expect(kinds(store)).toEqual(['CONFIDENTIAL_ACCESS_APPROVED']);
       expect(store.access.chatId).toBe(store.chats[0].id);
+    });
+  });
+
+  /*
+   * The client's report, in three steps: access granted says so, access
+   * revoked says so, and access granted again said nothing at all. The notice
+   * was being matched against the whole conversation, so the first "granted"
+   * stopped the second from ever being written — while the access itself came
+   * back. Revoking again did show, because that message is written another way.
+   */
+  describe('access given, taken away, and given again', () => {
+    it('says so each time it actually changes', async () => {
+      const { service, store } = build({}, { status: 'PENDING', chatId: 'chat-9' }, [
+        { id: 'chat-9', listingId: LISTING, userId: BUYER, sellerId: SELLER },
+      ]);
+
+      await service.grantConfidentialAccess(LISTING, SELLER, BUYER);
+      await service.revokeConfidentialAccess(LISTING, SELLER, BUYER);
+      await service.grantConfidentialAccess(LISTING, SELLER, BUYER);
+
+      expect(kinds(store)).toEqual([
+        'CONFIDENTIAL_ACCESS_APPROVED',
+        'CONFIDENTIAL_ACCESS_APPROVED',
+      ]);
+    });
+
+    it('says nothing when the buyer already has access', async () => {
+      const { service, store } = build({}, { status: 'PENDING', chatId: 'chat-9' }, [
+        { id: 'chat-9', listingId: LISTING, userId: BUYER, sellerId: SELLER },
+      ]);
+
+      await service.grantConfidentialAccess(LISTING, SELLER, BUYER);
+      await service.grantConfidentialAccess(LISTING, SELLER, BUYER);
+
+      expect(kinds(store)).toEqual(['CONFIDENTIAL_ACCESS_APPROVED']);
+    });
+
+    it('stays quiet when a refused buyer accepts the agreement again', async () => {
+      // A refusal stands until the seller changes it, so nothing has happened
+      // and the conversation says nothing.
+      const { service, store } = build({}, { status: 'DECLINED', chatId: 'chat-9' }, [
+        { id: 'chat-9', listingId: LISTING, userId: BUYER, sellerId: SELLER },
+      ]);
+
+      await service.acceptConfidentialityAgreement(LISTING, BUYER);
+
+      expect(kinds(store)).toEqual([]);
+    });
+  });
+
+  /*
+   * The chat says all of this too, but a buyer is not always sitting in it and
+   * a seller had no way at all of learning that somebody had asked — the
+   * request only showed up if they opened their chats. The bell is where every
+   * other notification already is.
+   */
+  describe('the bell', () => {
+    it('tells the buyer when the seller grants access, and where to look', async () => {
+      const { service, notifications } = build({}, { status: 'PENDING', chatId: 'chat-9' }, [
+        { id: 'chat-9', listingId: LISTING, userId: BUYER, sellerId: SELLER },
+      ]);
+
+      await service.grantConfidentialAccess(LISTING, SELLER, BUYER);
+
+      expect(notifications.notify).toHaveBeenCalledWith(BUYER, {
+        title: 'Access granted',
+        message: 'You can now see the confidential details of "Test Title".',
+        type: 'success',
+        link: `/listing/${LISTING}`,
+      });
+    });
+
+    it('tells the buyer when it is taken away again', async () => {
+      const { service, notifications } = build({}, { status: 'APPROVED' });
+
+      await service.revokeConfidentialAccess(LISTING, SELLER, BUYER);
+
+      expect(notifications.notify).toHaveBeenCalledWith(
+        BUYER,
+        expect.objectContaining({ title: 'Access revoked', link: `/listing/${LISTING}` }),
+      );
+    });
+
+    it('says nothing when there was no access to take away', async () => {
+      const { service, notifications } = build({}, null);
+
+      await service.revokeConfidentialAccess(LISTING, SELLER, BUYER);
+
+      expect(notifications.notify).not.toHaveBeenCalled();
+    });
+
+    it('tells the seller that a buyer has asked, and opens the conversation', async () => {
+      const { service, notifications, store } = build();
+
+      await service.acceptConfidentialityAgreement(LISTING, BUYER);
+
+      expect(notifications.notify).toHaveBeenCalledWith(
+        SELLER,
+        expect.objectContaining({
+          title: 'New access request',
+          link: `/chat?chatId=${store.chats[0].id}&userId=${BUYER}&sellerId=${SELLER}`,
+        }),
+      );
+    });
+
+    it('tells the buyer when the seller declines', async () => {
+      const { service, notifications } = build({}, { status: 'PENDING', chatId: null });
+
+      await service.declineConfidentialAccess(LISTING, SELLER, BUYER);
+
+      expect(notifications.notify).toHaveBeenCalledWith(
+        BUYER,
+        expect.objectContaining({ title: 'Access request declined' }),
+      );
+    });
+
+    /* A bell that cannot be rung must not undo the decision it was about. */
+    it('never fails the decision it reports', async () => {
+      const { service, notifications, store } = build({}, { status: 'PENDING', chatId: 'chat-9' }, [
+        { id: 'chat-9', listingId: LISTING, userId: BUYER, sellerId: SELLER },
+      ]);
+      notifications.notify.mockRejectedValueOnce(new Error('the bell is broken'));
+
+      await expect(service.grantConfidentialAccess(LISTING, SELLER, BUYER)).resolves.toBeTruthy();
+      expect(store.access.status).toBe('APPROVED');
     });
   });
 

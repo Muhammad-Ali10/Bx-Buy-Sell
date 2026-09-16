@@ -18,6 +18,7 @@ import ChatWelcomeCards from "@/components/chat/ChatWelcomeCards";
 import StartDealProcessDialog from "@/components/chat/StartDealProcessDialog";
 import { formatChatTime, formatAdminMessageTime } from "@/lib/timeFormatter";
 import { cn } from "@/lib/utils";
+import { downloadAttachment } from "@/lib/downloadFile";
 import { toast } from "sonner";
 import { Socket } from "socket.io-client";
 import { useAuth } from "@/hooks/useAuth";
@@ -1895,6 +1896,21 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     }
   };
 
+  /**
+   * Save a file somebody sent, rather than opening it in a tab.
+   *
+   * "Download File" was a plain link to the CDN, which sends no
+   * `Content-Disposition`: the browser previewed whatever it could read and
+   * showed its own error page for the rest. This puts the file on disk under
+   * the name it was sent with — the message carries it as "📎 name" — and says
+   * plainly when it cannot be fetched.
+   */
+  const saveChatFile = (url?: string | null, label?: string | null) => {
+    if (!url) return;
+    const name = String(label || '').replace(/^📎\s*/, '').trim();
+    void downloadAttachment(url, name || undefined);
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -3268,6 +3284,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                           <div className="space-y-2">
                             <a 
                               href={message.fileUrl} 
+                              onClick={(event) => { 
+                                event.preventDefault(); 
+                                saveChatFile(message.fileUrl, message.content); 
+                              }} 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="text-sm underline hover:opacity-80 flex items-center gap-2 break-all chat-message-text-desktop"
@@ -3431,6 +3451,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                           <div className="space-y-2">
                             <a 
                               href={message.fileUrl} 
+                              onClick={(event) => { 
+                                event.preventDefault(); 
+                                saveChatFile(message.fileUrl, message.content); 
+                              }} 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="underline hover:opacity-80 flex items-center gap-2 break-all"
@@ -3643,6 +3667,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                           <div className="space-y-2">
                             <a 
                               href={message.fileUrl} 
+                              onClick={(event) => { 
+                                event.preventDefault(); 
+                                saveChatFile(message.fileUrl, message.content); 
+                              }} 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="underline hover:opacity-80 flex items-center gap-2 break-all chat-message-text-desktop"
@@ -3822,6 +3850,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                         <div className="space-y-2">
                           <a 
                             href={message.fileUrl} 
+                            onClick={(event) => { 
+                              event.preventDefault(); 
+                              saveChatFile(message.fileUrl, message.content); 
+                            }} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             className={cn(

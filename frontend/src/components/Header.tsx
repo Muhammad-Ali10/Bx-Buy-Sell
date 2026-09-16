@@ -5,9 +5,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { apiClient } from "@/lib/api";
 import { NotificationDropdown } from "./NotificationDropdown";
 import { HeaderCurrencySelect } from "./HeaderCurrencySelect";
+import { apiClient } from "@/lib/api";
 import { AdminSidebar } from "./admin/AdminSidebar";
 import { toast } from "sonner";
 import logo from "@/assets/_App Icon 1 (2).png";
@@ -43,24 +43,12 @@ interface HeaderProps {
   /**
    * Keep the bar on its dark treatment regardless of what is behind it.
    *
-   * The portal screens sit beside a black sidebar, and the bar's strip is meant
-   * to continue that black rather than break it with a white band. Everywhere
-   * else the ink is decided by what the bar is actually over — see `onDark`.
+   * The portal screens beside a black sidebar used it so the bar's strip
+   * carried that black on. The client has since asked for those screens to
+   * open on a white strip with the light bar, like every other page, so none
+   * passes it now: the ink is decided by what the bar is over — see `onDark`.
    */
   dark?: boolean;
-  /**
-   * The width at which this page's sidebar stops being a drawer and takes its
-   * place beside the bar.
-   *
-   * It decides one thing: where to drop the logo. Every sidebar in the portal
-   * carries the same EX mark at its top, so once it is on screen the bar's copy
-   * is the second one in a row. Below that width the sidebar is a drawer and
-   * the bar is the only place the mark appears, so it stays.
-   *
-   * `lg` everywhere except the create-listing wizard, whose sidebar arrives at
-   * `md`.
-   */
-  sidebarFrom?: "md" | "lg";
   /**
    * Something to sit at the start of the bar, before the logo — the chat
    * page's menu button below 1280px. Floating beside the bar, it landed on the
@@ -95,7 +83,7 @@ const THEME = {
       border: "1px solid rgba(0, 0, 0, 0.05)",
       backdropFilter: "blur(10px)",
     },
-    chip: { background: "#D8D8D8", color: "#000000/70" },
+    chip: { background: "#D8D8D8", color: "rgba(0, 0, 0, 0.7)" },
     circle: { background: "rgba(255, 255, 255, 0.12)" },
     ink: "rgba(255, 255, 255, 1)",
     text: "text-white",
@@ -123,19 +111,25 @@ const Header = ({
   admin = false,
   inColumn = false,
   dark = false,
-  sidebarFrom = "lg",
   leading,
 }: HeaderProps) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
+
+  /*
+   * The currency chooser and the favourites shortcut belong to the public
+   * pages. The portal screens beside a sidebar follow the design without
+   * them — their sidebar already has Favourites.
+   */
+  const showExtras = !inColumn && !admin;
   const [favoritesCount, setFavoritesCount] = useState(0);
 
   useEffect(() => {
-    if (isAuthenticated && user) {
+    if (showExtras && isAuthenticated && user) {
       loadFavoritesCount();
     }
-  }, [isAuthenticated, user]);
+  }, [showExtras, isAuthenticated, user]);
 
   const loadFavoritesCount = async () => {
     if (!user) return;
@@ -150,7 +144,6 @@ const Header = ({
       console.error("Error loading favorites count:", error);
     }
   };
-
   const handleLogout = async () => {
     try {
       await logout();
@@ -253,18 +246,9 @@ const Header = ({
           )}
           {leading && <div className="shrink-0">{leading}</div>}
 
-          {/* Hidden once the sidebar beside this bar is on screen — it shows
-              the same mark, and the two sat side by side. */}
-          <Link
-            to="/"
-            className={`flex items-center shrink-0 ${
-              (inColumn || admin) && sidebarFrom === "md"
-                ? "md:hidden"
-                : inColumn || admin
-                ? "lg:hidden"
-                : ""
-            }`}
-          >
+          {/* The EX mark, on every page and at every width. The sidebars no
+              longer carry it — as in the design — so this is the one place it is. */}
+          <Link to="/" className="flex items-center shrink-0">
             <img
               src={logo}
               alt="EX Logo"
@@ -320,23 +304,24 @@ const Header = ({
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-[10px]">
-            <HeaderCurrencySelect onDark={onDark} />
-
+            {showExtras && <HeaderCurrencySelect onDark={onDark} />}
             {isAuthenticated && user ? (
               <>
-                <button
-                  onClick={handleFavoritesClick}
-                  aria-label="Favourites"
-                  className="relative rounded-full flex items-center justify-center transition-colors h-10 w-10 sm:h-[52px] sm:w-[52px]"
-                  style={t.circle}
-                >
-                  <Heart className="w-5 h-5" style={{ color: t.ink }} />
-                  {favoritesCount > 0 && (
-                    <Badge className="absolute -top-1 -right-1 h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center p-0 bg-red-500 text-white text-xs rounded-full">
-                      {favoritesCount > 9 ? "9+" : favoritesCount}
-                    </Badge>
-                  )}
-                </button>
+                {showExtras && (
+                  <button
+                    onClick={handleFavoritesClick}
+                    aria-label="Favourites"
+                    className="relative rounded-full flex items-center justify-center transition-colors h-10 w-10 sm:h-[52px] sm:w-[52px]"
+                    style={t.circle}
+                  >
+                    <Heart className="w-5 h-5" style={{ color: t.ink }} />
+                    {favoritesCount > 0 && (
+                      <Badge className="absolute -top-1 -right-1 h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center p-0 bg-red-500 text-white text-xs rounded-full">
+                        {favoritesCount > 9 ? "9+" : favoritesCount}
+                      </Badge>
+                    )}
+                  </button>
+                )}
 
                 <NotificationDropdown userId={user.id} variant={onDark ? "glassDark" : "glass"} />
 

@@ -23,13 +23,34 @@ export class AuthGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    const request = context.switchToHttp().getRequest();
+    const token = this.extractTokenFromHeader(request);
+
     if (isPublic) {
-      // 💡 See this condition
+      /*
+       * Public means "a signed-out visitor may call this", not "never look at
+       * who is calling". This used to return here without touching the token,
+       * so `req.user` was empty on every public route even when the browser
+       * had sent a perfectly good one — and a route that answers differently
+       * for a member could not tell that a member was asking. That is what
+       * sent Premium buyers to the pricing page from the off-market cards:
+       * their membership was never read.
+       *
+       * A missing or unreadable token is not an error here. It only means
+       * nobody is signed in, and public routes serve guests.
+       */
+      if (token && this.jwtSecret) {
+        try {
+          request['user'] = await this.jwtService.verifyAsync(token, {
+            secret: this.jwtSecret,
+          });
+        } catch {
+          // Signed out, or a token past its date. Answer as for a guest.
+        }
+      }
       return true;
     }
 
-    const request = context.switchToHttp().getRequest();
-    const token = this.extractTokenFromHeader(request);
     if (!token) {
       throw new UnauthorizedException('No token provided');
     }

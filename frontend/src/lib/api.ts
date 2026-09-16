@@ -89,6 +89,9 @@ class ApiClient {
       endpoint.startsWith('/health') ||
       endpoint.startsWith('/plan') ||
       endpoint.startsWith('/question-admin') ||
+      // The ⓘ wording for an ad's worked-out figures: every visitor reading an
+      // ad needs it, signed in or not.
+      endpoint.startsWith('/ad-field-hint') ||
       endpoint.startsWith('/service-tool') ||
       endpoint.startsWith('/admin-social-account') ||
       endpoint.startsWith('/financial-admin/template') ||
@@ -400,6 +403,7 @@ class ApiClient {
     password: string;
     confirm_password: string;
     user_type?: string;
+    business_name?: string;
   }) {
     const response = await this.request('/auth/signup', {
       method: 'POST',
@@ -1201,6 +1205,24 @@ class ApiClient {
     });
   }
 
+  /**
+   * The ⓘ wording for the ad's worked-out figures.
+   *
+   * Public: every visitor reading an ad needs it. The question-based hints
+   * arrive with the questions themselves; these have no question to arrive
+   * with.
+   */
+  async getAdFieldHints() {
+    return this.request('/ad-field-hint');
+  }
+
+  async saveAdFieldHints(hints: Record<string, string>) {
+    return this.request('/ad-field-hint', {
+      method: 'PUT',
+      body: JSON.stringify({ hints }),
+    });
+  }
+
   // The order the listing form asks its areas in, arranged in Content Management.
   async getListingAreaOrder() {
     return this.request('/listing-area-order');
@@ -1532,16 +1554,28 @@ class ApiClient {
 
   // Auth helper methods
   async getOTP(email: string) {
-    return this.request(`/auth/get-otp/${email}`, {
+    return this.request(`/auth/get-otp/${encodeURIComponent(email)}`, {
       method: 'GET',
     });
   }
 
+  /**
+   * Confirm an address with its emailed code. For a sign-up this is when the
+   * account is made, and the answer signs it in — stored the way sign-in does.
+   */
   async verifyOTP(data: { email: string; otp_code: string }) {
-    return this.request('/auth/verify-otp', {
+    const response = await this.request('/auth/verify-otp', {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+    const payload = (response.success ? response.data : null) as any;
+    if (payload?.tokens?.accessToken) {
+      this.setToken(payload.tokens.accessToken);
+      this.setBearerToken(payload.tokens.accessToken);
+      localStorage.setItem('last_login_time', Date.now().toString());
+      if (payload.user) localStorage.setItem('user_data', JSON.stringify(payload.user));
+    }
+    return response;
   }
 
   async resetPassword(email: string) {

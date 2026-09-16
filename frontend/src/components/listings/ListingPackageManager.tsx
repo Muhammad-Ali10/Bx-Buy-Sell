@@ -364,6 +364,51 @@ export const ListingPackageManager = ({
    * Two lines, not one, because the package and each placement run on cycles of
    * their own — two cycles cannot share a single "Billing Cycle" cell.
    */
+  /**
+   * The change on screen, and the press that applies it.
+   *
+   * Opening a card only opens it; a second press is what buys or schedules
+   * what is inside. For a downgrade there was no second press to give: the
+   * moment the lower card opens, its own button turns into "Cancel Downgrade
+   * and keep …", so the seller could choose a downgrade and had no way to say
+   * yes to it. This is that missing press, at the foot of the panel where the
+   * design puts it.
+   *
+   * It is sent as `manage`, which is the intent the handlers read as "the card
+   * is already open, so this is the confirmation" — never as a cancellation,
+   * whatever the open card's own button happens to say.
+   */
+  const packageCycleChanged =
+    openPackage === current && cycleForPackage !== (data?.packageBillingCycle ?? "MONTHLY");
+  const heldAddon = openAddon ? (held.find((row) => row.addon === openAddon) ?? null) : null;
+  const addonChanged = openAddon ? !heldAddon || heldAddon.billingCycle !== cycleForAddon : false;
+
+  /*
+   * Nothing chosen is nothing to save.
+   *
+   * Confirming the package and cycle already in force would start a second
+   * checkout for what the seller is paying for today, so the button stays shut
+   * until something on screen actually differs from it.
+   */
+  const saveOpenChange =
+    openPackage && (openPackage !== current || packageCycleChanged)
+      ? () =>
+          onPackageAction(openPackage, {
+            label: "Save Changes",
+            tone: "accent",
+            intent: "manage",
+            disabled: false,
+          })
+      : openAddon && addonChanged
+        ? () =>
+            onAddonAction(openAddon, {
+              label: "Save Changes",
+              tone: "accent",
+              intent: "manage",
+              disabled: false,
+            })
+        : null;
+
   const summary = useMemo(() => {
     const rows: Array<{
       key: string;
@@ -654,6 +699,20 @@ export const ListingPackageManager = ({
           style={{ fontFamily: "Lufga" }}
         >
           Go back
+        </button>
+        <button
+          type="button"
+          onClick={() => saveOpenChange?.()}
+          disabled={!saveOpenChange || busy}
+          title={
+            saveOpenChange
+              ? undefined
+              : "Open a package or a placement and choose what you want first"
+          }
+          className="w-full rounded-full py-3 text-[13.5px] font-semibold text-black disabled:opacity-60 sm:flex-1"
+          style={{ fontFamily: "Lufga", background: LIME }}
+        >
+          {busy ? "Saving…" : "Save Changes"}
         </button>
         {isDraft && (
           <button

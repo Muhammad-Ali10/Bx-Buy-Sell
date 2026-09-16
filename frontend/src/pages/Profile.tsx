@@ -261,7 +261,7 @@ const Profile = () => {
       <ListingsSidebar />
 
       <div className="flex-1 min-w-0 md:w-auto lg:ml-[240px] xl:ml-[280px]">
-        <Header inColumn dark />
+        <Header inColumn />
 
         <main className="px-4 py-6 sm:px-6 lg:px-10">
           <h1

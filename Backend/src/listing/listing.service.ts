@@ -11,7 +11,14 @@ import { UpdateListingT } from './dto/update-listing.dto';
 import { ListingSchemaT } from './dto/create-listing.dto';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { NotificationService } from '../notification/notification.service';
-import { blockedListingNotice, listingTitleOf } from './listing-notices';
+import {
+  accessDeclinedNotice,
+  accessGrantedNotice,
+  accessRequestedNotice,
+  accessRevokedNotice,
+  blockedListingNotice,
+  listingTitleOf,
+} from './listing-notices';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import {
   formatDay,
@@ -97,7 +104,10 @@ export class ListingService {
     private readonly stripeService: StripeService,
     /** The listing's placements, which are rows of their own. */
     private readonly addons: ListingAddonService,
-    /** Tells an owner when the team blocks their listing. */
+    /**
+     * Tells a member what has happened to them: their listing blocked, or the
+     * confidential details of one asked for, given, refused or taken away.
+     */
     private readonly notifications: NotificationService,
     /** What happens to a listing goes into its owner's log. */
     @Optional() private readonly activityLog?: ActivityLogService,
@@ -1150,7 +1160,10 @@ export class ListingService {
           }>,
         ),
         daysRemaining: daysLeft(listing.created_at),
-        locked: !hasEarlyAccess,
+        // Locked for anyone without early access — except on their own
+        // listing. A seller who has not bought Premium was being sent to the
+        // pricing page to open an advertisement they wrote themselves.
+        locked: !hasEarlyAccess && listing.userId !== resolvedViewer.userId,
       })),
     };
   }
@@ -1314,6 +1327,9 @@ export class ListingService {
         where: { listingId_buyerId: { listingId, buyerId } },
         select: { status: true },
       });
+      // Accepting the agreement again while the seller has not answered is not
+      // a new request, and the conversation should not say it twice.
+      const alreadyWaiting = existing?.status === 'PENDING';
 
       // Already decided? Leave it. Re-accepting the agreement must not undo a
       // seller's refusal, nor re-open a request they already approved.
@@ -1349,7 +1365,18 @@ export class ListingService {
 
       // The buyer is taken into this conversation next; this tells them what
       // they are waiting for.
-      await postAccessNotice(this.db as any, chatId, 'CONFIDENTIAL_ACCESS_REQUESTED', buyerId);
+      if (!alreadyWaiting) {
+        await postAccessNotice(this.db as any, chatId, 'CONFIDENTIAL_ACCESS_REQUESTED', buyerId);
+        // The seller learns of a request only by opening their chats. This is
+        // the one place that knows it has just arrived.
+        await this.notifyQuietly(
+          listing.userId,
+          accessRequestedNotice(
+            await this.listingTitleFor(listingId),
+            `/chat?chatId=${chatId}&userId=${buyerId}&sellerId=${listing.userId}`,
+          ),
+        );
+      }
 
       return { granted: false, pendingApproval: true, chatId };
     }
@@ -1472,6 +1499,10 @@ export class ListingService {
     // The buyer is in this conversation waiting for an answer. Without a word
     // they would go on waiting.
     await postAccessNotice(this.db as any, chatId, 'CONFIDENTIAL_ACCESS_DECLINED', buyerId);
+    await this.notifyQuietly(
+      buyerId,
+      accessDeclinedNotice(await this.listingTitleFor(listingId), listingId),
+    );
 
     this.logger.log(`Listing ${listingId}: access declined for buyer ${buyerId}`);
     return { success: true };
@@ -1551,6 +1582,23 @@ export class ListingService {
     const noticeChat =
       chatId ?? (await ensureRequestChat(this.db as any, listingId, buyerId, sellerId));
 
+    /*
+     * Whether the buyer could already see the details before this.
+     *
+     * A notice describes a change. Approving somebody who already has access
+     * changes nothing and should say nothing; approving after access was taken
+     * away is a change and must say so. That second case used to be silent —
+     * the first "access granted" was still in the conversation, so the notice
+     * read as a duplicate and was dropped, while the access itself was
+     * restored. The chat showed the access being taken away twice and given
+     * back once.
+     */
+    const before = await this.db.listingConfidentialAccess.findUnique({
+      where: { listingId_buyerId: { listingId, buyerId } },
+      select: { status: true },
+    });
+    const alreadyHadAccess = before?.status === 'APPROVED';
+
     const granted = await this.db.listingConfidentialAccess.upsert({
       where: {
         listingId_buyerId: {
@@ -1593,9 +1641,40 @@ export class ListingService {
     // Written into the request's conversation and pushed to whoever has it
     // open. There is always one now: a request that never had a conversation
     // gets it here, which is where every approval so far had nowhere to go.
-    await postAccessNotice(this.db as any, noticeChat, 'CONFIDENTIAL_ACCESS_APPROVED', buyerId);
+    if (!alreadyHadAccess) {
+      await postAccessNotice(this.db as any, noticeChat, 'CONFIDENTIAL_ACCESS_APPROVED', buyerId);
+      await this.notifyQuietly(
+        buyerId,
+        accessGrantedNotice(await this.listingTitleFor(listingId), listingId),
+      );
+    }
 
     return granted;
+  }
+
+  /** The listing's public title, for a notification that names it. */
+  private async listingTitleFor(listingId: string): Promise<string | null> {
+    const row = await this.db.listing
+      .findUnique({ where: { id: listingId }, select: { advertisement: true, brand: true } })
+      .catch(() => null);
+    return listingTitleOf(row as any);
+  }
+
+  /**
+   * Tell somebody, without letting the telling fail the thing it describes.
+   *
+   * A notification is worth less than the decision it reports: a seller's
+   * approval must not fail because the bell could not be rung.
+   */
+  private async notifyQuietly(
+    userId: string,
+    notice: { title: string; message: string; type?: string; link?: string | null },
+  ) {
+    try {
+      await this.notifications.notify(userId, notice);
+    } catch (error) {
+      this.logger.warn(`Could not notify ${userId}: ${error}`);
+    }
   }
 
   async revokeConfidentialAccess(
@@ -1621,6 +1700,14 @@ export class ListingService {
     const deleted = await this.db.listingConfidentialAccess.deleteMany({
       where: { listingId, buyerId },
     });
+
+    // Only when something was actually taken away.
+    if (deleted.count > 0) {
+      await this.notifyQuietly(
+        buyerId,
+        accessRevokedNotice(await this.listingTitleFor(listingId), listingId),
+      );
+    }
 
     return { success: true, revoked: deleted.count > 0 };
   }

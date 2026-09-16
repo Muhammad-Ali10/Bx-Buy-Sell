@@ -81,6 +81,24 @@ describe("AdminChatDetails participants", () => {
 
     await screen.findByRole("heading", { name: /Mulhammad Ali2\s+←→\s+abcd abcd/ });
     expect(avatarCount(container)).toBe(3);
-    expect(screen.getByText("Team: hello rao0")).toBeTruthy();
+    expect(screen.getByText(/^Team:/).textContent).toContain("hello rao0");
+  });
+
+  /**
+   * "Please delete the red crossed names at the top of the chat. Instead make
+   * the names on the right side clickable."
+   */
+  it("opens each person's record from their name, and from their picture", async () => {
+    const { container } = render(panel("team-chat"));
+
+    expect((await screen.findByRole("link", { name: "Mulhammad Ali2" })).getAttribute("href")).toBe(
+      "/admin/users/mulhammad",
+    );
+    expect(screen.getByRole("link", { name: "abcd abcd" }).getAttribute("href")).toBe("/admin/users/abcd");
+    expect(screen.getByRole("link", { name: "hello rao0" }).getAttribute("href")).toBe("/admin/users/admin");
+
+    expect(
+      Array.from(container.querySelectorAll("a.rounded-full")).map((a) => a.getAttribute("href")),
+    ).toEqual(["/admin/users/mulhammad", "/admin/users/abcd", "/admin/users/admin"]);
   });
 });

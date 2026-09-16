@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mail, Lock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { mustConfirmEmail } from "@/lib/emailConfirmation";
+import { isSignupNotConfirmed, mustConfirmEmail, PENDING_SIGNUP_EMAIL_KEY } from "@/lib/emailConfirmation";
 import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
 import { toast } from "sonner";
 
@@ -84,6 +84,12 @@ const Login = () => {
         } else {
           navigate(getPostLoginRoute(result.user?.role));
         }
+      } else if (isSignupNotConfirmed(result.error)) {
+        // Signed up but never entered the code: a new one is on its way.
+        const address = email.toLowerCase().trim();
+        sessionStorage.setItem(PENDING_SIGNUP_EMAIL_KEY, address);
+        toast.info(result.error);
+        navigate("/verify-otp", { state: { email: address } });
       } else {
         toast.error(result.error || "Failed to log in");
       }

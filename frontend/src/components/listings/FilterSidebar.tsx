@@ -15,7 +15,6 @@ import FlagIcon from "@/components/FlagIcon";
 import { ALL_COUNTRY_NAMES } from "@/lib/countryUtils";
 import { Link } from "react-router-dom";
 import { useSubscriptionTier } from "@/hooks/useSubscriptionTier";
-import logo from "@/assets/_App Icon 1 (2).png";
 
 import { formatNumber as formatFullNumber } from "@/lib/formatNumber";
 import { getCurrencySymbol } from "@/components/CurrencySelect";
@@ -143,20 +142,13 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
         paddingRight: '5px',
         gap: 0,
         overflow: 'hidden',
+        // Its own black. It used to show All Listings' black page through it,
+        // and that page is white now, like the rest of the portal.
+        backgroundColor: 'rgba(0, 0, 0, 1)',
       }}
     >
-      {/* Logo at the top - fixed */}
-      <div className="flex-shrink-0 mb-4" style={{ paddingLeft: '12px', paddingRight: '12px' }}>
-        <Link to="/" className="flex items-center">
-          <img 
-            src={logo} 
-            alt="EX Logo" 
-            className="h-8 w-8 sm:h-10 sm:w-10 object-contain"
-          />
-        </Link>
-      </div>
 
-      {/* Scrollable content area - between logo and buttons */}
+      {/* Scrollable content area - above the buttons */}
       <div 
         className="flex-1 overflow-y-auto overflow-x-hidden w-full px-0 filter-sidebar-scroll"
         style={{

@@ -35,6 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { AdFieldHintsPanel } from "@/components/admin/content/AdFieldHintsPanel";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
 import { useCategories } from "@/hooks/useCategories";
 import { useReorderQuestions } from "@/hooks/useReorderQuestions";
@@ -1353,6 +1354,11 @@ const AdminContentManagement = () => {
                 </>
               );
             })()}
+
+                {/* The ⓘ wording for the figures this table produces. They have
+                    no question of their own, so there was nowhere to write
+                    them. */}
+                <AdFieldHintsPanel />
               </div>
             )}
 

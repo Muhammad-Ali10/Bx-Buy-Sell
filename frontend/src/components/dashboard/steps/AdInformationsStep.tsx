@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { hintPlaceholder, QuestionHint } from "@/components/dashboard/QuestionHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PrefixedNumberInput } from "@/components/dashboard/PrefixedNumberInput";
 import { Textarea } from "@/components/ui/textarea";
 import { Upload, X, Paperclip, ImageIcon, Loader2 } from "lucide-react";
 import { useAdInformationQuestions } from "@/hooks/useAdInformationQuestions";
@@ -392,26 +393,23 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                 )}
 
                 {cfg.kind === "price" && (
-                  <div className="relative">
-                    {/* The currency the seller chose in Financials, not a
-                        hard dollar sign. */}
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
-                      {currencySymbol}
-                    </span>
-                    {/* A price, so a decimal point is allowed — but nothing
-                        else is. `type="number"` had let "e" and a leading
-                        minus through. */}
-                    <Input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0"
-                      value={textValue}
-                      onChange={(e) =>
-                        handleInputChange(question.id, sanitizeNumberInput(e.target.value))
-                      }
-                      className="bg-muted/50 pl-7"
-                    />
-                  </div>
+                  /* The currency the seller chose in Financials, not a hard
+                     dollar sign — and the field leaves room for however wide
+                     it is, "$" or "CHF". A price, so a decimal point is
+                     allowed but nothing else: `type="number"` had let "e"
+                     and a leading minus through. */
+                  <PrefixedNumberInput
+                    prefix={currencySymbol}
+                    prefixClassName="text-muted-foreground"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={textValue}
+                    onChange={(e) =>
+                      handleInputChange(question.id, sanitizeNumberInput(e.target.value))
+                    }
+                    className="bg-muted/50"
+                  />
                 )}
 
                 {cfg.kind === "title" && (

@@ -73,11 +73,14 @@ function build() {
       .fn()
       .mockResolvedValue({ id: 'cs_new', url: 'https://checkout.stripe.test' }),
   };
-  const service = new SubscriptionService(db as any, stripe as any);
+  // A buyer plan never reaches the listing side of the checkout.
+  const listingCheckout = { applyFromSession: jest.fn() };
+  const service = new SubscriptionService(db as any, stripe as any, listingCheckout as any);
   return {
     service,
     db,
     stripe,
+    listingCheckout,
     list,
     retrieve,
     setRow: (value: any) => {
@@ -254,14 +257,18 @@ describe('the success page confirming a checkout', () => {
     expect(row().stripeSubscriptionId).toBe('sub_new');
   });
 
-  it("leaves a listing's package to the webhook", async () => {
-    const { service, db, retrieve } = build();
-    retrieve.mockResolvedValue(paidSession({ metadata: { listingId: 'listing-1' } }));
+  // The webhook is not the only one that applies it: it used to be, and where
+  // no endpoint was set up a paid package simply never switched on.
+  it("applies a listing's package, without touching the buyer's plan", async () => {
+    const { service, db, retrieve, listingCheckout } = build();
+    const session = paidSession({ metadata: { listingId: 'listing-1', userId: USER } });
+    retrieve.mockResolvedValue(session);
 
     await expect(service.syncCheckoutSession(USER, 'cs_1')).resolves.toEqual({
       success: true,
       kind: 'listing',
     });
+    expect(listingCheckout.applyFromSession).toHaveBeenCalledWith(session);
     expect(db.userSubscription.upsert).not.toHaveBeenCalled();
   });
 

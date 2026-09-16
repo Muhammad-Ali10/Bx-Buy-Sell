@@ -1,3 +1,4 @@
+import { PENDING_SIGNUP_EMAIL_KEY } from "@/lib/emailConfirmation";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthLayout } from "@/components/AuthLayout";
@@ -108,18 +109,15 @@ const SellerSignup = () => {
         email: email.toLowerCase().trim(),
         password,
         confirm_password: confirmPassword,
+        // Kept with the sign-up and saved on the account when it is made.
+        business_name: companyName.trim() || undefined,
       });
 
       if (result.success) {
-        // Update user with business_name if needed
-        if (companyName && result.user?.id) {
-          await apiClient.updateUser(result.user.id, {
-            business_name: companyName,
-          });
-        }
-        toast.success("Account created successfully!");
-        // Next: confirm the email address, then the phone number.
-        navigate("/verify-otp");
+        // Not registered yet: the account is made once the emailed code is entered.
+        sessionStorage.setItem(PENDING_SIGNUP_EMAIL_KEY, result.email);
+        toast.success("We sent a code to your email.");
+        navigate("/verify-otp", { state: { email: result.email } });
       } else {
         toast.error(result.error || "Failed to create account");
       }

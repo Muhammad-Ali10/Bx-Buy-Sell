@@ -2,6 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUpdateAdInformationQuestion } from "@/hooks/useUpdateAdInformationQuestion";
 import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
@@ -17,6 +18,8 @@ export const EditAdInformationQuestionDialog = ({ open, onOpenChange, question }
   const [questionText, setQuestionText] = useState("");
   const [answerType, setAnswerType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  /** The administrator's note for the seller, shown under this question in Create Listing. */
+  const [hintText, setHintText] = useState("");
   const [required, setRequired] = useState(true);
   const updateQuestion = useUpdateAdInformationQuestion();
 
@@ -30,6 +33,7 @@ export const EditAdInformationQuestionDialog = ({ open, onOpenChange, question }
       setAnswerType(answerTypeMap[question.answer_type] || question.answer_type);
       setOptions(question.option && Array.isArray(question.option) ? question.option.join(", ") : "");
       setRequired(question.required !== false);
+      setHintText((question as any).hint ?? "");
     }
   }, [question]);
 
@@ -44,7 +48,14 @@ export const EditAdInformationQuestionDialog = ({ open, onOpenChange, question }
         : [];
 
     updateQuestion.mutate(
-      { id: question.id, question: questionText, answer_type: answerType, options: optionsArray, required },
+      {
+        id: question.id,
+        question: questionText,
+        answer_type: answerType,
+        options: optionsArray,
+        required,
+        hint: hintText.trim(),
+      },
       {
         onSuccess: () => {
           onOpenChange(false);
@@ -68,6 +79,15 @@ export const EditAdInformationQuestionDialog = ({ open, onOpenChange, question }
               onChange={(e) => setQuestionText(e.target.value)}
               placeholder="Write Question"
               className="bg-[#2a2a2a] border-[#3a3a3a] text-white"
+            />
+          </div>
+          <div>
+            <Label className="text-white">Create Listing Text Hint</Label>
+            <Textarea
+              value={hintText}
+              onChange={(e) => setHintText(e.target.value)}
+              placeholder="Enter hint text to help users understand this question..."
+              className="bg-[#2a2a2a] border-[#3a3a3a] text-white min-h-[80px] resize-none"
             />
           </div>
           <div>

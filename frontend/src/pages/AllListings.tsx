@@ -928,8 +928,9 @@ const AllListings = () => {
           </div>
         </div>
       )}
-      {/* Main Container - White on mobile, Black on desktop */}
-      <div className="bg-white md:bg-black pb-20">
+      {/* Main Container. White at every width: only the filter menu on the
+          left is black, as on the rest of the portal. */}
+      <div className="bg-white pb-20">
         {/* Mobile Menu Overlay */}
         {isMobileMenuOpen && (
           <div 
@@ -983,9 +984,9 @@ const AllListings = () => {
           <div className="flex-1 min-w-0 flex flex-col">
             {/* Shared transparent bar, same as the rest of the portal. It
                 sits in this column rather than floating over the viewport, so
-                it lines up with the content instead of overhanging the black
-                frame — and needs no spacer under it to push the page clear. */}
-            <Header inColumn dark />
+                it lines up with the content instead of overhanging the filter
+                menu — and needs no spacer under it to push the page clear. */}
+            <Header inColumn />
             
             {/* Main Content Area - White Background */}
             <div className="flex-1 bg-white min-w-0 p-5 md:px-2 lg:px-4 md:py-4 lg:py-8 w-full">

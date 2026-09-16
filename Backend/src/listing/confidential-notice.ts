@@ -87,26 +87,41 @@ export async function ensureRequestChat(
 }
 
 /**
- * Post a notice into the request's conversation, once, and tell whoever has it
- * open.
+ * Post a notice into the request's conversation and tell whoever has it open.
  *
- * Returns the message, or null when it was already there or could not be
- * written. Never throws: a notice is not worth failing the decision it
- * describes.
+ * Returns the message, or null when it was skipped or could not be written.
+ * Never throws: a notice is not worth failing the decision it describes.
+ *
+ * It posts whatever it is given. Each notice describes something that has just
+ * changed, and the callers are the ones who know whether anything did — a
+ * seller pressing Approve on a buyer who already has access changes nothing and
+ * says nothing, while approving after access was taken away is a change and
+ * must be said.
+ *
+ * This used to decide for itself, by looking for the same notice anywhere in
+ * the conversation. That meant each thing could only ever be said once: access
+ * granted, revoked, then granted again left no second "access granted" in the
+ * chat, because the first was still sitting there. The access came back; only
+ * the sentence was missing. `onlyIfMissing` keeps that old behaviour for the
+ * one caller that needs it — the repair script, which fills in notices for
+ * conversations that never had one and must not add a second on a re-run.
  */
 export async function postAccessNotice(
   db: Db,
   chatId: string,
   kind: AccessNoticeKind,
   buyerId: string,
+  options: { onlyIfMissing?: boolean } = {},
 ) {
   const meta = accessNoticeMeta(kind, buyerId);
   try {
-    const already = await db.message.findFirst({
-      where: { chatId, type: 'SYSTEM', metadata: { equals: meta } },
-      select: { id: true },
-    });
-    if (already) return null;
+    if (options.onlyIfMissing) {
+      const already = await db.message.findFirst({
+        where: { chatId, type: 'SYSTEM', metadata: { equals: meta } },
+        select: { id: true },
+      });
+      if (already) return null;
+    }
 
     // The wording lives in the browser, keyed on `kind`, because the two sides
     // are told different things about the same event.

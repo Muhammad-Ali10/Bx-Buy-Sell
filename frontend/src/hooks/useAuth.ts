@@ -209,22 +209,27 @@ export const useAuth = () => {
     email: string;
     password: string;
     confirm_password: string;
+    business_name?: string;
   }) => {
+    // Nothing is registered yet: the account is made when the emailed code
+    // comes back right (`confirmSignup`), so there is no user to set here.
     const response = await apiClient.signUp(userData);
+    if (response.success) {
+      const data = (response.data ?? {}) as { email?: string };
+      return { success: true as const, email: data.email ?? userData.email };
+    }
+    return { success: false as const, error: response.error };
+  };
+
+  /** Enter the emailed code: the account is made and signed in. */
+  const confirmSignup = async (email: string, code: string) => {
+    const response = await apiClient.verifyOTP({ email, otp_code: code });
     const data = response.data as { user?: User } | undefined;
-    
     if (response.success && data?.user) {
       setUser(data.user);
-      if (
-        typeof window !== "undefined" &&
-        sessionStorage.getItem(LISTING_PUBLISH_PENDING_SESSION_KEY) === "1"
-      ) {
-        window.location.assign("/dashboard");
-      }
-      return { success: true, user: data.user };
+      return { success: true as const, user: data.user };
     }
-
-    return { success: false, error: response.error };
+    return { success: false as const, error: response.error };
   };
 
   const logout = async () => {
@@ -252,6 +257,7 @@ export const useAuth = () => {
     loading,
     login,
     signup,
+    confirmSignup,
     logout,
     refreshUser,
     isAuthenticated: !!user,

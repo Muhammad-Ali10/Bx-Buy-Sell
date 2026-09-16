@@ -15,7 +15,13 @@ jest.mock("@/hooks/useBrandQuestions", () => ({ useBrandQuestions: () => ({ data
 jest.mock("@/hooks/useStatisticQuestions", () => ({ useStatisticQuestions: () => ({ data: [] }) }));
 jest.mock("@/hooks/useProductQuestions", () => ({ useProductQuestions: () => ({ data: [] }) }));
 jest.mock("@/hooks/useManagementQuestions", () => ({ useManagementQuestions: () => ({ data: [] }) }));
-jest.mock("@/hooks/useAdInformationQuestions", () => ({ useAdInformationQuestions: () => ({ data: [] }) }));
+// The step prices everything from the listing price, and refuses to draw the
+// packages at all without one. These tests are about publishing, so the
+// question the price is answered under has to be here.
+jest.mock("@/hooks/useAdInformationQuestions", () => ({
+  useAdInformationQuestions: () => ({ data: [{ id: "q-price", question: "Listing Price" }] }),
+}));
+const PRICED = { "q-price": "250000" };
 jest.mock("@/hooks/useHandoverQuestions", () => ({ useHandoverQuestions: () => ({ data: [] }) }));
 jest.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ data: [] }) }));
 jest.mock("@/hooks/useAccountQuestions", () => ({ useAccountQuestions: () => ({ data: [] }) }));
@@ -27,6 +33,9 @@ jest.mock("@/hooks/useListingCategoryId", () => ({ useListingCategoryId: () => u
 jest.mock("@/lib/api", () => ({
   apiClient: {
     getSubscriptionRules: jest.fn().mockResolvedValue({ success: true, data: { actions: {} } }),
+    getSubscriptionRulesPreview: jest
+      .fn()
+      .mockResolvedValue({ success: true, data: { actions: {} } }),
     getCategories: jest.fn(),
     getTools: jest.fn(),
     createListing: jest.fn(),
@@ -49,7 +58,7 @@ describe("PackagesStep guest listing flow", () => {
     const onPersist = jest.fn();
     render(
       <PackagesStep
-        formData={{}}
+        formData={PRICED}
         onBack={() => {}}
         isGuest
         onGuestPersistDraft={onPersist}
@@ -70,7 +79,7 @@ describe("PackagesStep guest listing flow", () => {
     const onAuthOpen = jest.fn();
     render(
       <PackagesStep
-        formData={{}}
+        formData={PRICED}
         onBack={() => {}}
         isGuest
         onGuestPersistDraft={onPersist}
@@ -93,7 +102,7 @@ describe("PackagesStep guest listing flow", () => {
     apiClient.getTools.mockResolvedValue({ success: true, data: [] });
     apiClient.createListing.mockResolvedValue({ success: true, data: {} });
 
-    render(<PackagesStep formData={{}} onBack={() => {}} />);
+    render(<PackagesStep formData={PRICED} onBack={() => {}} />);
 
     await user.click(screen.getAllByText("Publish Now")[0]);
     await user.click(screen.getByRole("button", { name: /publish listing/i }));
@@ -109,11 +118,11 @@ describe("PackagesStep guest listing flow", () => {
     apiClient.createListing.mockResolvedValue({ success: true, data: {} });
 
     const { rerender } = render(
-      <PackagesStep formData={{}} onBack={() => {}} isGuest={false} resumePublishNonce={0} />
+      <PackagesStep formData={PRICED} onBack={() => {}} isGuest={false} resumePublishNonce={0} />
     );
 
     rerender(
-      <PackagesStep formData={{}} onBack={() => {}} isGuest={false} resumePublishNonce={1} />
+      <PackagesStep formData={PRICED} onBack={() => {}} isGuest={false} resumePublishNonce={1} />
     );
 
     await waitFor(() => {

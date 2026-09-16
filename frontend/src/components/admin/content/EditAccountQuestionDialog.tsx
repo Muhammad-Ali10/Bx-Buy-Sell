@@ -58,6 +58,9 @@ export const EditAccountQuestionDialog = ({ open, onOpenChange, question }: Edit
         setOptions("");
       }
       setRequired(question.required !== false);
+      // The note an administrator wrote last time, so editing anything else
+      // does not quietly wipe it.
+      setHintText((question as any).hint ?? "");
     }
   }, [question]);
 
@@ -85,6 +88,7 @@ export const EditAccountQuestionDialog = ({ open, onOpenChange, question }: Edit
         answer_type: questionType,
         options: optionsArray,
         required,
+        hint: hintText.trim(),
       },
       {
         onSuccess: () => {

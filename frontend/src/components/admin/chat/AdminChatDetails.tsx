@@ -12,11 +12,31 @@ import { formatNumber } from "@/lib/formatNumber";
 import { formatLastSeenShort } from "@/lib/timeFormatter";
 import { formatListingBusinessAge } from "@/lib/dateUtils";
 import { computeListingFinancialMetrics } from "@/lib/financialTableUtils";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import FlagIcon from "@/components/FlagIcon";
 import { resolveListingTitle } from "@/lib/listingTitle";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 import { teamParticipants, uniqueParticipants, type TeamParticipant } from "@/lib/chatParticipants";
+
+/**
+ * A person's name, opening their record.
+ *
+ * The client asked for the names here rather than at the top of the chat,
+ * where they used to sit above the conversation.
+ */
+const MemberLink = ({ id, name }: { id?: string | null; name: string }) =>
+  id ? (
+    <Link
+      to={`/admin/users/${id}`}
+      title={`Open ${name}`}
+      className="hover:underline underline-offset-2"
+    >
+      {name}
+    </Link>
+  ) : (
+    <>{name}</>
+  );
+
 interface AdminChatDetailsProps {
   conversationId: string;
 }
@@ -265,23 +285,37 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
         
         {/* Profile Pictures Group - Centered */}
         <div className="flex items-center justify-center mb-4" style={{ gap: '-8px' }}>
-          {[...participants, ...teamMembers].map((participant, i, everyone) => (
-            <Avatar
-              key={participant.id}
-              className="border-2 border-white"
-              style={{
-                width: '48px',
-                height: '48px',
-                marginLeft: i > 0 ? '-8px' : '0',
-                zIndex: everyone.length - i,
-              }}
-            >
-              <AvatarImage src={participant.avatar_url} />
-              <AvatarFallback style={{ fontSize: '16px' }}>
-                {participant.full_name?.charAt(0) || participant.email?.charAt(0) || 'U'}
+          {[...participants, ...teamMembers].map((participant, i, everyone) => {
+            const picture = (
+              <Avatar
+                className="border-2 border-white"
+                style={{
+                  width: '48px',
+                  height: '48px',
+                  marginLeft: i > 0 ? '-8px' : '0',
+                  zIndex: everyone.length - i,
+                }}
+              >
+                <AvatarImage src={participant.avatar_url} />
+                <AvatarFallback style={{ fontSize: '16px' }}>
+                  {participant.full_name?.charAt(0) || participant.email?.charAt(0) || 'U'}
                 </AvatarFallback>
               </Avatar>
-            ))}
+            );
+            // The picture opens the same record as the name beneath it.
+            return participant.id ? (
+              <Link
+                key={participant.id}
+                to={`/admin/users/${participant.id}`}
+                title={`Open ${participant.full_name || participant.email || 'this member'}`}
+                className="rounded-full"
+              >
+                {picture}
+              </Link>
+            ) : (
+              <span key={`unknown-${i}`}>{picture}</span>
+            );
+          })}
           </div>
 
         {/* Who is talking. The panel used to head itself with the listing's
@@ -315,7 +349,12 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
             wordBreak: 'break-word',
           }}
         >
-          {participants.map((p: any) => p.full_name || p.email || 'Unknown').join('  ←→  ')}
+          {participants.map((p: any, i: number) => (
+            <span key={p.id || `participant-${i}`}>
+              {i > 0 && '  ←→  '}
+              <MemberLink id={p.id} name={p.full_name || p.email || 'Unknown'} />
+            </span>
+          ))}
         </h4>
 
         {/* The team members who wrote in the chat, by name — a third picture
@@ -333,7 +372,13 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
               marginBottom: '8px',
             }}
           >
-            Team: {teamMembers.map((member) => member.full_name || 'Team member').join(', ')}
+            Team:{' '}
+            {teamMembers.map((member, i) => (
+              <span key={member.id || `team-${i}`}>
+                {i > 0 && ', '}
+                <MemberLink id={member.id} name={member.full_name || 'Team member'} />
+              </span>
+            ))}
           </p>
         )}
 

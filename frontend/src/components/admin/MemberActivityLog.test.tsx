@@ -1,10 +1,14 @@
 jest.mock("@/lib/api", () => ({ apiClient: { getActivityLogByUser: jest.fn() } }));
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
 import type { ActivityEntry } from "@/lib/activityLog";
 import { MemberActivityLog } from "./MemberActivityLog";
+
+// The suite runs many files at once, and the default second was not always
+// enough for this one to render its first page.
+configure({ asyncUtilTimeout: 5000 });
 
 const entry = (overrides: Partial<ActivityEntry> = {}): ActivityEntry => ({
   id: "e1",

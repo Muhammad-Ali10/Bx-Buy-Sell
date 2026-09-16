@@ -4,7 +4,6 @@ import { useListingAreaOrder } from "@/hooks/useListingAreaOrder";
 import { listingSteps } from "@/lib/listingAreaOrder";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import logo from "@/assets/_App Icon 1 (2).png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import {
@@ -68,15 +67,8 @@ const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep:
 
   return (
     <>
-      <div className="p-4 sm:p-6">
-        <Link to="/" className="flex items-center justify-start" onClick={onLinkClick}>
-          <img
-            src={logo}
-            alt="EX Logo"
-            className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
-          />
-        </Link>
-      </div>
+      {/* Room above the first step. The EX mark sits in the top bar now. */}
+      <div className="h-6 shrink-0 sm:h-8 md:h-10" />
 
       <nav
         className="flex-1 overflow-y-auto"

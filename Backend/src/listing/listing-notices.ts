@@ -46,3 +46,56 @@ export function blockedListingNotice(title: string | null, reason?: string | nul
     link: '/my-listings',
   };
 }
+
+/**
+ * The four notifications about a listing's confidential details.
+ *
+ * The conversation already carries the same news, and that is where it belongs
+ * — but a buyer who is not sitting in the chat had no way of learning that the
+ * seller had answered, and a seller no way of learning that somebody had asked.
+ * These go to the bell, beside every other notification.
+ *
+ * The buyer's three point at the listing, because that is where the details
+ * are. The seller's points at the conversation, because that is where they
+ * approve or decline.
+ */
+const whichListing = (title: string | null) => (title ? `"${title}"` : 'a listing');
+
+export function accessGrantedNotice(title: string | null, listingId: string) {
+  return {
+    title: 'Access granted',
+    message: `You can now see the confidential details of ${whichListing(title)}.`,
+    type: 'success',
+    link: `/listing/${listingId}`,
+  };
+}
+
+export function accessRevokedNotice(title: string | null, listingId: string) {
+  return {
+    title: 'Access revoked',
+    message: `The confidential details of ${whichListing(title)} are no longer available to you.`,
+    type: 'warning',
+    link: `/listing/${listingId}`,
+  };
+}
+
+export function accessDeclinedNotice(title: string | null, listingId: string) {
+  return {
+    title: 'Access request declined',
+    message: `The seller did not approve your request to see the confidential details of ${whichListing(title)}.`,
+    type: 'warning',
+    link: `/listing/${listingId}`,
+  };
+}
+
+export function accessRequestedNotice(
+  title: string | null,
+  chatLink: string,
+) {
+  return {
+    title: 'New access request',
+    message: `A buyer has asked to see the confidential details of ${whichListing(title)}. You can approve or decline it in the conversation.`,
+    type: 'info',
+    link: chatLink,
+  };
+}

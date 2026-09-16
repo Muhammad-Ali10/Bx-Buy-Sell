@@ -23,6 +23,20 @@ export class RolesGuard implements CanActivate {
       context.getClass(),
     ]);
     if (isPublic) {
+      /*
+       * A public route can now be called by someone signed in, so the same
+       * rule as below applies to the role: read it from the database, never
+       * from the token, or a demoted admin would still be masked as staff
+       * here. Nobody is turned away — these pages are open to guests — so a
+       * blocked account, or one whose row has gone, is simply served as a
+       * guest.
+       */
+      const open = context.switchToHttp().getRequest();
+      if (open.user?.id) {
+        const account = await this.userService.findRoleByID(open.user.id);
+        if (!account || (account as any).blocked) delete open.user;
+        else open.user.role = account.role;
+      }
       return true;
     }
 

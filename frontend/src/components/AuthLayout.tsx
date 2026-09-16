@@ -29,6 +29,28 @@ const testimonials = [
   },
 ];
 
+/**
+ * Where the visitor is in sign-up: one bar per step, all the same length, the
+ * current one in the accent green — the segmented bar in the design. It used
+ * to be a long pill beside small dots.
+ */
+const StepProgress = ({ currentStep, totalSteps }: { currentStep: number; totalSteps: number }) => (
+  <div
+    className="flex gap-2 justify-center mt-8"
+    role="img"
+    aria-label={`Step ${currentStep} of ${totalSteps}`}
+  >
+    {Array.from({ length: totalSteps }).map((_, idx) => (
+      <div
+        key={idx}
+        className={`h-1 w-14 sm:w-16 rounded-full transition-colors ${
+          idx + 1 === currentStep ? "bg-accent" : "bg-border"
+        }`}
+      />
+    ))}
+  </div>
+);
+
 export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant = "user" }: AuthLayoutProps) => {
   const [activeTestimonial, setActiveTestimonial] = useState(0);
 
@@ -113,21 +135,8 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
             </div>
           </div>
 
-          {/* Progress Dots */}
-          {totalSteps > 1 && (
-            <div className="flex gap-2 justify-center mt-8">
-              {Array.from({ length: totalSteps }).map((_, idx) => (
-                <div
-                  key={idx}
-                  className={`h-2 rounded-full transition-all ${
-                    idx + 1 === currentStep
-                      ? "w-12 bg-accent"
-                      : "w-2 bg-border"
-                  }`}
-                />
-              ))}
-            </div>
-          )}
+          {/* Progress */}
+          {totalSteps > 1 && <StepProgress currentStep={currentStep} totalSteps={totalSteps} />}
         </div>
       </div>
     );
@@ -154,21 +163,8 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
           </div>
         </div>
 
-        {/* Progress Dots */}
-        {totalSteps > 1 && (
-          <div className="flex gap-2 justify-center mt-8">
-            {Array.from({ length: totalSteps }).map((_, idx) => (
-              <div
-                key={idx}
-                className={`h-2 rounded-full transition-all ${
-                  idx + 1 === currentStep
-                    ? "w-12 bg-accent"
-                    : "w-2 bg-border"
-                }`}
-              />
-            ))}
-          </div>
-        )}
+        {/* Progress */}
+        {totalSteps > 1 && <StepProgress currentStep={currentStep} totalSteps={totalSteps} />}
       </div>
 
       {/* Right Panel - Background & Testimonial */}

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { applyChatLabel } from "@/lib/chatLabels";
 import { chatRoomsQueryKey, fetchChatRooms } from "@/lib/chatRooms";
 import { seedChatRoomIfAbsent, setCachedListing } from "@/lib/chatRoomCache";
 import { readPersisted, writePersisted } from "@/lib/persistentCache";
@@ -152,24 +153,25 @@ const Chat = () => {
   // refetch), then still refresh from the server in the background.
   const handleLabelUpdated = useCallback(
     (label: "GOOD" | "MEDIUM" | "BAD") => {
-      if (userId && chatRoomData) {
-        const pair = [chatRoomData.userId, chatRoomData.sellerId].sort().join("-");
-        queryClient.setQueryData(chatRoomsQueryKey(userId), (old: any) => {
-          if (!Array.isArray(old)) return old;
-          return old.map((room: any) => {
-            const roomPair = [room.userId, room.sellerId].sort().join("-");
-            if (roomPair !== pair) return room;
-            const others = (room.chatLabels || []).filter((l: any) => l.userId !== userId);
-            return { ...room, chatLabels: [...others, { userId, label }] };
-          });
-        });
+      /*
+       * The conversation that was labelled, and no other.
+       *
+       * This used to match on the two people in it. The same pair can have a
+       * conversation about every listing they have discussed, so labelling one
+       * put the label on all of them at once — several appeared down the left
+       * and vanished again when the server's own answer arrived.
+       */
+      if (userId && selectedConversation) {
+        queryClient.setQueryData(chatRoomsQueryKey(userId), (old: any) =>
+          Array.isArray(old) ? applyChatLabel(old, selectedConversation, userId, label) : old,
+        );
       }
       setListRefreshToken((prev) => prev + 1);
       checkConversations();
       // A request card carries the same label; without this it waited a minute.
       queryClient.invalidateQueries({ queryKey: ["confidential-requests"] });
     },
-    [userId, chatRoomData, queryClient, checkConversations],
+    [userId, selectedConversation, queryClient, checkConversations],
   );
 
   // Redirect unauthenticated users to login.

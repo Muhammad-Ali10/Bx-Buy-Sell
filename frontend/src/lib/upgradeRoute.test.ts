@@ -1,15 +1,14 @@
 import {
+  UPGRADE_ROUTE,
   currentPackage,
-  pickerOrder,
   showUpgradeCard,
   upgradeableListings,
-  upgradeRoute,
 } from "./upgradeRoute";
 
 /**
- * The sidebar's "Upgrade Your Account To Pro" card. The client: a seller who
- * presses Let's Go lands on the listing's Manage Your Subscription page. It
- * used to send everyone to the old buyer pricing page.
+ * The sidebar's "Upgrade Your Account To Pro" card. The client: Let's Go lands
+ * on Manage Your Subscription, every time. It used to route per listing, and
+ * before that to the old buyer pricing page.
  */
 const live = (id: string, over: Record<string, unknown> = {}) => ({
   id,
@@ -43,20 +42,8 @@ describe("the package a listing is on", () => {
 });
 
 describe("where Let's Go leads", () => {
-  it("a seller with one listing goes straight to its page", () => {
-    expect(upgradeRoute([live("abc")])).toEqual({ kind: "go", to: "/manage-subscription/abc" });
-  });
-
-  it("a seller with several chooses which one first", () => {
-    expect(upgradeRoute([live("a"), live("b")])).toEqual({ kind: "pick" });
-  });
-
-  it("a buyer goes to the buyer plans, not the old pricing page", () => {
-    expect(upgradeRoute([], "USER")).toEqual({ kind: "go", to: "/manage-subscription" });
-  });
-
-  it("a seller who has not listed yet starts by listing", () => {
-    expect(upgradeRoute([], "SELLER")).toEqual({ kind: "go", to: "/dashboard" });
+  it("is Manage Your Subscription, whatever the member has listed", () => {
+    expect(UPGRADE_ROUTE).toBe("/manage-subscription");
   });
 });
 
@@ -72,16 +59,5 @@ describe("whether the card shows", () => {
   it("follows the buyer plan for someone with no listings", () => {
     expect(showUpgradeCard([], false)).toBe(true);
     expect(showUpgradeCard([], true)).toBe(false);
-  });
-});
-
-describe("the picker's order", () => {
-  it("puts listings that can still go higher first, newest first", () => {
-    const rows = [
-      live("old", { created_at: "2026-01-01" }),
-      live("premium", { selectedPackage: "PREMIUM", created_at: "2026-09-01" }),
-      live("new", { created_at: "2026-08-01" }),
-    ];
-    expect(pickerOrder(rows).map((r) => r.id)).toEqual(["new", "old", "premium"]);
   });
 });

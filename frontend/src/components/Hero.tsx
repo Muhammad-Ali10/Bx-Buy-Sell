@@ -3,9 +3,7 @@ import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { apiClient } from "@/lib/api";
 import heroCard1 from "@/assets/hero-card-1.png";
 import heroCard2 from "@/assets/hero-card-2.png";
 import heroCard3 from "@/assets/hero-card-3.png";
@@ -45,6 +43,35 @@ const LOOKING_FOR_OPTIONS: {
     { label: "Other", category: "Other" },
     { label: "I want to Sell my Business", to: "/dashboard" },
   ];
+
+/**
+ * The search filters in the brand's green rather than the theme's blue, which
+ * is what the client asked for. Only two parts of a slider are coloured: the
+ * filled length of the track and the ring around the thumb, both drawn by
+ * ui/slider.tsx from `--primary`. `accent` is the same green as the Pro
+ * badge, the lime cards and the "See plans" pill in this panel.
+ */
+const GREEN_SLIDER =
+  "[&_.bg-primary]:!bg-accent [&_[role=slider]]:!border-accent";
+
+/**
+ * The topics under the search field.
+ *
+ * Fixed, and in this order, because the client asked for these four by name.
+ * They were read from the listings for a while — busiest category first — and
+ * that made the row rearrange itself as listings came and went, which is what
+ * the client noticed.
+ *
+ * `label` and `category` are separate for the same reason as above: the
+ * client writes "Service business", the listings say "Service Business", and
+ * the filter matches the name exactly.
+ */
+const TRENDING_TOPICS: { label: string; category: string }[] = [
+  { label: "E-Commerce", category: "E-Commerce" },
+  { label: "Service business", category: "Service Business" },
+  { label: "Other Businesses", category: "Other Businesses" },
+  { label: "Pioneers", category: "Pioneers" },
+];
 
 interface HeroProps {
   searchQuery: string;
@@ -123,23 +150,6 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
     setSelected(option);
     setMenuOpen(false);
   };
-  /**
-   * Read from the listings rather than typed in here.
-   *
-   * The four topics that used to be hardcoded had to match a category name
-   * exactly, and three of them matched nothing — Shopify, SaaS and YouTube
-   * Automation all opened an empty page. Coming from the data, a topic can
-   * only appear if there is something behind it.
-   */
-  const { data: trendingTopics = [] } = useQuery<{ name: string; listings: number }[]>({
-    queryKey: ["trending-categories"],
-    queryFn: async () => {
-      const response = await apiClient.getTrendingCategories();
-      const rows = (response as any)?.data ?? response;
-      return Array.isArray(rows) ? rows : [];
-    },
-    staleTime: 5 * 60_000,
-  });
 
   const handleSearch = () => {
     // "I want to sell" is not a search — it leaves for the wizard whatever
@@ -351,6 +361,7 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
                           min={0}
                           max={PRICE_MAX}
                           step={10000}
+                          className={GREEN_SLIDER}
                         />
                       </div>
 
@@ -378,6 +389,7 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
                             min={0}
                             max={AGE_MAX}
                             step={1}
+                            className={GREEN_SLIDER}
                           />
                         ) : (
                           /* The same wall the listings page puts here, in the
@@ -412,28 +424,24 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
             </div>
           </div>
 
-          {/* An empty marketplace has no trending topics; a row reading
-              "Trending Topics" with nothing after it looks broken. */}
-          {trendingTopics.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 px-4">
-              <span className="text-xs sm:text-sm font-medium text-black/80 mr-2">Trending Topics</span>
-              {trendingTopics.map((topic) => (
-                <Button
-                  key={topic.name}
-                  variant="ghost"
-                  // Opens the listings page already filtered to this category.
-                  onClick={() =>
-                    navigate(`/all-listings?category=${encodeURIComponent(topic.name)}`)
-                  }
-                  className="bg-black text-primary-foreground hover:text-white hover:bg-black rounded-full px-3 py-1.5 sm:px-5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
-                >
-                  {topic.name}
-                  {/* Stroked with currentColor, so it stays white with the label. */}
-                  <ArrowUpSvg className="w-3 h-3 sm:w-4 sm:h-4 ml-1 sm:ml-2 text-[#C6FE1F]" />
-                </Button>
-              ))}
-            </div>
-          )}
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 px-4">
+            <span className="text-xs sm:text-sm font-medium text-black/80 mr-2">Trending Topics</span>
+            {TRENDING_TOPICS.map((topic) => (
+              <Button
+                key={topic.label}
+                variant="ghost"
+                // Opens the listings page already filtered to this category.
+                onClick={() =>
+                  navigate(`/all-listings?category=${encodeURIComponent(topic.category)}`)
+                }
+                className="bg-black text-primary-foreground hover:text-white hover:bg-black rounded-full px-3 py-1.5 sm:px-5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+              >
+                {topic.label}
+                {/* Stroked with currentColor, so it stays white with the label. */}
+                <ArrowUpSvg className="w-3 h-3 sm:w-4 sm:h-4 ml-1 sm:ml-2 text-[#C6FE1F]" />
+              </Button>
+            ))}
+          </div>
 
           <div className="relative w-full max-w-7xl mx-auto mt-4 sm:mt-8 flex items-end justify-center mb-0 px-4">
             {/* Large center image - positioned at bottom */}

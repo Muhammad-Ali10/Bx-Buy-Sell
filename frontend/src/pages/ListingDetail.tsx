@@ -136,6 +136,8 @@ import ListingImage from "@/components/ListingImage";
 import ExIcon from "@/assets/Ex icon.svg";
 import { getCurrencySymbol } from "@/components/CurrencySelect";
 import { useListingCategoryId } from "@/hooks/useListingCategoryId";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useAdFieldHints } from "@/hooks/useAdFieldHints";
 import { useStatisticQuestions } from "@/hooks/useStatisticQuestions";
 import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
@@ -681,6 +683,25 @@ const PRODUCT_SPECS = [
  * A question with no hint yields null, and the caller keeps the sentence the
  * page already had. Nothing goes blank because nobody has filled this in yet.
  */
+/**
+ * Two sets of hints, the category's own winning.
+ *
+ * Questions belong to a category, and so do their hints — but an administrator
+ * who writes one sentence for a card means it for every ad, not for whichever
+ * category they happened to be editing. The originals, which belong to no
+ * category, stand in wherever a category has written nothing of its own.
+ */
+const mergeHints = (
+  fallback: Record<string, string | null>,
+  own: Record<string, string | null>,
+): Record<string, string | null> => {
+  const out: Record<string, string | null> = { ...fallback };
+  for (const [key, value] of Object.entries(own)) {
+    if (value) out[key] = value;
+  }
+  return out;
+};
+
 const resolveSectionHints = (
   questions: any[] | undefined,
   specs: { key: string; match: string[] }[],
@@ -1549,14 +1570,71 @@ const LockedBlur = ({
  * The ⓘ every metric card carries in its top-right corner. The card it sits on
  * must be `position: relative`.
  */
+/**
+ * The ⓘ beside a figure, and the sentence behind it.
+ *
+ * It was the browser's own `title`, which a phone never shows: there is no
+ * hover to wait for, so on a touch screen the ⓘ did nothing at all and the
+ * explanation was unreachable for every visitor on one. This opens on hover and
+ * on tap. The card underneath is left alone — the press belongs to the badge.
+ */
+const InfoHint = ({
+  text,
+  children,
+  style,
+}: {
+  text: string;
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={text}
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+          onClick={(event) => {
+            // The card underneath is often a link; the press belongs here.
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen((wasOpen) => !wasOpen);
+          }}
+          style={{
+            cursor: 'help',
+            lineHeight: 0,
+            background: 'none',
+            border: 0,
+            padding: 0,
+            ...style,
+          }}
+        >
+          {children}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={6}
+        // Opening it must not move the reader off the figure they are reading.
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        className="w-auto max-w-[260px] p-3 text-xs leading-relaxed"
+        style={{ fontFamily: 'Lufga' }}
+      >
+        {text}
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+/** The ⓘ in a card's corner. */
 const InfoBadge = ({ text }: { text: string }) => (
-  <span
-    title={text}
-    aria-label={text}
-    style={{ position: 'absolute', top: '16px', right: '16px', cursor: 'help', lineHeight: 0 }}
-  >
+  <InfoHint text={text} style={{ position: 'absolute', top: '16px', right: '16px' }}>
     <Info style={{ width: '16px', height: '16px', color: 'rgba(0,0,0,0.35)' }} />
-  </span>
+  </InfoHint>
 );
 
 /**
@@ -1644,7 +1722,21 @@ const CustomerTypeCard = ({
 };
 
 /** Light grey panel with a title and an info icon, holding white metric cards. */
-const SectionBox = ({ title, children }: { title: string; children: React.ReactNode }) => (
+const SectionBox = ({
+  title,
+  children,
+  info,
+}: {
+  title: string;
+  children: React.ReactNode;
+  /**
+   * The administrator's words for this heading.
+   *
+   * Without them the ⓘ stays exactly as it was — a plain mark that explains
+   * nothing, which is all it has ever been.
+   */
+  info?: string;
+}) => (
   <div
     style={{
       borderRadius: '20px',
@@ -1664,7 +1756,13 @@ const SectionBox = ({ title, children }: { title: string; children: React.ReactN
       <span style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '15px', color: '#000' }}>
         {title}
       </span>
-      <Info style={{ width: '15px', height: '15px', color: 'rgba(0,0,0,0.35)' }} />
+      {info ? (
+        <InfoHint text={info}>
+          <Info style={{ width: '15px', height: '15px', color: 'rgba(0,0,0,0.35)' }} />
+        </InfoHint>
+      ) : (
+        <Info style={{ width: '15px', height: '15px', color: 'rgba(0,0,0,0.35)' }} />
+      )}
     </div>
     {children}
   </div>
@@ -1676,20 +1774,25 @@ const AverageCell = ({
   value,
   note,
   currency,
+  info,
 }: {
   label: string;
   value: number | null;
   note: string;
   /** The currency `value` is in. It printed "$" whatever the listing was in. */
   currency: string;
+  /** The administrator's wording; without it the figure carries no ⓘ. */
+  info?: string;
 }) => (
   <div
     style={{
+      position: 'relative',
       background: '#fff',
       borderRadius: '14px',
       padding: '14px 16px',
     }}
   >
+    {info && <InfoBadge text={info} />}
     <div style={{ fontFamily: 'Lufga', fontSize: '12px', color: 'rgba(0,0,0,0.55)' }}>{label}</div>
     <div
       style={{
@@ -1717,15 +1820,19 @@ const MultipleRow = ({
   label,
   value,
   kind,
+  info,
 }: {
   label: string;
   value: number | null;
   kind: MultipleKind;
+  /** The administrator's wording; without it the figure carries no ⓘ. */
+  info?: string;
 }) => {
   const rating = getMultipleRating(value, kind);
 
   return (
-    <div style={{ background: '#fff', borderRadius: '14px', padding: '14px 16px' }}>
+    <div style={{ position: 'relative', background: '#fff', borderRadius: '14px', padding: '14px 16px' }}>
+      {info && <InfoBadge text={info} />}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '80px' }}>
         <div>
           <div style={{ fontFamily: 'Lufga', fontSize: '13px', color: 'rgba(0,0,0,0.55)' }}>{label}</div>
@@ -2685,9 +2792,37 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   const { data: statisticAdminQuestions } = useStatisticQuestions(listingCategoryId);
   const { data: productAdminQuestions } = useProductQuestions(listingCategoryId);
   const { data: managementAdminQuestions } = useManagementQuestions(listingCategoryId);
-  const statisticHints = resolveSectionHints(statisticAdminQuestions, STATISTIC_SPECS);
-  const managementHints = resolveSectionHints(managementAdminQuestions, MANAGEMENT_SPECS);
-  const productHints = resolveSectionHints(productAdminQuestions, PRODUCT_SPECS);
+  /*
+   * And the originals, which belong to no category.
+   *
+   * An ad whose category cannot be worked out — and there are older ones whose
+   * category was never saved — would otherwise show no administrator's wording
+   * at all. Where the ad's own category has nothing to say, these do. Asking
+   * for them costs nothing when the ad has no category: it is the same query.
+   */
+  const { data: statisticOriginals } = useStatisticQuestions(undefined);
+  const { data: productOriginals } = useProductQuestions(undefined);
+  const { data: managementOriginals } = useManagementQuestions(undefined);
+  const statisticHints = mergeHints(
+    resolveSectionHints(statisticOriginals, STATISTIC_SPECS),
+    resolveSectionHints(statisticAdminQuestions, STATISTIC_SPECS),
+  );
+  const managementHints = mergeHints(
+    resolveSectionHints(managementOriginals, MANAGEMENT_SPECS),
+    resolveSectionHints(managementAdminQuestions, MANAGEMENT_SPECS),
+  );
+  const productHints = mergeHints(
+    resolveSectionHints(productOriginals, PRODUCT_SPECS),
+    resolveSectionHints(productAdminQuestions, PRODUCT_SPECS),
+  );
+  /*
+   * The figures no question stands behind — the margin, the averages, the
+   * multiples. Their sentences were written into this page, so an
+   * administrator filling in hints saw nothing change beside them. They are
+   * written in Content Management → Financials now.
+   */
+  const { data: adFieldHints } = useAdFieldHints();
+  const adHints = adFieldHints ?? {};
 
   const statisticsMissing = missingValueLabel(listing?.statistics, unlockCtaText);
   const statisticValues = resolveSectionAnswers(listing?.statistics, STATISTIC_SPECS);
@@ -4116,11 +4251,15 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
               value={location}
               flagCountry={location}
               image={MapImage}
+              info={adHints.location}
             />
             <MetricCard
               label="Business Age"
               value={businessAge}
-              info="How long the business has been running, based on its starting date."
+              info={
+                adHints.businessAge ||
+                "How long the business has been running, based on its starting date."
+              }
             />
             {/* Monthly profit stood here and again as "⌀ Monthly Profit" in
                 the Averages box directly below, which is where it belongs —
@@ -4130,7 +4269,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
             <MetricCard
               label="Profit Margin"
               value={profitMarginDisplay}
-              info="Annual profit as a percentage of annual revenue."
+              info={adHints.profitMargin || "Annual profit as a percentage of annual revenue."}
             />
             {/* <MetricCard
               label="Page Views"
@@ -4140,19 +4279,19 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
 
           {/* Averages + Multiples */}
           <div className="grid grid-cols-1 lg:grid-cols-2" style={{ width: '100%', gap: '20px', marginTop: '20px' }}>
-            <SectionBox title="Averages">
+            <SectionBox title="Averages" info={adHints.averages}>
               <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '12px' }}>
-                <AverageCell label="⌀ Annual Revenue" value={annualRevenue} currency={figuresCurrency} note="Average generated per year" />
-                <AverageCell label="⌀ Monthly Revenue" value={avgMonthlyRevenue} currency={figuresCurrency} note="Average generated per month" />
-                <AverageCell label="⌀ Annual Profit" value={annualProfit} currency={figuresCurrency} note="Average generated per year" />
-                <AverageCell label="⌀ Monthly Profit" value={avgMonthlyProfit} currency={figuresCurrency} note="Average generated per month" />
+                <AverageCell label="⌀ Annual Revenue" value={annualRevenue} currency={figuresCurrency} note="Average generated per year" info={adHints.annualRevenue} />
+                <AverageCell label="⌀ Monthly Revenue" value={avgMonthlyRevenue} currency={figuresCurrency} note="Average generated per month" info={adHints.monthlyRevenue} />
+                <AverageCell label="⌀ Annual Profit" value={annualProfit} currency={figuresCurrency} note="Average generated per year" info={adHints.annualProfit} />
+                <AverageCell label="⌀ Monthly Profit" value={avgMonthlyProfit} currency={figuresCurrency} note="Average generated per month" info={adHints.monthlyProfit} />
               </div>
             </SectionBox>
 
-            <SectionBox title="Multiples">
+            <SectionBox title="Multiples" info={adHints.multiples}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <MultipleRow label="Revenue Multiple" value={revenueMultipleValue} kind="revenue" />
-                <MultipleRow label="Profit Multiple" value={profitMultipleValue} kind="profit" />
+                <MultipleRow label="Revenue Multiple" value={revenueMultipleValue} kind="revenue" info={adHints.revenueMultiple} />
+                <MultipleRow label="Profit Multiple" value={profitMultipleValue} kind="profit" info={adHints.profitMultiple} />
               </div>
             </SectionBox>
           </div>

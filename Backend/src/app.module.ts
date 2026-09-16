@@ -35,6 +35,7 @@ import { MonitoringAlertModule } from './monitoring-alert/monitoring-alert.modul
 import { AcquisitionCapacityModule } from './acquisition-capacity/acquisition-capacity.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AttachmentModule } from './attachment/attachment.module';
+import { AdFieldHintModule } from './ad-field-hint/ad-field-hint.module';
 import { ListingAreaOrderModule } from './listing-area-order/listing-area-order.module';
 import { FxModule } from './fx/fx.module';
 
@@ -65,6 +66,7 @@ import { FxModule } from './fx/fx.module';
     FinancialAdminModule,
     QuestionAdminModule,
     ListingAreaOrderModule,
+    AdFieldHintModule,
     AdminSocialAccountModule,
     NotificationModule,
     SmsModule,

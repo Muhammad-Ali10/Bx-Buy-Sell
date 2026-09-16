@@ -22,3 +22,13 @@ export function mustConfirmEmail(
   const created = user.created_at ? Date.parse(user.created_at) : NaN;
   return Number.isFinite(created) && created >= EMAIL_CONFIRMATION_REQUIRED_FROM;
 }
+
+/** The address a sign-up is waiting on, kept so a reload of the code page still knows it. */
+export const PENDING_SIGNUP_EMAIL_KEY = "ex.pendingSignupEmail";
+
+/**
+ * What sign-in answers someone who signed up but never entered the code. The
+ * server has sent them a new one; the page takes them back to it.
+ */
+export const isSignupNotConfirmed = (message?: string | null): boolean =>
+  /confirm your email to finish signing up/i.test(String(message ?? ""));

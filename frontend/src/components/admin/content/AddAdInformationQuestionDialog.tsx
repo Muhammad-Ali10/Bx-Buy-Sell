@@ -2,6 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAddAdInformationQuestion } from "@/hooks/useAddAdInformationQuestion";
 import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
@@ -24,6 +25,8 @@ export const AddAdInformationQuestionDialog = ({ open, onOpenChange, categoryId 
   const [question, setQuestion] = useState("");
   const [answerType, setAnswerType] = useState("TEXT");
   const [options, setOptions] = useState("");
+  /** The administrator's note for the seller, shown under this question in Create Listing. */
+  const [hintText, setHintText] = useState("");
   const [required, setRequired] = useState(true);
   const addQuestion = useAddAdInformationQuestion();
 
@@ -59,7 +62,14 @@ export const AddAdInformationQuestionDialog = ({ open, onOpenChange, categoryId 
     }
 
     addQuestion.mutate(
-      { question: trimmedQuestion, answer_type: answerType, options: optionsArray, required, categoryId },
+      {
+        question: trimmedQuestion,
+        answer_type: answerType,
+        options: optionsArray,
+        required,
+        categoryId,
+        hint: hintText.trim(),
+      },
       {
         onSuccess: () => {
           setQuestion("");
@@ -99,6 +109,15 @@ export const AddAdInformationQuestionDialog = ({ open, onOpenChange, categoryId 
               onChange={(e) => setQuestion(e.target.value)}
               placeholder="Write Question"
               className="bg-gray-50 border-gray-200 text-black"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-black">Create Listing Text Hint</Label>
+            <Textarea
+              value={hintText}
+              onChange={(e) => setHintText(e.target.value)}
+              placeholder="Enter hint text to help users understand this question..."
+              className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
             />
           </div>
           <div className="space-y-2">

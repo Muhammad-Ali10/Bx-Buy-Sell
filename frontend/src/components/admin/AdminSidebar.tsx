@@ -5,13 +5,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { useAuth } from "@/hooks/useAuth";
 import { useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
 import { useListingAreaOrder, useSaveListingAreaOrder } from "@/hooks/useListingAreaOrder";
-import { isListingArea } from "@/lib/listingAreaOrder";
+import { isListingArea, keepHiddenAreas } from "@/lib/listingAreaOrder";
 import { SortableQuestionList } from "@/components/admin/content/SortableQuestionList";
 import { toast } from "sonner";
 import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import logo from "@/assets/_App Icon 1 (2).png";
 import {
   AccountsSvg,
   AdInformationsSvg,
@@ -102,6 +101,17 @@ const menuItems: SidebarMenuItem[] = [
     ],
   },
 ];
+
+/**
+ * Rows kept out of the menu for now, by id.
+ *
+ * The client asked for Tools to go until it is needed again, so its page, its
+ * route and its files stay exactly as they are: putting the row back is
+ * deleting the id from this set. The area itself stays in the listing form's
+ * order — see `keepHiddenAreas` — so the seller's "Tools you use" step keeps
+ * its place among the steps.
+ */
+const HIDDEN_SUB_ITEMS: ReadonlySet<string> = new Set(["tools"]);
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -343,14 +353,15 @@ const AdminSidebarContent = ({
    * here rather than copied.
    */
   const renderContentSubItems = (subItems: SidebarSubItem[]) => {
-    const firstArea = subItems.findIndex((sub) => isListingArea(sub.id));
-    if (firstArea < 0) return subItems.map(renderSubItem);
+    const shown = subItems.filter((sub) => !HIDDEN_SUB_ITEMS.has(sub.id));
+    const firstArea = shown.findIndex((sub) => isListingArea(sub.id));
+    if (firstArea < 0) return shown.map(renderSubItem);
 
-    const pinnedTop = subItems.slice(0, firstArea);
-    const pinnedBottom = subItems.filter(
+    const pinnedTop = shown.slice(0, firstArea);
+    const pinnedBottom = shown.filter(
       (sub, index) => index > firstArea && !isListingArea(sub.id),
     );
-    const areas = areaOrder.flatMap((id) => subItems.filter((sub) => sub.id === id));
+    const areas = areaOrder.flatMap((id) => shown.filter((sub) => sub.id === id));
 
     return (
       <>
@@ -358,7 +369,14 @@ const AdminSidebarContent = ({
         <SortableQuestionList
           items={areas}
           onReorder={(ordered) =>
-            saveAreaOrder.mutate(ordered.map((sub) => sub.id).filter(isListingArea))
+            saveAreaOrder.mutate(
+              // A hidden row cannot be dragged; it keeps its place all the same.
+              keepHiddenAreas(
+                ordered.map((sub) => sub.id).filter(isListingArea),
+                areaOrder,
+                HIDDEN_SUB_ITEMS,
+              ),
+            )
           }
         >
           {/* A box of their own, so a dragged area stays among the areas and
@@ -414,27 +432,17 @@ const AdminSidebarContent = ({
           opacity: var(--sidebar-icon-opacity) !important;
         }
       `}</style>
-      {/* Logo — stays as <img>, it's a raster asset not an icon */}
+      {/* The collapse button. The EX mark sits in the top bar now. */}
       <div
         style={{
           flexShrink: 0,
           marginBottom: "16px",
           display: "flex",
           alignItems: "center",
-          justifyContent: collapsed ? "center" : "space-between",
+          justifyContent: collapsed ? "center" : "flex-end",
           paddingRight: collapsed ? 0 : "12px",
         }}
       >
-        {!collapsed && (
-          <Link to="/" onClick={onClose}>
-            <img
-              src={logo}
-              alt="EX Logo"
-              className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 object-contain"
-            />
-          </Link>
-        )}
-
         {onToggleCollapse && (
           <button
             type="button"
@@ -555,7 +563,9 @@ const AdminSidebarContent = ({
                 >
                   {item.id === "content"
                     ? renderContentSubItems(item.subItems!)
-                    : item.subItems!.map(renderSubItem)}
+                    : item.subItems!
+                        .filter((sub) => !HIDDEN_SUB_ITEMS.has(sub.id))
+                        .map(renderSubItem)}
                 </div>
               )}
             </div>

@@ -18,6 +18,9 @@ import { MailService } from 'src/mail/mail.service';
  */
 export type InboxCodePurpose = 'verify' | 'reset';
 
+/** Where the code is kept: on an account, or on a sign-up still waiting for it. */
+export type CodeOwner = 'user' | 'signup';
+
 interface CodeHolder {
   id: string;
   otp_code?: string | null;
@@ -62,6 +65,7 @@ export class InboxCodeService {
   async send(
     user: { id: string; email: string; otp_expires_at?: Date | null },
     purpose: InboxCodePurpose,
+    owner: CodeOwner = 'user',
   ) {
     // A new code only once the last one has had its minute. The remaining time
     // is in the message so the page can count it down.
@@ -73,19 +77,16 @@ export class InboxCodeService {
     }
 
     const code = InboxCodeService.generateCode();
-    await this.db.user.update({
-      where: { id: user.id },
-      data: {
-        otp_code: code,
-        otp_expires_at: new Date(Date.now() + InboxCodeService.CODE_TTL_MS),
-        otp_attempts: 0,
-      },
+    await this.write(owner, user.id, {
+      otp_code: code,
+      otp_expires_at: new Date(Date.now() + InboxCodeService.CODE_TTL_MS),
+      otp_attempts: 0,
     });
 
     const result = await this.mail.send({ to: user.email, ...InboxCodeService.message(purpose, code) });
     if (!result.sent) {
       // Never leave a live code behind for an email that never went out.
-      await this.clear(user.id);
+      await this.clear(user.id, owner);
       throw new BadRequestException(result.reason || 'The email could not be sent.');
     }
 
@@ -97,22 +98,22 @@ export class InboxCodeService {
    * `consume` is set: a reset checks the code on one screen and spends it on the
    * next, where the new password is saved.
    */
-  async check(user: CodeHolder, code: string, consume: boolean) {
+  async check(user: CodeHolder, code: string, consume: boolean, owner: CodeOwner = 'user') {
     if (!user.otp_code || !user.otp_expires_at) {
       throw new BadRequestException('Ask for a code first.');
     }
     if (user.otp_expires_at.getTime() < Date.now()) {
-      await this.clear(user.id);
+      await this.clear(user.id, owner);
       throw new BadRequestException('That code has expired. Ask for a new one.');
     }
     const used = user.otp_attempts ?? 0;
     if (used >= InboxCodeService.MAX_ATTEMPTS) {
-      await this.clear(user.id);
+      await this.clear(user.id, owner);
       throw new BadRequestException('Too many attempts. Ask for a new code.');
     }
     if (String(code || '').trim() !== user.otp_code) {
       const attempts = used + 1;
-      await this.db.user.update({ where: { id: user.id }, data: { otp_attempts: attempts } });
+      await this.write(owner, user.id, { otp_attempts: attempts });
       const left = InboxCodeService.MAX_ATTEMPTS - attempts;
       throw new BadRequestException(
         left > 0
@@ -120,7 +121,7 @@ export class InboxCodeService {
           : 'That code is not right. Ask for a new one.',
       );
     }
-    if (consume) await this.clear(user.id);
+    if (consume) await this.clear(user.id, owner);
   }
 
   /** Confirming the account's own address: send the code. */
@@ -154,10 +155,17 @@ export class InboxCodeService {
     return { success: true };
   }
 
-  async clear(userId: string) {
-    await this.db.user.update({
-      where: { id: userId },
-      data: { otp_code: null, otp_expires_at: null, otp_attempts: 0 },
-    });
+  async clear(id: string, owner: CodeOwner = 'user') {
+    await this.write(owner, id, { otp_code: null, otp_expires_at: null, otp_attempts: 0 });
+  }
+
+  private write(
+    owner: CodeOwner,
+    id: string,
+    data: { otp_code?: string | null; otp_expires_at?: Date | null; otp_attempts?: number },
+  ) {
+    return owner === 'signup'
+      ? this.db.pendingSignup.update({ where: { id }, data })
+      : this.db.user.update({ where: { id }, data });
   }
 }

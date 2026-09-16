@@ -66,3 +66,29 @@ export const listingSteps = (order: ListingArea[]): DashboardStep[] => [
   ...order.flatMap((area) => AREA_STEPS[area]),
   "packages",
 ];
+
+/**
+ * A dragged order, with the areas whose rows are not on screen put back where
+ * they were.
+ *
+ * A hidden row cannot be dragged, so it is missing from what the drag hands
+ * back. Saving that would drop the area from the order, and the seller's form
+ * would then ask for it last instead of where it belongs. Each one goes back
+ * behind the same area it followed before.
+ */
+export function keepHiddenAreas(
+  dragged: ListingArea[],
+  saved: readonly ListingArea[],
+  hidden: ReadonlySet<string>,
+): ListingArea[] {
+  const order = [...dragged];
+  saved.forEach((id, index) => {
+    if (!hidden.has(id) || order.includes(id)) return;
+    const before = saved
+      .slice(0, index)
+      .reverse()
+      .find((other) => order.includes(other));
+    order.splice(before ? order.indexOf(before) + 1 : 0, 0, id);
+  });
+  return order;
+}

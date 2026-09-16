@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { AuthLayout } from "@/components/AuthLayout";
 import { Button } from "@/components/ui/button";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api";
+import { PENDING_SIGNUP_EMAIL_KEY } from "@/lib/emailConfirmation";
+import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
 
 /**
  * Sign-up, step two: confirm the email address.
@@ -29,10 +31,22 @@ const VerifyOTP = () => {
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const sentRef = useRef(false);
   const navigate = useNavigate();
-  const { user, loading: authLoading, refreshUser } = useAuth();
+  const { user, loading: authLoading, refreshUser, confirmSignup } = useAuth();
+  const location = useLocation();
+  /*
+   * A sign-up waiting for its code: no account and no session yet, only the
+   * address the code went to. Kept in the session as well, so a reload of this
+   * page still knows it.
+   */
+  const signupEmail: string | null =
+    (location.state as { email?: string } | null)?.email ||
+    (typeof window !== "undefined" ? sessionStorage.getItem(PENDING_SIGNUP_EMAIL_KEY) : null);
+  const signingUp = !user && Boolean(signupEmail);
 
   const send = async () => {
-    const response: any = await apiClient.sendEmailConfirmCode();
+    const response: any = signingUp
+      ? await apiClient.getOTP(signupEmail as string)
+      : await apiClient.sendEmailConfirmCode();
     if (response?.success === false) {
       // Asked again within the minute: the code already sent still works, so
       // this is a countdown rather than a failure.
@@ -56,7 +70,14 @@ const VerifyOTP = () => {
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
-      navigate("/login");
+      // Signing up: the code went out with the form, and the button below asks
+      // for another. With no sign-up either, there is nothing to confirm here.
+      if (signingUp) {
+        setResendIn(60);
+        inputRefs.current[0]?.focus();
+      } else {
+        navigate("/login");
+      }
       return;
     }
     if ((user as any).is_email_verified) {
@@ -115,6 +136,26 @@ const VerifyOTP = () => {
 
     setLoading(true);
     try {
+      if (signingUp) {
+        // The account is made now, and signed in.
+        const result = await confirmSignup(signupEmail as string, code);
+        if (result.success === false) {
+          toast.error(result.error || "That code did not work.");
+          setOtp(Array(CODE_LENGTH).fill(""));
+          inputRefs.current[0]?.focus();
+          return;
+        }
+        sessionStorage.removeItem(PENDING_SIGNUP_EMAIL_KEY);
+        toast.success("Email confirmed — your account is ready");
+        // Someone who was publishing a listing as a guest goes back to it.
+        if (sessionStorage.getItem(LISTING_PUBLISH_PENDING_SESSION_KEY) === "1") {
+          window.location.assign("/dashboard");
+          return;
+        }
+        navigate("/phone-verification");
+        return;
+      }
+
       const response: any = await apiClient.confirmEmailCode(code);
       if (response?.success === false) {
         toast.error(response.error || "That code did not work.");
@@ -145,7 +186,7 @@ const VerifyOTP = () => {
           <p className="text-muted-foreground text-lg">
             Check your inbox. We sent a code to
             <br />
-            <span className="font-semibold text-foreground">{user?.email || "your email address"}</span>
+            <span className="font-semibold text-foreground">{user?.email || signupEmail || "your email address"}</span>
           </p>
         </div>
 

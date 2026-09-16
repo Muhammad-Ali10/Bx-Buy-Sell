@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAddBrandQuestion } from "@/hooks/useAddBrandQuestion";
 import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
@@ -33,6 +34,8 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange, categoryId }: AddBr
   const [question, setQuestion] = useState("");
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState(""); // Options field - always visible
+  /** The administrator's note for the seller, shown under this question in Create Listing. */
+  const [hintText, setHintText] = useState("");
   const [required, setRequired] = useState(true);
   const addQuestion = useAddBrandQuestion();
 
@@ -72,6 +75,7 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange, categoryId }: AddBr
         option: optionsArray.length > 0 ? optionsArray : [],
         required,
         categoryId,
+        hint: hintText.trim(),
       },
       {
         onSuccess: () => {
@@ -87,6 +91,7 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange, categoryId }: AddBr
 
   const handleCancel = () => {
     setQuestion("");
+    setHintText("");
     setQuestionType("TEXT");
     setOptions("");
     setRequired(true);
@@ -129,6 +134,15 @@ export const AddBrandQuestionDialog = ({ open, onOpenChange, categoryId }: AddBr
           )}
 
           {/* Answer Type Section */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-black">Create Listing Text Hint</Label>
+            <Textarea
+              value={hintText}
+              onChange={(e) => setHintText(e.target.value)}
+              placeholder="Enter hint text to help users understand this question..."
+              className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
+            />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="answerType" className="text-foreground">Answer Type</Label>
             <Select value={questionType} onValueChange={setQuestionType}>

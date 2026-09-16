@@ -26,14 +26,8 @@ import {
 import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
 import { toast } from "sonner";
 import { getAdminFinancialsTemplateVersion } from "@/lib/financialTableUtils";
-import { useAdInformationQuestions } from "@/hooks/useAdInformationQuestions";
-import { getListingPriceFromForm } from "@/lib/packagePricing";
 import { useListingAreaOrder } from "@/hooks/useListingAreaOrder";
 import { listingSteps } from "@/lib/listingAreaOrder";
-
-/** Packages pricing is derived from the listing price, so it must exist first. */
-const PACKAGES_LOCKED_MESSAGE =
-  "Please enter a listing price before accessing the Packages section. Pricing is calculated automatically based on the listing price you provide";
 
 export type DashboardStep = 
   | "category" 
@@ -68,7 +62,6 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
     Boolean(matchListingEdit || matchDashboardEdit);
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [activeStep, setActiveStep] = useState<DashboardStep>("category");
-  const { data: adInformationQuestions } = useAdInformationQuestions();
   const [formData, setFormData] = useState<any>({});
   /** Edit flow: start true so we never paint steps with empty formData before hydrate (fixes broken pre-fill). */
   const [loadingListing, setLoadingListing] = useState(() =>
@@ -623,9 +616,6 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
     setFormData((prev: any) => ({ ...prev, ...stepData }));
   };
 
-  // Packages stay locked until the seller has entered a listing price, since
-  // every package/add-on/success-fee amount is derived from it.
-  const listingPrice = getListingPriceFromForm(formData, adInformationQuestions);
   /**
    * Picking Packages while already on it starts that step over.
    *
@@ -637,11 +627,26 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
    */
   const [packagesKey, setPackagesKey] = useState(0);
 
+  /*
+   * Packages used to be refused here unless a listing price was already in
+   * `formData`, and the refusal was wrong twice over.
+   *
+   * The price is an admin-defined question, and every category has its own
+   * copy of it under its own id. This asked the question set that belongs to
+   * no category, so it looked the answer up under an id the seller's listing
+   * never uses — the price was always "missing", however carefully it had been
+   * filled in.
+   *
+   * And a step hands its answers up when it unmounts, which is after the step
+   * changes. Refusing the change meant the Ad Information step never unmounted
+   * and never handed anything up, so a price typed a moment ago could not
+   * arrive. Only "Next step" worked, because that lifts the answers itself.
+   *
+   * The Packages step asks its own category's questions and says the same
+   * sentence in place when there is genuinely no price, so nothing is lost by
+   * letting the seller through.
+   */
   const handleStepChange = (step: DashboardStep) => {
-    if (step === "packages" && listingPrice === null) {
-      toast.error(PACKAGES_LOCKED_MESSAGE);
-      return;
-    }
     if (step === "packages" && activeStep === "packages") {
       setPackagesKey((n) => n + 1);
     }
@@ -766,7 +771,7 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
       <DashboardSidebar activeStep={activeStep} onStepChange={handleStepChange} isMobile={false} />
       
       <div className="flex-1 flex flex-col w-full overflow-hidden">
-        <Header inColumn dark sidebarFrom="md" />
+        <Header inColumn />
 
         {/* The wizard's own step menu, kept below the site bar.
             The bar carries the site's links, not the listing steps, and the

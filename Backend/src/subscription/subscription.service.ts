@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListingCheckoutService } from './listing-checkout.service';
 import { StripeService, subscriptionPeriodEnd } from './stripe.service';
 import { ensureStripeCustomer } from './stripe-customer';
 import { SubscriptionStatus, BillingCycle } from '@prisma/client';
@@ -15,6 +16,31 @@ const stripeId = (value: unknown): string | null =>
 /** Holding a plan: paying for it, trialling it, or a payment being retried. */
 const HELD_STATUSES = ['active', 'trialing', 'past_due'];
 
+/**
+ * Is this subscription in force today?
+ *
+ * The record outlives the subscription: a cancelled or expired row keeps the
+ * plan it was bought on, and everything that asked "is this member Pro?" read
+ * that plan alone — so a membership that ended months ago still opened
+ * off-market listings and the advanced filters.
+ *
+ * Held means paying, trialling, or a payment being retried, as it does
+ * everywhere else here. Past that, what was paid for is honoured to the end of
+ * the period: a member who cancels on the first of the month keeps what they
+ * bought until the month is out.
+ */
+export const subscriptionInForce = (subscription: {
+  status?: unknown;
+  endDate?: Date | string | null;
+  stripeCurrentPeriodEnd?: Date | string | null;
+}): boolean => {
+  if (HELD_STATUSES.includes(String(subscription?.status ?? '').toLowerCase())) {
+    return true;
+  }
+  const paidUntil = subscription?.endDate ?? subscription?.stripeCurrentPeriodEnd;
+  return paidUntil ? new Date(paidUntil).getTime() > Date.now() : false;
+};
+
 @Injectable()
 export class SubscriptionService {
   private readonly logger = new Logger(SubscriptionService.name);
@@ -22,6 +48,8 @@ export class SubscriptionService {
   constructor(
     private db: PrismaService,
     private stripeService: StripeService,
+    /** Listing packages and placements, shared with the Stripe webhook. */
+    private readonly listingCheckout: ListingCheckoutService,
     /** Plans bought, cancelled and kept go into the member's log. */
     @Optional() private readonly activityLog?: ActivityLogService,
   ) {}
@@ -497,9 +525,11 @@ export class SubscriptionService {
    * Stripe tells the webhook too, but only where an endpoint is set up — and
    * locally that meant only while the Stripe CLI happened to be running. This
    * makes the purchase stick as soon as the member lands back on the site.
-   * Listing packages are left to the webhook, which knows how to switch them
-   * on; for those this only says what kind of purchase it was, so the page can
-   * send the member to the right place.
+   *
+   * A listing's package and placements are applied here too, through the same
+   * service the webhook uses. They used to be left to the webhook alone, and
+   * this answered only with what kind of purchase it was — so wherever no
+   * endpoint was set up, a seller paid and the listing never changed.
    */
   async syncCheckoutSession(userId: string, sessionId: string) {
     if (!sessionId) return { success: false, error: 'No checkout to confirm.' };
@@ -513,8 +543,6 @@ export class SubscriptionService {
     }
 
     const meta = session.metadata || {};
-    if (meta.listingId) return { success: true, kind: 'listing' as const };
-
     if (meta.userId !== userId) {
       return { success: false, error: 'Only the account that paid can confirm this checkout.' };
     }
@@ -526,6 +554,21 @@ export class SubscriptionService {
         success: false,
         error: 'The payment has not gone through yet. Please check again in a minute.',
       };
+    }
+
+    // The seller's own listing work, by the same rules the webhook follows.
+    if (meta.listingId) {
+      try {
+        await this.listingCheckout.applyFromSession(session);
+        return { success: true, kind: 'listing' as const };
+      } catch (error) {
+        this.logger.error(`Could not apply listing checkout ${sessionId}:`, error);
+        return {
+          success: false,
+          error:
+            'Your payment went through, but we could not switch the package on yet. Please check again in a minute.',
+        };
+      }
     }
 
     try {
@@ -763,7 +806,14 @@ export class SubscriptionService {
     const subscription = await this.getCurrentSubscription(userId);
     const usage = await this.getUserListingLimit(userId);
     const plan = subscription.plan;
-    const isPro = plan?.slug === 'pro';
+    /*
+     * What the member is entitled to today, which is not always what their
+     * record says. A subscription that has ended still names the plan it was
+     * bought on — Manage Subscription has to show it — but it no longer buys
+     * anything. `plan` stays the record; `entitled` is what it still grants.
+     */
+    const entitled = subscriptionInForce(subscription) ? plan : null;
+    const isPro = entitled?.slug === 'pro';
 
     /**
      * The three buyer tiers the client's subscription page works in. Slugs stay
@@ -772,7 +822,7 @@ export class SubscriptionService {
      */
     const tier: 'MINIMUM' | 'STARTER' | 'PREMIUM' = isPro
       ? 'PREMIUM'
-      : plan?.slug === 'starter'
+      : entitled?.slug === 'starter'
         ? 'STARTER'
         : 'MINIMUM';
 
@@ -789,15 +839,15 @@ export class SubscriptionService {
       },
       limits: {
         listings: usage,
-        maxPhotos: plan?.maxPhotos ?? 5,
-        maxVideoDurationMinutes: plan?.maxVideoDuration ?? 0,
+        maxPhotos: entitled?.maxPhotos ?? 5,
+        maxVideoDurationMinutes: entitled?.maxVideoDuration ?? 0,
       },
       features: {
-        analytics: Boolean(plan?.canUseAnalytics),
-        featuredListing: Boolean(plan?.featuredListing),
-        boostListing: Boolean(plan?.canBoostListing),
-        customBranding: Boolean(plan?.customBranding),
-        prioritySupport: Boolean(plan?.prioritySupport),
+        analytics: Boolean(entitled?.canUseAnalytics),
+        featuredListing: Boolean(entitled?.featuredListing),
+        boostListing: Boolean(entitled?.canBoostListing),
+        customBranding: Boolean(entitled?.customBranding),
+        prioritySupport: Boolean(entitled?.prioritySupport),
         // The client put the advanced filter behind "Starter or Premium";
         // early access stays with Premium alone, so the top tier keeps a perk
         // of its own.
@@ -811,9 +861,9 @@ export class SubscriptionService {
       },
       actions: {
         canCreateListing: usage.canCreate,
-        canUseAnalytics: Boolean(plan?.canUseAnalytics),
-        canBoostListing: Boolean(plan?.canBoostListing),
-        canFeatureListing: Boolean(plan?.featuredListing),
+        canUseAnalytics: Boolean(entitled?.canUseAnalytics),
+        canBoostListing: Boolean(entitled?.canBoostListing),
+        canFeatureListing: Boolean(entitled?.featuredListing),
         canAccessEarlyListings: isPro,
         canUseAdvancedFilters: isPro,
         canToggleConfidentialControl: false,

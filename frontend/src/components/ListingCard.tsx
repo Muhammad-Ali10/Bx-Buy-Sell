@@ -166,6 +166,21 @@ const ListingCard = ({
   };
 
   const handleUnlockClick = () => {
+    /*
+     * The way in is the listing itself.
+     *
+     * The lock is about this listing, and the agreement that opens it is on
+     * the listing's own page. This used to send the viewer to the pricing
+     * page, which answers a question they had not asked and left the listing
+     * they were looking at behind.
+     *
+     * Somebody who has not registered at all is a different matter: they still
+     * have to do that first, so that lock keeps where it was going.
+     */
+    if (imageLockType === "CONFIDENTIAL_AGREEMENT" && listingLink) {
+      navigate(listingLink);
+      return;
+    }
     navigate(lockRedirectTo || "/pricing");
   };
 
@@ -275,7 +290,7 @@ const ListingCard = ({
                 a broken page; what they are missing is the agreement. */}
             <span className="text-white text-sm font-medium underline">
               {imageLockType === 'CONFIDENTIAL_AGREEMENT'
-                ? 'Accept Agreement To Unlock'
+                ? 'Confidential'
                 : 'Register To Unlock'}
             </span>
           </button>

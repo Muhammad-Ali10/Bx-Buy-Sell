@@ -1,3 +1,4 @@
+import { PENDING_SIGNUP_EMAIL_KEY } from "@/lib/emailConfirmation";
 import { useState } from "react";
 import { AuthLayout } from "@/components/AuthLayout";
 import { Button } from "@/components/ui/button";
@@ -72,9 +73,10 @@ const Register = () => {
       });
 
       if (result.success) {
-        toast.success("Account created successfully!");
-        // Next: confirm the email address, then the phone number.
-        navigate("/verify-otp");
+        // Not registered yet: the account is made once the emailed code is entered.
+        sessionStorage.setItem(PENDING_SIGNUP_EMAIL_KEY, result.email);
+        toast.success("We sent a code to your email.");
+        navigate("/verify-otp", { state: { email: result.email } });
       } else {
         toast.error(result.error || "Failed to create account");
       }

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { asAttachmentUrl } from "@/lib/downloadFile";
+import { asAttachmentUrl, downloadAttachment } from "@/lib/downloadFile";
 import docIcon from "@/assets/doc.svg";
 import labelIcon from "@/assets/label.svg";
 import reportIcon from "@/assets/report.svg";
@@ -1059,6 +1059,12 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
                           previews whichever formats it can read. */}
                       <a
                         href={asAttachmentUrl(file.url || file.content)}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          const source = file.url || file.content;
+                          const name = String(file.content || '').replace(/^📎\s*/, '').trim();
+                          void downloadAttachment(source, name || undefined);
+                        }}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-500 hover:underline"

@@ -1,27 +1,15 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { List, Heart, MessageSquare, User, Menu, ChevronRight } from "lucide-react";
+import { List, Heart, MessageSquare, User, Menu } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import logo from "@/assets/_App Icon 1 (2).png";
 import rocketIcon from "@/assets/roccket.svg";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
-import { getChatListingImage, getChatListingTitle } from "@/lib/chatListing";
 import {
-  PACKAGE_LABEL,
-  currentPackage,
-  pickerOrder,
+  UPGRADE_ROUTE,
   showUpgradeCard,
-  upgradeRoute,
   upgradeableListings,
 } from "@/lib/upgradeRoute";
 
@@ -39,13 +27,11 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
   const { user } = useAuth();
   const [isPro, setIsPro] = useState(false);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
-  const [pickerOpen, setPickerOpen] = useState(false);
 
   /*
-   * The member's own listings, for the upgrade card. A seller's packages are
-   * bought per listing, so these decide where Let's Go leads and whether there
-   * is anything left to upgrade. Cached for a minute: this sidebar is on every
-   * account page.
+   * The member's own listings, for the upgrade card: they decide whether there
+   * is anything left to upgrade, and so whether the card shows at all. Cached
+   * for a minute: this sidebar is on every account page.
    */
   const { data: ownListings = [], isFetched: listingsFetched } = useQuery<any[]>({
     queryKey: ["upgrade-card-listings", user?.id],
@@ -86,24 +72,12 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
   };
 
   /*
-   * A seller goes to a listing's own Manage Your Subscription page, as the
-   * client asked — straight there with one listing, by way of a choice with
-   * several. A buyer goes to the buyer plans. This sent everyone to /pricing,
-   * the old buyer-only page.
+   * Let's Go always opens Manage Your Subscription, as the client asked. It
+   * used to route per listing — one listing's own page, or a "which listing?"
+   * dialog with several — and before that it sent everyone to /pricing.
    */
   const handleUpgrade = () => {
-    const route = upgradeRoute(ownListings, user?.role);
-    if (route.kind === "pick") {
-      setPickerOpen(true);
-      return;
-    }
-    navigate(route.to);
-    onLinkClick?.();
-  };
-
-  const chooseListing = (listingId: string) => {
-    setPickerOpen(false);
-    navigate(`/manage-subscription/${listingId}`);
+    navigate(UPGRADE_ROUTE);
     onLinkClick?.();
   };
 
@@ -135,16 +109,7 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
       <div 
         className="flex-1 overflow-y-auto overflow-x-hidden sidebar-scrollable w-full flex flex-col pr-2 sm:pr-3 md:pr-4 pt-6 sm:pt-8 md:pt-10"
       >
-        {/* Logo */}
-        <div className="p-0 flex-shrink-0 mb-4 sm:mb-5 md:mb-6">
-          <Link to="/" className="flex items-center justify-start" onClick={onLinkClick}>
-            <img 
-              src={logo} 
-              alt="EX Logo" 
-              className="h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 object-contain"
-            />
-          </Link>
-        </div>
+        {/* No logo here: the EX mark sits in the top bar, as in the design. */}
 
         {/* Navigation */}
         <nav className="w-full flex flex-col gap-2 sm:gap-3 md:gap-4 mb-4 sm:mb-5 md:mb-6"
@@ -240,50 +205,6 @@ const SidebarContent = ({ onLinkClick }: { onLinkClick?: () => void }) => {
           </div>
         )}
       </div>
-
-      {/* Several listings: which one gets upgraded is the seller's call, not
-          a guess. */}
-      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
-        <DialogContent className="max-w-[440px] gap-0 overflow-hidden p-0">
-          <DialogHeader className="px-5 pt-5 pb-3 text-left">
-            <DialogTitle className="font-['Lufga'] text-[17px] font-semibold text-[#0F172A]">
-              Which listing do you want to upgrade?
-            </DialogTitle>
-            <DialogDescription className="font-['Lufga'] text-[12.5px] text-[#64748B]">
-              Packages and add-ons are chosen for each listing separately.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto px-3 pb-3">
-            {pickerOrder(ownListings).map((listing: any) => {
-              const image = getChatListingImage(listing);
-              return (
-                <button
-                  key={listing.id}
-                  type="button"
-                  onClick={() => chooseListing(listing.id)}
-                  className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left hover:bg-black/[0.04]"
-                >
-                  <div className="h-11 w-14 shrink-0 overflow-hidden rounded-lg bg-black/5">
-                    {image && (
-                      <img src={image} alt="" loading="lazy" className="h-full w-full object-cover" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="m-0 truncate font-['Lufga'] text-[13.5px] font-semibold text-[#0F172A]">
-                      {getChatListingTitle(listing) || "Untitled listing"}
-                    </p>
-                    <p className="m-0 font-['Lufga'] text-[11.5px] text-[#64748B]">
-                      {PACKAGE_LABEL[currentPackage(listing)]} package
-                      {String(listing.status).toUpperCase() === "DRAFT" ? " · Draft" : ""}
-                    </p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-black/40" />
-                </button>
-              );
-            })}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

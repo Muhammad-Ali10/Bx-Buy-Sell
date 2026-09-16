@@ -19,10 +19,10 @@ import {
 import { CURRENCY_CHOICE_NOTE } from "@/lib/listingMoney";
 
 /**
- * The currency chooser, in the menu bar and again in the footer.
- *
- * Both read and write the same stored choice, so changing one changes the
- * other. The ⓘ says what the choice does: amounts across the site are
+ * The currency chooser, in the menu bar of the public pages and again in the
+ * footer. The portal screens beside a sidebar leave it out of their bar, as
+ * the design does. Every copy reads and writes the same stored choice, so
+ * changing one changes the others. The ⓘ says what the choice does: amounts across the site are
  * converted into it, approximately, while each listing's own currency stays
  * the binding price.
  */
@@ -31,18 +31,30 @@ interface HeaderCurrencySelectProps {
   onDark?: boolean;
   /** Which way the explanation opens; up in the footer, at the foot of the page. */
   infoSide?: "top" | "bottom";
+  /**
+   * "bar" is the light grey pill the menu bar wears. "footer" is the outlined
+   * dark chip the design gives it under the footer's Currency label — same
+   * stored choice, different skin.
+   */
+  variant?: "bar" | "footer";
 }
 
-export const HeaderCurrencySelect = ({ onDark = false, infoSide = "bottom" }: HeaderCurrencySelectProps) => {
+export const HeaderCurrencySelect = ({
+  onDark = false,
+  infoSide = "bottom",
+  variant = "bar",
+}: HeaderCurrencySelectProps) => {
   const code = useDisplayCurrency();
   const symbol = getCurrencySymbol(code);
+  const isFooter = variant === "footer";
 
   return (
     <div
-      className="flex items-center gap-1 rounded-full pl-3 pr-2 py-1.5"
+      className="inline-flex items-center gap-1 rounded-full pl-3 pr-2 py-1.5"
       style={{
-        background: onDark ? "#D8D8D8" : "D8D8D8",
-        color: onDark ? "#000000" : "#000000",
+        background: isFooter ? "rgba(255, 255, 255, 0.06)" : "#D8D8D8",
+        border: isFooter ? "1px solid rgba(255, 255, 255, 0.2)" : undefined,
+        color: isFooter ? "#FFFFFF" : "#000000",
       }}
     >
       <DropdownMenu>

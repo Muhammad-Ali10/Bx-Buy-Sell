@@ -7,14 +7,27 @@ import { signInSchema, SignInSchemaType } from './dto/signin.dto';
 import { randomBytes } from 'crypto';
 import { VerifyOtpType } from './dto/verify.dto';
 import { InboxCodeService } from 'src/user/inbox-code.service';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { ActivityLogService } from 'src/activity-log/activity-log.service';
 import type { RequestOrigin } from 'src/activity-log/request-origin';
+/**
+ * What sign-in answers someone who signed up but never entered the emailed
+ * code. The browser watches for it and takes them back to the code page.
+ */
+export const SIGNUP_NOT_CONFIRMED =
+  'Please confirm your email to finish signing up. We have sent you a new code.';
+
+/** How long an unfinished sign-up is kept before it is thrown away. */
+const PENDING_SIGNUP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class AuthService {
   constructor(
     private userService: UserService,
     private jwtService: JwtService,
     private readonly inboxCode: InboxCodeService,
+    /** Sign-ups waiting for their emailed code. */
+    private readonly db: PrismaService,
     /** Sign-ins, sign-outs and password changes go into the member's log. */
     @Optional() private readonly activityLog?: ActivityLogService,
   ) {}
@@ -32,38 +45,80 @@ export class AuthService {
       throw new HttpException(`User Already Exists`, HttpStatus.CONFLICT);
 
     const hash = await this.hashData(password);
+    const address = UserService.normalizeEmail(email);
 
     /*
-     * `verified` is left at the schema's default of false.
-     *
-     * It used to be set true here for every new account, which made the flag
-     * mean "has an account" rather than "has proved who they are" — and the
-     * listing page drew an "ID Verified" badge from it. Thirty-six of the
-     * forty-eight members carry it today without a single identity check
-     * having been run against any of them.
-     *
-     * The one place that may set it is the identity service, when the provider
-     * comes back approved.
+     * Nothing is registered yet. The details wait beside the emailed code, and
+     * the account is made only once the code comes back right (`verifyOTP`).
+     * Before, the account was created — and signed in — right here, so the
+     * code was a step anyone could simply walk away from.
      */
-    const payload = {
-      role: process.env.DEFAULT_ROLE || 'USER',
-      email: UserService.normalizeEmail(email),
-      password_hash: hash,
+    await this.db.pendingSignup.deleteMany({
+      where: { created_at: { lt: new Date(Date.now() - PENDING_SIGNUP_TTL_MS) } },
+    });
+    const details = {
       first_name: body.first_name,
       last_name: body.last_name,
+      password_hash: hash,
+      business_name: body.business_name?.trim() || null,
     };
-
-    const user = await this.userService.createUser(payload);
-
-    let formattedUser = this.formatResponse(user);
-    const { accessToken, refreshToken } = await this.getTokens(user);
-
-    const hashedToken = await this.hashData(refreshToken);
-
-    const loggedInUser = await this.userService.updateUser(user.id, {
-      refresh_token: hashedToken,
+    const pending = await this.db.pendingSignup.upsert({
+      where: { email: address },
+      create: { email: address, ...details },
+      update: details,
     });
-    formattedUser = this.formatResponse(loggedInUser);
+
+    try {
+      const sent = await this.inboxCode.send(pending, 'verify', 'signup');
+      return { pending: true, email: address, ...sent };
+    } catch (error) {
+      // The form sent again within the minute: the code already sent still works.
+      if (/wait \d+ seconds?/i.test(String((error as any)?.message ?? ''))) {
+        return { pending: true, email: address, codeAlreadySent: true };
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * A confirmed sign-up becomes an account, signed in — what `signUp` used to
+   * do before the code had been checked.
+   *
+   * `verified` is left at the schema's default of false: that is the identity
+   * badge, and only the identity service may set it. The address, though, has
+   * just been proved, so `is_email_verified` starts true.
+   */
+  private async completeSignup(
+    pending: {
+      id: string;
+      email: string;
+      first_name: string;
+      last_name: string;
+      password_hash: string;
+      business_name?: string | null;
+    },
+    origin?: RequestOrigin,
+  ) {
+    if (await this.isUserExist(pending.email)) {
+      await this.db.pendingSignup.delete({ where: { id: pending.id } }).catch(() => undefined);
+      throw new HttpException(`User Already Exists`, HttpStatus.CONFLICT);
+    }
+
+    const user = await this.userService.createUser({
+      role: process.env.DEFAULT_ROLE || 'USER',
+      email: pending.email,
+      password_hash: pending.password_hash,
+      first_name: pending.first_name,
+      last_name: pending.last_name,
+      ...(pending.business_name ? { business_name: pending.business_name } : {}),
+      is_email_verified: true,
+    });
+    await this.db.pendingSignup.delete({ where: { id: pending.id } }).catch(() => undefined);
+
+    const { accessToken, refreshToken } = await this.getTokens(user);
+    const loggedInUser = await this.userService.updateUser(user.id, {
+      refresh_token: await this.hashData(refreshToken),
+    });
 
     void this.activityLog?.record({
       actorId: user.id,
@@ -76,8 +131,8 @@ export class AuthService {
     });
 
     return {
-      user: formattedUser,
-      tokens: { accessToken, refreshToken: refreshToken },
+      user: this.formatResponse(loggedInUser),
+      tokens: { accessToken, refreshToken },
     };
   }
 
@@ -107,6 +162,21 @@ export class AuthService {
             // Signing in matters more than the migration; it will be retried
             // on the next successful sign-in.
           });
+      }
+    }
+
+    /*
+     * Signed up but never entered the emailed code: there is no account yet.
+     * With the password they chose, send a fresh code and say so, so the page
+     * can take them back to it instead of reporting a wrong password.
+     */
+    if (!user) {
+      const pending = await this.db.pendingSignup.findUnique({
+        where: { email: UserService.normalizeEmail(email) },
+      });
+      if (pending && (await bcrypt.compare(password, pending.password_hash))) {
+        await this.inboxCode.send(pending, 'verify', 'signup').catch(() => undefined);
+        throw new HttpException(SIGNUP_NOT_CONFIRMED, HttpStatus.CONFLICT);
       }
     }
 
@@ -176,16 +246,38 @@ export class AuthService {
    * out who is registered.
    */
   async getOTP(email: string) {
-    const user = await this.userService.findOneByEmail(email);
-    if (user && !user.is_email_verified) {
-      await this.inboxCode.send(user, 'verify');
+    // A sign-up still waiting for its code is sent a fresh one.
+    const pending = await this.db.pendingSignup.findUnique({
+      where: { email: UserService.normalizeEmail(email) },
+    });
+    if (pending) {
+      await this.inboxCode.send(pending, 'verify', 'signup');
+    } else {
+      const user = await this.userService.findOneByEmail(email);
+      if (user && !user.is_email_verified) {
+        await this.inboxCode.send(user, 'verify');
+      }
     }
     return { message: 'If this address has an account, a code is on its way.', success: true };
   }
 
-  /** Confirm an address with its emailed code; the public form of `me/email/confirm`. */
-  async verifyOTP(body: VerifyOtpType) {
+  /**
+   * Confirm an address with its emailed code; the public form of
+   * `me/email/confirm`.
+   *
+   * For a sign-up this is the moment the account is made: the details waiting
+   * beside the code become a User, already confirmed, and it is signed in.
+   */
+  async verifyOTP(body: VerifyOtpType, origin?: RequestOrigin) {
     const { otp_code, email } = body;
+    const pending = await this.db.pendingSignup.findUnique({
+      where: { email: UserService.normalizeEmail(email) },
+    });
+    if (pending) {
+      await this.inboxCode.check(pending, otp_code, true, 'signup');
+      return this.completeSignup(pending, origin);
+    }
+
     const user = await this.userService.findOneByEmail(email);
     if (!user) {
       throw new HttpException('That code is not right.', HttpStatus.BAD_REQUEST);

@@ -186,10 +186,26 @@ describe('confidential access building blocks', () => {
       expect(emitted[0].payload.metadata.kind).toBe('CONFIDENTIAL_ACCESS_APPROVED');
     });
 
-    it('are posted once, however often the decision is repeated', async () => {
+/*
+     * Each notice describes something that has just changed, and the caller is
+     * the one who knows whether anything did. This used to refuse to write a
+     * notice that appeared anywhere earlier in the conversation, which is why
+     * access granted, revoked and granted again said "granted" only once.
+     */
+    it('are written again when the same thing happens again', async () => {
       const { db, store } = fakeDb();
-      await postAccessNotice(db, 'chat-1', 'CONFIDENTIAL_ACCESS_REQUESTED', BUYER);
-      await postAccessNotice(db, 'chat-1', 'CONFIDENTIAL_ACCESS_REQUESTED', BUYER);
+      await postAccessNotice(db, 'chat-1', 'CONFIDENTIAL_ACCESS_APPROVED', BUYER);
+      await postAccessNotice(db, 'chat-1', 'CONFIDENTIAL_ACCESS_APPROVED', BUYER);
+      expect(store.messages).toHaveLength(2);
+      expect(emitted).toHaveLength(2);
+    });
+
+    it('are written once where a caller is filling a gap', async () => {
+      // The repair script, which may be run again over the same conversations.
+      const { db, store } = fakeDb();
+      const once = { onlyIfMissing: true };
+      await postAccessNotice(db, 'chat-1', 'CONFIDENTIAL_ACCESS_REQUESTED', BUYER, once);
+      await postAccessNotice(db, 'chat-1', 'CONFIDENTIAL_ACCESS_REQUESTED', BUYER, once);
       expect(store.messages).toHaveLength(1);
       expect(emitted).toHaveLength(1);
     });

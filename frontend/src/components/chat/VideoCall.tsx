@@ -58,6 +58,20 @@ export const VideoCall = ({
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const initializingRef = useRef<boolean>(false); // Prevent multiple simultaneous initialization attempts
   const offerCreatedRef = useRef<boolean>(false); // Track if offer has been created to prevent duplicates
+  /**
+   * Route details that arrived before they could be used.
+   *
+   * The two sides send each other every way they might be reached, and those
+   * cannot be handed to the browser until it knows what the other side
+   * proposed. They used to be thrown away when they came too early — the code
+   * even said "will add when ready" and then dropped them — and a call whose
+   * only workable route happened to arrive first simply never connected.
+   */
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  /** True while an offer of ours is waiting for an answer. */
+  const makingOfferRef = useRef(false);
+  /** Resolves when the camera has finished opening, for whoever asked second. */
+  const openingCameraRef = useRef<Promise<void> | null>(null);
   
   // Use refs to store latest values for handlers (defined early so they can be used in functions)
   const toUserIdRef = useRef(toUserId);
@@ -84,20 +98,155 @@ export const VideoCall = ({
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string>('Initializing...');
+  /**
+   * The other side's video has not arrived, and by now it probably will not.
+   *
+   * Until this, a call that could not find a route showed "Connecting video…"
+   * for as long as the caller was willing to wait — no message, no way to try
+   * again, nothing to tell them whether to keep waiting.
+   */
+  const [connectingTooLong, setConnectingTooLong] = useState(false);
+  /**
+   * How long the call has been up, in seconds.
+   *
+   * The timer below has always counted, and has always thrown: nothing
+   * declared this, so every tick raised "setCallDuration is not defined" in the
+   * console and the call's length was never shown.
+   */
+  const [callDuration, setCallDuration] = useState(0);
 
-  // WebRTC Configuration
+  /*
+   * Where the two browsers look for a way to reach each other.
+   *
+   * STUN only tells each side what its own public address is. Where both
+   * networks are strict — an office firewall, mobile data — there is no direct
+   * route to find, and the call sits on "Connecting video…" for ever. What is
+   * missing then is a TURN server, which relays the call when nothing else
+   * works. There is none yet; it is read from the environment so that setting
+   * one up is a matter of configuration rather than code.
+   */
+  const turnUrls = String(import.meta.env.VITE_TURN_URL || '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
   const rtcConfiguration: RTCConfiguration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      ...(turnUrls.length > 0
+        ? [
+            {
+              urls: turnUrls,
+              username: import.meta.env.VITE_TURN_USERNAME as string | undefined,
+              credential: import.meta.env.VITE_TURN_CREDENTIAL as string | undefined,
+            } as RTCIceServer,
+          ]
+        : []),
     ],
+  };
+
+  /** Keep a route detail until the browser is ready for it. */
+  const rememberCandidate = (candidate: RTCIceCandidateInit) => {
+    pendingCandidatesRef.current.push(candidate);
+    console.log('🧊 VideoCall: Stored an ICE candidate for later', pendingCandidatesRef.current.length);
+  };
+
+  /** Hand over everything that was waiting, once the other side is known. */
+  const flushPendingCandidates = async () => {
+    const pc = peerConnectionRef.current;
+    if (!pc || !pc.remoteDescription || pendingCandidatesRef.current.length === 0) return;
+    const waiting = pendingCandidatesRef.current;
+    pendingCandidatesRef.current = [];
+    console.log('🧊 VideoCall: Adding', waiting.length, 'stored ICE candidate(s)');
+    for (const candidate of waiting) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.warn('⚠️ VideoCall: Could not add a stored ICE candidate:', error);
+      }
+    }
+  };
+
+  /*
+   * Give the element the stream whenever both exist.
+   *
+   * The stream can arrive while a different screen is up — a call still
+   * ringing — and the element it belongs to is then not on the page. It used
+   * to be handed over once, at that moment, and never again: the stream was
+   * running and the picture stayed black.
+   */
+  useEffect(() => {
+    const video = localVideoRef.current;
+    const stream = localStreamRef.current;
+    if (!video || !stream || video.srcObject === stream) return;
+    if (stream.getVideoTracks().length === 0) return;
+    video.srcObject = stream;
+    video.muted = true;
+    video.play().catch((error) => console.warn('⚠️ VideoCall: Self-view would not play:', error));
+    console.log('✅ VideoCall: Self-view attached to the element');
+  }, [localStreamActive, isInitialized, callStatus, localVideoEnabled]);
+
+  useEffect(() => {
+    const video = remoteVideoRef.current;
+    const stream = remoteStreamRef.current;
+    if (!video || !stream || video.srcObject === stream) return;
+    video.srcObject = stream;
+    video.play().catch((error) => console.warn('⚠️ VideoCall: Remote video would not play:', error));
+    console.log('✅ VideoCall: Remote stream attached to the element');
+  }, [remoteStreamActive, callStatus, remoteVideoEnabled]);
+
+  /*
+   * Say something when nothing comes through.
+   *
+   * Twenty seconds is far longer than a working call needs and short enough
+   * that nobody sits there wondering. The count starts again whenever the call
+   * moves on, so a slow but successful connection is never accused.
+   */
+  useEffect(() => {
+    if (remoteStreamActive || error || callStatus !== 'connected') {
+      setConnectingTooLong(false);
+      return;
+    }
+    const timer = setTimeout(() => setConnectingTooLong(true), 20000);
+    return () => clearTimeout(timer);
+  }, [remoteStreamActive, error, callStatus]);
+
+  /**
+   * Look for a route again, from the beginning.
+   *
+   * Both sides ask their browser to start the search over; the side that
+   * placed the call also offers again, which is what carries the new routes
+   * across.
+   */
+  const retryConnection = async () => {
+    const pc = peerConnectionRef.current;
+    setConnectingTooLong(false);
+    if (!pc) return;
+    try {
+      pc.restartIce?.();
+      if (!isIncomingRef.current) {
+        offerCreatedRef.current = false;
+        await createOffer();
+      }
+      console.log('🔄 VideoCall: Looking for a route again');
+    } catch (error) {
+      console.error('❌ VideoCall: Could not start again:', error);
+    }
   };
 
   // Initialize local media stream
   const initializeLocalStream = async (retryAudioOnly = false) => {
-    // Prevent multiple simultaneous initialization attempts
+    /*
+     * Someone else asked for the camera first: wait for it, do not walk away.
+     *
+     * This used to return at once. The incoming offer then went on without a
+     * camera, the answer was built with no tracks in it, and the caller sat
+     * looking at "Connecting video…" while this side's camera opened seconds
+     * later with nobody to tell.
+     */
     if (initializingRef.current) {
-      console.log('⚠️ VideoCall: Already initializing, skipping duplicate call');
+      console.log('⏳ VideoCall: The camera is already opening; waiting for it');
+      await openingCameraRef.current;
       return;
     }
     
@@ -108,6 +257,11 @@ export const VideoCall = ({
     }
     
     initializingRef.current = true;
+    // What anybody else asking for the camera meanwhile will wait on.
+    let cameraReady: () => void = () => {};
+    openingCameraRef.current = new Promise<void>((resolve) => {
+      cameraReady = resolve;
+    });
     
     try {
       console.log('📹 VideoCall: Requesting local media stream...', { 
@@ -221,27 +375,58 @@ export const VideoCall = ({
       setLocalStreamActive(true);
       console.log('✅ VideoCall: Got local media stream');
 
-      // Display local video (if available)
-      if (localVideoRef.current) {
-        if (stream.getVideoTracks().length > 0) {
-          localVideoRef.current.srcObject = stream;
-          localVideoRef.current.muted = true; // Mute local to prevent echo
-          await localVideoRef.current.play();
-          setIsInitialized(true);
-          console.log('✅ VideoCall: Local video playing');
-        } else {
-          // Audio-only mode - show placeholder
-          localVideoRef.current.srcObject = null;
-          setIsInitialized(true);
-          console.log('✅ VideoCall: Audio-only mode (no video)');
+      /*
+       * A connection built before this has nothing of ours in it.
+       *
+       * That is how a call ended up established with one side blank: the offer
+       * arrived first, the connection was made without a camera, and when the
+       * camera opened its tracks went nowhere. Adding them here is what starts
+       * the exchange again — `onnegotiationneeded` sends the new offer.
+       */
+      const connection = peerConnectionRef.current;
+      if (connection) {
+        const senders = connection.getSenders();
+        for (const track of stream.getTracks()) {
+          if (track.readyState !== 'live') continue;
+          if (senders.some((sender) => sender.track === track)) continue;
+          try {
+            connection.addTrack(track, stream);
+            console.log('✅ VideoCall: Added a late local track:', track.kind);
+          } catch (addError) {
+            console.warn('⚠️ VideoCall: Could not add a late track:', addError);
+          }
         }
+      }
+
+      /*
+       * The camera is open; that is what "initialized" means.
+       *
+       * This used to be said only when the little self-view happened to be on
+       * screen at that very moment. While a call was still ringing it was not,
+       * so the camera opened, the call went ahead — and the self-view showed
+       * "Loading camera…" for the rest of it, because nothing ever said
+       * otherwise. Putting the picture into the element is a separate job, done
+       * by the effect below whenever both exist.
+       */
+      setIsInitialized(true);
+      if (localVideoRef.current && stream.getVideoTracks().length > 0) {
+        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.muted = true; // Mute local to prevent echo
+        await localVideoRef.current.play().catch((playError) =>
+          console.warn('⚠️ VideoCall: Local video would not play:', playError),
+        );
+        console.log('✅ VideoCall: Local video playing');
+      } else if (stream.getVideoTracks().length === 0) {
+        console.log('✅ VideoCall: Audio-only mode (no video)');
       }
       
       // Clear any previous errors
       setError(null);
       initializingRef.current = false;
+      cameraReady();
     } catch (error: any) {
       initializingRef.current = false;
+      cameraReady();
       console.error('❌ VideoCall: Error accessing media:', {
         name: error.name,
         message: error.message,
@@ -334,7 +519,9 @@ export const VideoCall = ({
           setRemoteStreamActive(true);
           console.log('✅ VideoCall: Remote stream received, tracks:', event.streams[0].getTracks().map(t => `${t.kind}:${t.enabled ? 'on' : 'off'}`));
           
-          if (remoteVideoRef.current) {
+          // The audio track and the video track arrive separately, in the
+          // same stream; attaching it twice interrupts the first play().
+          if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== event.streams[0]) {
             remoteVideoRef.current.srcObject = event.streams[0];
             remoteVideoRef.current.play().catch(err => {
               console.error('❌ Error playing remote video:', err);
@@ -345,6 +532,28 @@ export const VideoCall = ({
           }
         } else {
           console.warn('⚠️ VideoCall: Received track but no stream');
+        }
+      };
+
+      /*
+       * A track added after the first offer — a camera permission granted
+       * slowly is enough — has to be offered again, or the other side is never
+       * told about it and the call stays connected with nothing to show.
+       */
+      peerConnection.onnegotiationneeded = async () => {
+        if (peerConnection !== peerConnectionRef.current) return;
+        if (peerConnection.signalingState !== 'stable') return;
+        // The first offer belongs to the call flow itself. This is only for
+        // what changes afterwards, once the two sides have agreed once.
+        if (!peerConnection.currentRemoteDescription) return;
+        console.log('🔄 VideoCall: Something changed, offering again');
+        try {
+          makingOfferRef.current = true;
+          await createOffer();
+        } catch (error) {
+          console.error('❌ VideoCall: Could not offer again:', error);
+        } finally {
+          makingOfferRef.current = false;
         }
       };
 
@@ -545,6 +754,7 @@ export const VideoCall = ({
       
       await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(offer));
       console.log('✅ VideoCall: Remote description set');
+      await flushPendingCandidates();
       
       const answer = await peerConnectionRef.current.createAnswer();
       await peerConnectionRef.current.setLocalDescription(answer);
@@ -580,6 +790,27 @@ export const VideoCall = ({
 
     console.log('📥 VideoCall: Received offer from:', data.from);
     
+    /*
+     * Both sides offered at the same moment.
+     *
+     * Someone has to give way or neither settles. The side that answered the
+     * call takes back its own offer and accepts the one that arrived; the side
+     * that placed the call ignores it and waits for its answer.
+     */
+    const existing = peerConnectionRef.current;
+    const collision =
+      makingOfferRef.current || (existing != null && existing.signalingState !== 'stable');
+    if (collision) {
+      if (!isIncomingRef.current) {
+        console.log('⚠️ VideoCall: Our offer is still in flight, ignoring theirs');
+        return;
+      }
+      console.log('↩️ VideoCall: Taking back our offer and accepting theirs');
+      await existing?.setLocalDescription({ type: 'rollback' } as RTCSessionDescriptionInit).catch(
+        (error) => console.warn('⚠️ VideoCall: Could not take back our offer:', error),
+      );
+    }
+
     // Ensure we have local stream
     if (!localStreamRef.current) {
       console.log('📹 VideoCall: Initializing local stream for incoming offer');
@@ -616,6 +847,7 @@ export const VideoCall = ({
       try {
         await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
         console.log('✅ VideoCall: Remote description set');
+        await flushPendingCandidates();
         
         const answer = await peerConnectionRef.current.createAnswer();
         await peerConnectionRef.current.setLocalDescription(answer);
@@ -654,6 +886,7 @@ export const VideoCall = ({
       try {
         await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
         console.log('✅ VideoCall: Answer set as remote description');
+        await flushPendingCandidates();
       } catch (error) {
         console.error('❌ VideoCall: Error setting remote description:', error);
       }
@@ -672,8 +905,10 @@ export const VideoCall = ({
     
     console.log('🧊 VideoCall: Received ICE candidate from:', data.from);
     
-    if (!peerConnectionRef.current) {
-      console.warn('⚠️ VideoCall: Received ICE candidate but no peer connection yet, will add when ready');
+    // Not ready for it yet: keep it rather than lose it. Everything stored
+    // here is handed over as soon as the other side's description is in.
+    if (!peerConnectionRef.current || !peerConnectionRef.current.remoteDescription) {
+      if (data.candidate) rememberCandidate(data.candidate);
       return;
     }
     
@@ -1139,8 +1374,22 @@ export const VideoCall = ({
               </div>
               <p className="text-white text-xl mb-2">{otherUserName}</p>
               <p className="text-gray-400">
-                {callStatus === 'connected' ? (remoteVideoEnabled ? 'Connecting video...' : 'Video off') : getStatusText() || 'Connecting...'}
+                {callStatus === 'connected'
+                  ? remoteVideoEnabled
+                    ? connectingTooLong
+                      ? 'The video is not coming through. This is usually the network at one end.'
+                      : 'Connecting video...'
+                    : 'Video off'
+                  : getStatusText() || 'Connecting...'}
               </p>
+              {connectingTooLong && callStatus === 'connected' && remoteVideoEnabled && (
+                <Button
+                  onClick={retryConnection}
+                  className="mt-4 bg-white/10 hover:bg-white/20 text-white"
+                >
+                  Try again
+                </Button>
+              )}
             </div>
           </div>
         )}

@@ -16,6 +16,8 @@ export const signUpSchema = z.object({
   password: z.string().min(4),
   confirm_password: z.string().min(4),
   email: z.string().email().min(4).trim().toLowerCase(),
+  /** The seller sign-up's company name, kept until the account is made. */
+  business_name: z.string().trim().max(120).optional(),
 });
 
 export type SignUpSchemaType = z.infer<typeof signUpSchema>;

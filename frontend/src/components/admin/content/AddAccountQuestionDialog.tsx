@@ -60,6 +60,7 @@ export const AddAccountQuestionDialog = ({ open, onOpenChange, categoryId }: Add
         options: optionsArray,
         required,
         categoryId,
+        hint: hintText.trim(),
       },
       {
         onSuccess: () => {
