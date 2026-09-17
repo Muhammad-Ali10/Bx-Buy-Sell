@@ -213,15 +213,15 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
 
           <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6 mb-8 sm:mb-12 text-xs sm:text-sm px-4">
             <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-black rounded-full" />
+              <div className="w-2 h-2 border border-black bg-[#c6fe1f] rounded-full" />
               <span className="text-black">Secure Payments with EXPay</span>
-            </div>
+            </div> 
             <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-black rounded-full" />
+              <div className="w-2 h-2 border border-black bg-[#c6fe1f] rounded-full" />
               <span className="text-black">Simple 3-step process</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-black rounded-full" />
+              <div className="w-2 h-2 border border-black bg-[#c6fe1f] rounded-full" />
               <span className="text-black">Start in 1 Minute</span>
             </div>
           </div>
@@ -457,7 +457,7 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
             <img
               src={heroCard3}
               alt="Archived Chats"
-              className="hidden sm:block absolute left-4 sm:left-2 md:left-4 top-0 w-48 sm:w-56 md:w-72 hover:scale-105 transition-transform z-20"
+              className="hidden sm:block absolute left-4 sm:left-2 md:-left-4 top-0 w-48 sm:w-56 md:w-72 hover:scale-105 transition-transform z-20"
               decoding="async"
               sizes="(max-width: 1024px) 40vw, 320px"
             />
@@ -466,7 +466,7 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
             <img
               src={heroCard2}
               alt="Chat Details"
-              className="hidden sm:block absolute right-0 sm:-right-2 md:right-0 -top-4 w-52 sm:w-64 md:w-80 hover:scale-105 transition-transform z-20"
+              className="hidden sm:block absolute right-0 sm:-right-2 md:-right-10 -top-4 w-52 sm:w-64 md:w-80 hover:scale-105 transition-transform z-20"
               decoding="async"
               sizes="(max-width: 1024px) 45vw, 360px"
             />

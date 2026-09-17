@@ -8,6 +8,7 @@ import { normalizeDomainAnswer } from "@/lib/domainUtils";
 import { serializeMediaUrls } from "@/lib/mediaUtils";
 import { isQuestionHidden, isQuestionRequired } from "@/lib/questionRequired";
 import { usePlans } from "@/hooks/usePlans";
+import { LockNew, UserLock } from "@/assets/svg";
 import {
   Ban,
   Check,
@@ -240,26 +241,26 @@ export const PackagesStep = ({
   // Helper function to transform question answers to Question format
   const transformQuestions = (questions: any[], answers: Record<string, any>, answerFor: string) => {
     if (!questions || !Array.isArray(questions)) return [];
-    
+
     // Valid answer types according to backend DTO
     const validAnswerTypes = ['TEXT', 'SELECT', 'CHECKBOX', 'BOOLEAN', 'NUMBER', 'FILE', 'PHOTO', 'DATE', 'URL'];
-    
+
     return questions.map((question) => {
       const answer = answers[question.id];
-      
+
       // Skip unanswered questions (but allow 0 and false as valid answers)
       if (answer === null || answer === undefined || answer === '' || (Array.isArray(answer) && answer.length === 0)) {
         return null;
       }
-      
+
       // Convert answer to string and ensure it's at least 2 characters
       const isArrayAnswer = Array.isArray(answer);
       const isObjectArrayAnswer =
         isArrayAnswer && answer.some((item) => typeof item === "object" && item !== null);
       const answerValue = isArrayAnswer
         ? (answer as any[]).map((item) =>
-            typeof item === "object" && item !== null ? JSON.stringify(item) : String(item),
-          )
+          typeof item === "object" && item !== null ? JSON.stringify(item) : String(item),
+        )
         : String(answer);
       // Photos/attachments are stored as a JSON array of URLs (comma-safe, explicit
       // multi-value) via the shared media helper; everything else keeps its format.
@@ -271,13 +272,13 @@ export const PackagesStep = ({
         : isObjectArrayAnswer
           ? JSON.stringify(answer)
           : (Array.isArray(answerValue) ? answerValue.join(", ") : answerValue);
-      
+
       // Skip if answer is too short (backend requires min 2 characters)
       if (answerStr.length < 2) {
         console.warn(`Skipping question "${question.question}" - answer too short: "${answerStr}"`);
         return null;
       }
-      
+
       // Map answer_type: if it's not in the valid list, default to TEXT
       // This handles cases like 'DATE' which should be converted to 'TEXT'
       let answerType = question.answer_type || 'TEXT';
@@ -285,14 +286,14 @@ export const PackagesStep = ({
         console.warn(`Invalid answer_type "${answerType}" for question "${question.question}", converting to TEXT`);
         answerType = 'TEXT';
       }
-      
+
       // Ensure question text is at least 2 characters if provided
       const questionText = question.question || '';
       if (questionText && questionText.length < 2) {
         console.warn(`Question text too short: "${questionText}", skipping`);
         return null;
       }
-      
+
       const rawAnswer =
         question.answer_type === "CHECKBOX" && Array.isArray(answerValue)
           ? answerValue
@@ -325,7 +326,7 @@ export const PackagesStep = ({
         // before this was written down hold US dollars instead.
         amountsIn: formData.currency || 'USD',
       };
-      
+
       return [{
         type: 'yearly' as const, // Backend requires 'monthly' or 'yearly'
         name: '__FINANCIAL_TABLE__', // Special marker name
@@ -334,10 +335,10 @@ export const PackagesStep = ({
         net_profit: '0',
       }];
     }
-    
+
     // Fallback to old format for backward compatibility
     if (!formData.months || !Array.isArray(formData.months)) return [];
-    
+
     return formData.months
       .filter((month: any) => {
         const revenue = parseFloat(month.revenue || month.revenue2 || '0');
@@ -348,7 +349,7 @@ export const PackagesStep = ({
         const revenue = parseFloat(month.revenue || month.revenue2 || '0');
         const cost = parseFloat(month.cost || '0');
         const profit = revenue - cost;
-        
+
         return {
           type: formData.financialType === 'yearly' ? 'yearly' : 'monthly',
           name: month.period || month.month || 'Financial Period',
@@ -362,7 +363,7 @@ export const PackagesStep = ({
   // Helper function to transform social accounts
   const transformSocialAccounts = () => {
     if (!formData.socialAccounts || typeof formData.socialAccounts !== 'object') return [];
-    
+
     const accounts: any[] = [];
     Object.keys(formData.socialAccounts).forEach((platform) => {
       const accountData = formData.socialAccounts[platform];
@@ -394,7 +395,7 @@ export const PackagesStep = ({
         option: [],
       });
     });
-    
+
     return accounts;
   };
 
@@ -424,19 +425,19 @@ export const PackagesStep = ({
     }
 
     setIsSubmitting(true);
-    
+
     try {
       // Fetch categories and tools to get names from IDs
       const categoriesResponse = await apiClient.getCategories();
       const toolsResponse = await apiClient.getTools();
-      
-      const categories = categoriesResponse.success && Array.isArray(categoriesResponse.data) 
-        ? categoriesResponse.data 
+
+      const categories = categoriesResponse.success && Array.isArray(categoriesResponse.data)
+        ? categoriesResponse.data
         : [];
-      const tools = toolsResponse.success && Array.isArray(toolsResponse.data) 
-        ? toolsResponse.data 
+      const tools = toolsResponse.success && Array.isArray(toolsResponse.data)
+        ? toolsResponse.data
         : [];
-      
+
       // Transform category from ID to { name }
       let categoryArray: any[] = [];
       if (formData.category) {
@@ -454,13 +455,13 @@ export const PackagesStep = ({
           }
         }
       }
-      
+
       // Transform tools from IDs to { name }
       const toolsArray = (formData.tools || []).map((toolId: string) => {
         const tool = tools.find((t: any) => t.id === toolId);
         return { name: tool?.name || toolId };
       });
-      
+
       // Transform all question-based data
       const brandArray = transformQuestions(brandQuestions || [], formData, 'BRAND');
       const statisticsArray = transformQuestions(statisticQuestions || [], formData, 'STATISTIC');
@@ -471,17 +472,17 @@ export const PackagesStep = ({
       const socialAccountPlatformsArray = transformSocialAccounts();
       // Transform account questions (questions created by admin)
       const accountQuestionsArray = transformQuestions(
-        accountQuestions || [], 
-        formData.socialAccountQuestions || {}, 
+        accountQuestions || [],
+        formData.socialAccountQuestions || {},
         'SOCIAL'
       );
       // Combine social account platforms and account questions
       const socialAccountArray = [...socialAccountPlatformsArray, ...accountQuestionsArray];
-      
+
       // Transform financials
       const financialsArray = transformFinancials();
       console.log('💰 Transformed financials array:', JSON.stringify(financialsArray, null, 2));
-      
+
       // Prepare listing data for API
       // Backend REQUIRES these fields as arrays (even if empty):
       // - productQuestion, managementQuestion, social_account
@@ -518,7 +519,7 @@ export const PackagesStep = ({
       if (formData.portfolioLink && formData.portfolioLink.trim()) {
         listingPayload.portfolioLink = formData.portfolioLink.trim();
       }
-      
+
       console.log("Transformed listing payload:", JSON.stringify(listingPayload, null, 2));
 
       console.log("Submitting listing:", listingPayload);
@@ -536,11 +537,11 @@ export const PackagesStep = ({
         clearDraftListing();
         const statusMessage = listingId
           ? (status === 'PUBLISH'
-              ? "Listing updated and published successfully!"
-              : "Listing updated successfully!")
+            ? "Listing updated and published successfully!"
+            : "Listing updated successfully!")
           : (status === 'PUBLISH'
-              ? "Listing published successfully!"
-              : "Listing created successfully! You can publish it later from My Listings.");
+            ? "Listing published successfully!"
+            : "Listing created successfully! You can publish it later from My Listings.");
         toast.success(statusMessage);
         console.log(listingId ? "Updated listing:" : "Created listing:", response.data);
 
@@ -661,7 +662,7 @@ export const PackagesStep = ({
       <div className="w-full max-w-3xl mx-auto rounded-3xl border border-border bg-card p-6 md:p-10">
         <div className="flex flex-col items-center text-center gap-4">
           <div className="h-20 w-20 rounded-full bg-accent flex items-center justify-center">
-            <UserRoundCheck className="h-9 w-9 text-accent-foreground" />
+            <UserLock className="h-9 w-9 text-accent-foreground" />
           </div>
           <h1 className="text-2xl md:text-3xl font-bold">Confidentiality Options</h1>
           <p className="text-sm text-muted-foreground max-w-lg">
@@ -705,30 +706,30 @@ export const PackagesStep = ({
           </div>
 
           {approveOpen && (
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-xl bg-muted/40 p-4">
-              <div className="flex items-center gap-2 font-semibold text-sm mb-2">
-                <Ban className="h-4 w-4" />
-                When Disabled
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-xl bg-muted/40 p-4">
+                <div className="flex items-center gap-2 font-semibold text-sm mb-2">
+                  <Ban className="h-4 w-4" />
+                  When Disabled
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Buyers can access confidential listing details immediately after accepting the
+                  official confidentiality agreement provided by the Company Exchange Marketplace.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Buyers can access confidential listing details immediately after accepting the
-                official confidentiality agreement provided by the Company Exchange Marketplace.
-              </p>
-            </div>
-            <div className="rounded-xl bg-muted/40 p-4">
-              <div className="flex items-center gap-2 font-semibold text-sm mb-2">
-                <CircleCheck className="h-4 w-4" />
-                When Enabled
+              <div className="rounded-xl bg-muted/40 p-4">
+                <div className="flex items-center gap-2 font-semibold text-sm mb-2">
+                  <CircleCheck className="h-4 w-4" />
+                  When Enabled
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Buyers must first accept our confidentiality agreement and then be approved by you
+                  before they can access confidential listing details. This option may significantly
+                  slow down the sales process and is generally not recommended unless you wish to
+                  personally review buyers or require an additional NDA.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Buyers must first accept our confidentiality agreement and then be approved by you
-                before they can access confidential listing details. This option may significantly
-                slow down the sales process and is generally not recommended unless you wish to
-                personally review buyers or require an additional NDA.
-              </p>
             </div>
-          </div>
           )}
         </div>
 
@@ -753,7 +754,7 @@ export const PackagesStep = ({
       <div className="w-full max-w-3xl mx-auto rounded-3xl border border-border bg-card p-6 md:p-10">
         <div className="flex flex-col items-center text-center gap-4">
           <div className="h-20 w-20 rounded-full bg-accent flex items-center justify-center">
-            <Lock className="h-9 w-9 text-accent-foreground" />
+            <LockNew className="h-9 w-9" />
           </div>
           <h1 className="text-2xl md:text-3xl font-bold">Seller Agreement</h1>
           <p className="text-sm text-muted-foreground max-w-lg">
@@ -873,70 +874,70 @@ export const PackagesStep = ({
           .map((id) => packageCards.find((entry) => entry.id === id))
           .filter((card): card is (typeof packageCards)[number] => Boolean(card))
           .map((card) => {
-          const isSelected = selection.packageId === card.id;
-          const price = getPackageMonthlyPrice(tier, card.id);
-          const isPremium = card.id === "PREMIUM";
-          return (
-            <div
-              key={card.id}
-              onClick={() =>
-                setSelection((prev) => ({
-                  ...prev,
-                  packageId: prev.packageId === card.id ? null : card.id,
-                }))
-              }
-              className="relative cursor-pointer rounded-2xl p-6 transition-colors"
-              style={{
-                // Premium is the card being sold, so it is lime whatever is
-                // selected — the selection shows as a dark outline instead.
-                background: isPremium ? LIME : "#FFFFFF",
-                border: isSelected ? "2px solid #000000" : "1px solid #E9EBF2",
-              }}
-            >
-              {/* The name in a dark pill, top left, as the design has it. */}
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full bg-black px-3 py-1 text-xs font-semibold text-white"
-                style={{ fontFamily: "Lufga" }}
+            const isSelected = selection.packageId === card.id;
+            const price = getPackageMonthlyPrice(tier, card.id);
+            const isPremium = card.id === "PREMIUM";
+            return (
+              <div
+                key={card.id}
+                onClick={() =>
+                  setSelection((prev) => ({
+                    ...prev,
+                    packageId: prev.packageId === card.id ? null : card.id,
+                  }))
+                }
+                className="relative cursor-pointer rounded-2xl p-6 transition-colors"
+                style={{
+                  // Premium is the card being sold, so it is lime whatever is
+                  // selected — the selection shows as a dark outline instead.
+                  background: isPremium ? LIME : "#FFFFFF",
+                  border: isSelected ? "2px solid #000000" : "1px solid #E9EBF2",
+                }}
               >
-                {card.id === "MINIMUM" ? (
-                  <Dot className="h-4 w-4" />
-                ) : card.id === "STARTER" ? (
-                  <Rocket className="h-3 w-3" />
-                ) : (
-                  <Crown className="h-3 w-3" />
-                )}
-                {PACKAGE_LABELS[card.id]}
-              </span>
-              <p className="mt-3 text-sm text-black/60">{card.blurb}</p>
-              <div className="mt-4">
-                <span className="text-3xl font-bold">{formatUsd(price)}</span>
-                <span className="ml-1 text-sm text-black/50">/monthly</span>
-              </div>
-              <div className="mt-4 space-y-2">
-                {card.features.map((f) => (
-                  <div key={f} className="flex items-start gap-2 text-sm">
-                    <CircleCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                    <span>{f}</span>
-                  </div>
-                ))}
-              </div>
-              {/*
+                {/* The name in a dark pill, top left, as the design has it. */}
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full bg-black px-3 py-1 text-xs font-semibold text-white"
+                  style={{ fontFamily: "Lufga" }}
+                >
+                  {card.id === "MINIMUM" ? (
+                    <Dot className="h-4 w-4" />
+                  ) : card.id === "STARTER" ? (
+                    <Rocket className="h-3 w-3" />
+                  ) : (
+                    <Crown className="h-3 w-3" />
+                  )}
+                  {PACKAGE_LABELS[card.id]}
+                </span>
+                <p className="mt-3 text-sm text-black/60">{card.blurb}</p>
+                <div className="mt-4">
+                  <span className="text-3xl font-bold">{formatUsd(price)}</span>
+                  <span className="ml-1 text-sm text-black/50">/monthly</span>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {card.features.map((f) => (
+                    <div key={f} className="flex items-start gap-2 text-sm">
+                      <CircleCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                      <span>{f}</span>
+                    </div>
+                  ))}
+                </div>
+                {/*
                 * Still a div, not a button.
                 *
                 * The whole card is the click target and always has been; a
                 * real button inside it would fire the selection twice.
                 */}
-              <div
-                className="mt-5 rounded-full py-2.5 text-center text-sm font-semibold"
-                style={{
-                  background: isSelected ? "#000000" : LIME,
-                  color: isSelected ? "#FFFFFF" : "#000000",
-                }}
-              >
-                {isSelected ? "Selected" : "Select"}
-              </div>
+                <div
+                  className="mt-5 rounded-full py-2.5 text-center text-sm font-semibold"
+                  style={{
+                    background: isSelected ? "#000000" : LIME,
+                    color: isSelected ? "#FFFFFF" : "#000000",
+                  }}
+                >
+                  {isSelected ? "Selected" : "Select"}
+                </div>
 
-              {/*
+                {/*
                 * The billing cycle lives inside the card it belongs to.
                 *
                 * It was a full-width panel under all three, which is not what
@@ -947,17 +948,17 @@ export const PackagesStep = ({
                 * The condition and the handler are the ones that were here
                 * before; only where it renders has changed.
                 */}
-              {isSelected && card.id !== "MINIMUM" && (
-                <BillingCycleChooser
-                  value={selection.billingCycle}
-                  onChange={(cycle) =>
-                    setSelection((prev) => ({ ...prev, billingCycle: cycle }))
-                  }
-                />
-              )}
-            </div>
-          );
-        })}
+                {isSelected && card.id !== "MINIMUM" && (
+                  <BillingCycleChooser
+                    value={selection.billingCycle}
+                    onChange={(cycle) =>
+                      setSelection((prev) => ({ ...prev, billingCycle: cycle }))
+                    }
+                  />
+                )}
+              </div>
+            );
+          })}
       </div>
 
       {/* Add-ons — a single choice; picking one replaces the other. */}

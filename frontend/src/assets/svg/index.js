@@ -55,7 +55,8 @@ import Svg9Black from "./9black.svg?react"
 import Svg10Black from "./10black.svg?react"
 import Svg11Black from "./11black.svg?react"
 import Svg12Black from "./12black.svg?react"
-
+import UserLock from "./userlock.svg?react"
+import LockNew from "./locknew.svg?react"
 
 
 export {
@@ -116,6 +117,6 @@ export {
   Svg10Black,
   Svg11Black,
   Svg12Black,
-
-
+  UserLock,
+  LockNew
 };
