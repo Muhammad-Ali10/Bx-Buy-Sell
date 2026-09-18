@@ -23,10 +23,10 @@ const Features = () => {
         <div className="grid gap-4 md:grid-cols-[930fr_860fr]">
           {/* Two rows of equal height, as in Figma. A flex column shared the
               height out by content instead: 631px and 533px at 1920. */}
-          <div className="grid min-w-0 grid-rows-[1fr_1fr] gap-4 md:gap-[26px]">
+          <div className="flex flex-col gap-4 md:gap-[26px]">
             {/* Reports & Insights */}
             <div
-              className="flex flex-col justify-center gap-4 min-h-[280px] rounded-[20px] p-6 sm:min-h-[360px] sm:gap-6 sm:rounded-[40px] sm:p-10 md:rounded-[60px] lg:rounded-[80px] xl:justify-start xl:gap-[31px] xl:pb-12 xl:pl-[84px] xl:pr-12 xl:pt-[99px]"
+              className="flex flex-col justify-center gap-4 rounded-[20px] p-16 py-[100px] sm:gap-6 sm:rounded-[40px]  md:rounded-[60px] lg:rounded-[80px] xl:justify-start "
               style={{ backgroundColor: "rgb(24, 24, 26)" }}
             >
               <h2
@@ -36,7 +36,7 @@ const Features = () => {
                 Reports & Insights
               </h2>
               <p
-                className="font-lufga max-w-[668px] text-base sm:text-lg lg:text-xl xl:text-2xl"
+                className="font-lufga max-w-[668px] text-base sm:text-base lg:text-lg xl:text-base"
                 style={{ fontWeight: 400, lineHeight: 1.5, color: "rgba(255, 255, 255, 0.5)" }}
               >
                 Our detailed dashboard insights clear up most questions early on — so you can focus on what really matters. With key metrics presented clearly, users spend less time searching and more time deciding
@@ -45,18 +45,17 @@ const Features = () => {
 
             {/* Download the app */}
             <div
-              className="flex items-center justify-center overflow-hidden min-h-[300px] rounded-[20px] p-6 sm:min-h-[400px] sm:rounded-[40px] md:min-h-[460px] md:rounded-[60px] lg:rounded-[80px]"
-              style={{ backgroundColor: "#1364ff" }}
+              className="flex items-center justify-center overflow-hidden rounded-[20px] p-6 sm:rounded-[40px]  md:rounded-[60px] lg:rounded-[80px]"
+              style={{ backgroundColor: "#D6D6D6" }}
             >
               <img
                 src={downloadAppCard}
                 alt="Download Mobile App"
-                width={370}
-                height={411}
+              
                 // Full width up to its designed 370px. A fixed 370px width
                 // kept the column from narrowing, so on a phone the whole
                 // section ran off the right edge of the screen.
-                className="block h-auto w-full max-w-[370px]"
+                className="block h-auto w-full max-w-[300px]"
                 loading="lazy"
                 decoding="async"
               />
@@ -66,8 +65,8 @@ const Features = () => {
           {/* The app on lime. The card keeps Figma's 860:1190 shape, and
               stretches with the row when the cards beside it need more room. */}
           <div
-            className="relative w-full min-w-0 aspect-[860/1190] overflow-hidden rounded-[20px] sm:rounded-[40px] md:self-stretch md:rounded-[60px] lg:rounded-[80px]"
-            style={{ backgroundColor: "#c6fe1e" }}
+            // className="relative w-full min-w-0 aspect-[860/1190] overflow-hidden rounded-[20px] sm:rounded-[40px] md:self-stretch md:rounded-[60px] lg:rounded-[80px]"
+            // style={{ backgroundColor: "#c6fe1e" }}
           >
             {/* Anchored to the bottom: the phone's shadow runs off the
                 bottom and right edges, so any spare room has to go at the
@@ -76,11 +75,7 @@ const Features = () => {
             <img
               src={reportsPhone}
               alt="Reports & Insights App"
-              width={860}
-              height={1190}
-              className="absolute inset-0 h-full w-full object-contain object-bottom"
-              loading="lazy"
-              decoding="async"
+             
             />
           </div>
         </div>

@@ -10,7 +10,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
+import { Currency,Language } from "@/assets/svg";
+import cardimg from "@/assets/payment-list.png";
 /* The card marks under the blurb. Drawn here rather than imported — there are
    no payment SVGs in assets/, and four tiny tiles are not worth four files.
    Swap in the real brand artwork when it arrives. */
@@ -97,7 +98,7 @@ const LANGUAGES = ["English"];
 const FooterLanguageSelect = () => (
   <DropdownMenu>
     <DropdownMenuTrigger
-      className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/[0.06] pl-3 pr-2 py-1.5 focus:outline-none"
+      className="inline-flex items-center justify-between w-[150px] gap-2 rounded-full border border-white/20 bg-white/[0.06] pl-3 pr-2 py-1.5 focus:outline-none"
       aria-label="Language"
     >
       <UnionFlag />
@@ -155,10 +156,11 @@ const Footer = () => {
               next venture or selling the one you built, EX makes it simple.
             </p>
             <div className="mt-6 flex items-center gap-2">
-              <VisaMark />
-              <MastercardMark />
-              <MaestroMark />
-              <AmexMark />
+              <img
+                src={cardimg}
+                alt="Archived Chats"
+                className="h-6 w-auto"
+              />
             </div>
           </div>
 
@@ -199,9 +201,9 @@ const Footer = () => {
                 type="email"
                 placeholder="Email Address"
                 aria-label="Email Address"
-                className="w-full rounded-full border border-white/20 bg-white/[0.06] py-3 pl-4 pr-[124px] font-lufga text-[14px] text-white placeholder:text-white/40 focus:outline-none focus:border-[#C6FE1F]"
+                className="w-full rounded-md border border-white/20 bg-white/[0.06] py-3 pl-4 pr-[124px] font-lufga text-[14px] text-white placeholder:text-white/40 focus:outline-none focus:border-[#C6FE1F]"
               />
-              <Button className="absolute right-1.5 top-1.5 bottom-1.5 h-auto rounded-full bg-[#C6FE1F] px-4 py-0 font-lufga text-[13px] font-medium text-black hover:bg-[#C6FE1F]/90">
+              <Button className="absolute right-1.5 top-1.5 bottom-1.5 h-auto rounded-md bg-[#C6FE1F] px-4 py-0 font-lufga text-[13px] font-medium text-black hover:bg-[#C6FE1F]/90">
                 <span>Subscribe</span>
                 <Send className="ml-1.5 h-3.5 w-3.5" />
               </Button>
@@ -212,16 +214,16 @@ const Footer = () => {
           <div className="lg:col-span-2">
             <div className="mb-5">
               <div className="mb-2 flex items-center gap-2">
-                <Globe className="h-4 w-4 text-[#C6FE1F]" />
+                <Currency className="h-4 w-4 text-[#C6FE1F]" />
                 <span className="font-lufga text-[14px] text-white">Currency</span>
               </div>
               {/* The same choice as the menu bar makes: changing either changes both. */}
-              <HeaderCurrencySelect onDark infoSide="top" variant="footer" />
+              <HeaderCurrencySelect  onDark infoSide="top" variant="footer" />
             </div>
 
             <div className="mb-6">
               <div className="mb-2 flex items-center gap-2">
-                <Languages className="h-4 w-4 text-[#C6FE1F]" />
+                <Language className="h-4 w-4 text-[#C6FE1F]" />
                 <span className="font-lufga text-[14px] text-white">Language</span>
               </div>
               <FooterLanguageSelect />

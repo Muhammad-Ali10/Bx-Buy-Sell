@@ -10,7 +10,7 @@ import heroCard3 from "@/assets/hero-card-3.png";
 import { ArrowUpSvg } from "@/assets/svg";
 import { Slider } from "./ui/slider";
 import {
-  Select,
+  Select, 
   SelectContent,
   SelectItem,
   SelectTrigger,

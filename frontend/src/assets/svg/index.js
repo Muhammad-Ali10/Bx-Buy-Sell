@@ -57,7 +57,8 @@ import Svg11Black from "./11black.svg?react"
 import Svg12Black from "./12black.svg?react"
 import UserLock from "./userlock.svg?react"
 import LockNew from "./locknew.svg?react"
-
+import Currency from "./currency.svg?react"
+import Language from "./language.svg?react"
 
 export {
   AccountsSvg,
@@ -118,5 +119,7 @@ export {
   Svg11Black,
   Svg12Black,
   UserLock,
-  LockNew
+  LockNew,
+  Currency,
+  Language
 };

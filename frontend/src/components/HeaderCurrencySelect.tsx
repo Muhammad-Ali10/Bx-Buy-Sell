@@ -50,16 +50,18 @@ export const HeaderCurrencySelect = ({
 
   return (
     <div
-      className="inline-flex items-center gap-1 rounded-full pl-3 pr-2 py-1.5"
+      className="inline-flex items-center justify-between gap-1 rounded-full pl-3 pr-2 py-1.5"
       style={{
         background: isFooter ? "rgba(255, 255, 255, 0.06)" : "#D8D8D8",
         border: isFooter ? "1px solid rgba(255, 255, 255, 0.2)" : undefined,
         color: isFooter ? "#FFFFFF" : "#000000",
+        width: isFooter ? "150px" : undefined,
+        display: "inline-flex",
       }}
     >
       <DropdownMenu>
         <DropdownMenuTrigger
-          className="flex items-center gap-1 focus:outline-none"
+          className="flex items-center justify-between w-full gap-1 focus:outline-none"
           aria-label="Currency to show prices in"
         >
           <span
@@ -67,7 +69,7 @@ export const HeaderCurrencySelect = ({
           >
             {code} {symbol !== code ? symbol : ""}
           </span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+         <ChevronDown className="h-3 w-3" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="max-h-80 w-40 overflow-y-auto">
           {HEADER_CURRENCIES.map((option, index) => {
@@ -90,9 +92,9 @@ export const HeaderCurrencySelect = ({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <InfoHint label="About currencies" side={infoSide}>
+          {isFooter ?  null  :  <InfoHint label="About currencies" side={infoSide}>
         {CURRENCY_CHOICE_NOTE}
-      </InfoHint>
+      </InfoHint>}
     </div>
   );
 };
