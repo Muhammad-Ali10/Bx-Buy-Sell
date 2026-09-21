@@ -22,6 +22,7 @@ import { Optional } from '@nestjs/common';
 import { ActivityLogService } from 'src/activity-log/activity-log.service';
 import { socketOrigin } from 'src/activity-log/request-origin';
 import { listingTitleOf } from 'src/listing/listing-notices';
+import { mayPlaceVideoCall } from './video-call-rules';
 
 @WebSocketGateway({ 
   cors: { 
@@ -1152,7 +1153,14 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       select: { userId: true, sellerId: true },
     });
 
-    if (!chat || ![chat.userId, chat.sellerId].includes(message.from) || ![chat.userId, chat.sellerId].includes(message.to)) {
+    // The buyer and the seller may ring each other; the team may ring either of
+    // them from any conversation. The role is read from the database, never
+    // from the token, and only when the caller is not in the conversation.
+    const callerInChat = !!chat && [chat.userId, chat.sellerId].includes(message.from);
+    const caller = chat && !callerInChat
+      ? await this.db.user.findUnique({ where: { id: message.from }, select: { role: true } })
+      : null;
+    if (!mayPlaceVideoCall(chat, message.from, message.to, caller?.role)) {
       throw new WsException('Unauthorized video call participants');
     }
 

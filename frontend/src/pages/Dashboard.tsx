@@ -23,7 +23,7 @@ import {
   readDraftListing,
   writeDraftListing,
 } from "@/lib/draftListingStorage";
-import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
+import { LISTING_PUBLISH_PENDING_SESSION_KEY, listingAwaitingPublish } from "@/lib/listingGuestSession";
 import { toast } from "sonner";
 import { getAdminFinancialsTemplateVersion } from "@/lib/financialTableUtils";
 import { useListingAreaOrder } from "@/hooks/useListingAreaOrder";
@@ -144,7 +144,9 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
     if (!draftHydrated || authLoading || !isAuthenticated || !user || isEditMode) return;
     if (activeStep !== "packages") return;
     if (resumeFromSessionDoneRef.current) return;
-    if (sessionStorage.getItem(LISTING_PUBLISH_PENDING_SESSION_KEY) !== "1") return;
+    // The draft on this device counts as much as the tab's flag, so a guest
+    // who confirmed their account later still has their listing published.
+    if (!listingAwaitingPublish()) return;
     resumeFromSessionDoneRef.current = true;
     sessionStorage.removeItem(LISTING_PUBLISH_PENDING_SESSION_KEY);
     writeDraftListing({

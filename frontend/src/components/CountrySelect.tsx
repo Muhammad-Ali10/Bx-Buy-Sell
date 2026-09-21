@@ -38,6 +38,14 @@ interface CountrySelectProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  /**
+   * A first entry meaning "any country", for a filter rather than a form.
+   *
+   * Choosing it clears the value (`onChange("")`), and the button shows this
+   * label while nothing is chosen — as a real choice, not as a greyed-out
+   * placeholder.
+   */
+  allOption?: string;
 }
 
 export const CountrySelect = ({
@@ -45,6 +53,7 @@ export const CountrySelect = ({
   onChange,
   placeholder = "Select country",
   className,
+  allOption,
 }: CountrySelectProps) => {
   const [open, setOpen] = useState(false);
 
@@ -62,7 +71,7 @@ export const CountrySelect = ({
           aria-expanded={open}
           className={cn(
             "w-full justify-between bg-muted/50 font-normal",
-            !value && "text-muted-foreground",
+            !value && !allOption && "text-muted-foreground",
             className,
           )}
         >
@@ -80,7 +89,7 @@ export const CountrySelect = ({
             // Preserve any previously saved value that isn't an exact match.
             <span className="truncate">{value}</span>
           ) : (
-            placeholder
+            allOption ?? placeholder
           )}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -94,6 +103,22 @@ export const CountrySelect = ({
           <CommandList>
             <CommandEmpty>No country found.</CommandEmpty>
             <CommandGroup>
+              {allOption && (
+                <CommandItem
+                  value={allOption}
+                  onSelect={() => {
+                    onChange("");
+                    setOpen(false);
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <span className="w-5 shrink-0" />
+                  <span className="flex-1 truncate">{allOption}</span>
+                  <Check
+                    className={cn("h-4 w-4 shrink-0", !value ? "opacity-100" : "opacity-0")}
+                  />
+                </CommandItem>
+              )}
               {COUNTRIES.map((country) => (
                 <CommandItem
                   key={country.code}

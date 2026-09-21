@@ -11,20 +11,46 @@ jest.mock("@/hooks/usePlans", () => ({
     isLoading: false,
   }),
 }));
-jest.mock("@/hooks/useBrandQuestions", () => ({ useBrandQuestions: () => ({ data: [] }) }));
-jest.mock("@/hooks/useStatisticQuestions", () => ({ useStatisticQuestions: () => ({ data: [] }) }));
-jest.mock("@/hooks/useProductQuestions", () => ({ useProductQuestions: () => ({ data: [] }) }));
-jest.mock("@/hooks/useManagementQuestions", () => ({ useManagementQuestions: () => ({ data: [] }) }));
+/*
+ * Whether the questions have arrived from the server.
+ *
+ * The step will not build a listing until they have — answers are written
+ * against questions, and a listing built from empty lists loses every one — so
+ * each question hook reports it, the way React Query does.
+ */
+// Read when a hook is called, never when the mock is built: the mocks are
+// hoisted above this line.
+let mockQuestionsLoaded = true;
+
+jest.mock("@/hooks/useBrandQuestions", () => ({
+  useBrandQuestions: () => ({ data: [], isFetched: mockQuestionsLoaded }),
+}));
+jest.mock("@/hooks/useStatisticQuestions", () => ({
+  useStatisticQuestions: () => ({ data: [], isFetched: mockQuestionsLoaded }),
+}));
+jest.mock("@/hooks/useProductQuestions", () => ({
+  useProductQuestions: () => ({ data: [], isFetched: mockQuestionsLoaded }),
+}));
+jest.mock("@/hooks/useManagementQuestions", () => ({
+  useManagementQuestions: () => ({ data: [], isFetched: mockQuestionsLoaded }),
+}));
 // The step prices everything from the listing price, and refuses to draw the
 // packages at all without one. These tests are about publishing, so the
 // question the price is answered under has to be here.
 jest.mock("@/hooks/useAdInformationQuestions", () => ({
-  useAdInformationQuestions: () => ({ data: [{ id: "q-price", question: "Listing Price" }] }),
+  useAdInformationQuestions: () => ({
+    data: [{ id: "q-price", question: "Listing Price" }],
+    isFetched: mockQuestionsLoaded,
+  }),
 }));
 const PRICED = { "q-price": "250000" };
-jest.mock("@/hooks/useHandoverQuestions", () => ({ useHandoverQuestions: () => ({ data: [] }) }));
+jest.mock("@/hooks/useHandoverQuestions", () => ({
+  useHandoverQuestions: () => ({ data: [], isFetched: mockQuestionsLoaded }),
+}));
 jest.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ data: [] }) }));
-jest.mock("@/hooks/useAccountQuestions", () => ({ useAccountQuestions: () => ({ data: [] }) }));
+jest.mock("@/hooks/useAccountQuestions", () => ({
+  useAccountQuestions: () => ({ data: [], isFetched: mockQuestionsLoaded }),
+}));
 // The step asks which category the listing is in so the questions it checks
 // are that category's. Without this the hook reaches for React Query, which
 // this test deliberately does not set up.
@@ -51,6 +77,38 @@ describe("PackagesStep guest listing flow", () => {
   beforeEach(() => {
     sessionStorage.clear();
     jest.clearAllMocks();
+    mockQuestionsLoaded = true;
+  });
+
+  /*
+   * The client signed up from a listing, confirmed the account, and the listing
+   * arrived with its category, tools and figures — and not one answer besides.
+   * The publish ran the moment sign-up brought them back, before the questions
+   * had come from the server, so it walked empty lists and wrote nothing.
+   */
+  it("waits for the questions before publishing after sign-up", async () => {
+    const { apiClient } = require("@/lib/api");
+    apiClient.getCategories.mockResolvedValue({ success: true, data: [] });
+    apiClient.getTools.mockResolvedValue({ success: true, data: [] });
+    apiClient.createListing.mockResolvedValue({ success: true, data: {} });
+    mockQuestionsLoaded = false;
+
+    const { rerender } = render(
+      <PackagesStep formData={PRICED} onBack={() => {}} isGuest={false} resumePublishNonce={1} />
+    );
+
+    // Nothing is sent while the questions are still on their way.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(apiClient.createListing).not.toHaveBeenCalled();
+
+    // Once they are in, the same resume goes ahead — once.
+    mockQuestionsLoaded = true;
+    rerender(
+      <PackagesStep formData={PRICED} onBack={() => {}} isGuest={false} resumePublishNonce={1} />
+    );
+    await waitFor(() => {
+      expect(apiClient.createListing).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("persists draft locally when guest saves as draft", async () => {

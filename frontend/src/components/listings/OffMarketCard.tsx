@@ -7,7 +7,7 @@ import { orUnknown } from "@/lib/emptyValue";
 import { formatNumber } from "@/lib/formatNumber";
 import { listingCardData } from "@/lib/listingCardData";
 import { useDisplayCurrency } from "@/lib/displayCurrency";
-
+import { GoesPublicSvg, OffMarketSvg } from "@/assets/svg";
 /**
  * One listing in the off-market carousel, drawn as the client's design has it:
  * the feed's listing card, its photo blurred behind a lock and a countdown to
@@ -108,7 +108,7 @@ export const OffMarketCard = ({ listing }: { listing: any }) => {
               style={{ bottom: fig(100), fontSize: figText(16, 12), lineHeight: 1.45 }}
             >
               Off-Market Ends in{" "}
-              <span style={{ color: BLUE }}>
+              <span className="text-shadow-2xs text-shadow-sky-300 text-[#C6FE1F]" >
                 {days} {days === 1 ? "day" : "days"}
               </span>
             </p>
@@ -125,12 +125,7 @@ export const OffMarketCard = ({ listing }: { listing: any }) => {
               className="absolute flex items-center"
               style={{ bottom: fig(31), left: fig(18.6), right: fig(18.6), height: fig(24.7), gap: fig(7.6) }}
             >
-              <span
-                className="flex shrink-0 items-center justify-center rounded-full border-black"
-                style={{ ...circle, width: fig(20), height: fig(20) }}
-              >
-                <ArrowDown className="text-black" strokeWidth={2.5} style={{ width: fig(10.5), height: fig(10.5) }} />
-              </span>
+              <OffMarketSvg />
               <div className="relative flex-1 rounded-full bg-black/10" style={{ height: fig(9) }}>
                 <div
                   className="absolute inset-y-0 left-0 rounded-full"
@@ -150,17 +145,9 @@ export const OffMarketCard = ({ listing }: { listing: any }) => {
                   }}
                 />
               </div>
-              <span
-                className="flex shrink-0 items-center justify-center rounded-full border-black"
-                style={{ ...circle, width: fig(24.5), height: fig(24.5) }}
-              >
-                <Megaphone
-                  className="text-black"
-                  fill="currentColor"
-                  strokeWidth={2.2}
-                  style={{ width: fig(12), height: fig(12) }}
-                />
-              </span>
+
+              <GoesPublicSvg />
+
             </div>
           </div>
         </div>

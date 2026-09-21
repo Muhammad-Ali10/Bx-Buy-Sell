@@ -79,7 +79,13 @@ export const Question = z
       normalizeAnswerType,
       z.enum(['TEXT', 'SELECT', 'CHECKBOX', 'BOOLEAN', 'NUMBER', 'FILE', 'PHOTO', 'DATE', 'URL']),
     ).optional(),
-    answer: z.union([z.string().min(2), z.array(z.string().min(1)).min(1)]).optional(),
+    /*
+     * One character is a whole answer: five employees, a three per cent
+     * conversion rate. Asking for two made the form drop every such answer
+     * before sending, silently, and the seller's figures never reached the
+     * listing. Only an empty answer is refused.
+     */
+    answer: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional(),
     option: z.array(z.string().min(2)).optional(),
   })
   .superRefine((data, ctx) => {

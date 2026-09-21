@@ -1,4 +1,4 @@
-import { Info } from "lucide-react";
+import InfoHint from "@/components/InfoHint";
 import {
   ACQUISITION_CAPACITY_INFO,
   getCapacityMarkerAnchor,
@@ -69,12 +69,16 @@ export const AcquisitionCapacityCard = ({
             }}
           >
             Acquisition Capacity
-            <span
-              title={ACQUISITION_CAPACITY_INFO}
-              style={{ cursor: "help", lineHeight: 0 }}
+            {/* Was the browser's own `title`: it waits for a slow hover and a
+                phone never shows it, so the explanation could not be read. */}
+            <InfoHint
+              label="What Acquisition Capacity means"
+              side="top"
+              portal
+              className="text-white opacity-80 cursor-help"
             >
-              <Info style={{ width: "13px", height: "13px", color: "rgba(255,255,255,0.8)" }} />
-            </span>
+              {ACQUISITION_CAPACITY_INFO}
+            </InfoHint>
           </span>
           {/* The little tail, as on the multiples gauge. */}
           <span

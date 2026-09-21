@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api";
 import { PENDING_SIGNUP_EMAIL_KEY } from "@/lib/emailConfirmation";
-import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
+import { listingAwaitingPublish } from "@/lib/listingGuestSession";
 
 /**
  * Sign-up, step two: confirm the email address.
@@ -148,7 +148,9 @@ const VerifyOTP = () => {
         sessionStorage.removeItem(PENDING_SIGNUP_EMAIL_KEY);
         toast.success("Email confirmed — your account is ready");
         // Someone who was publishing a listing as a guest goes back to it.
-        if (sessionStorage.getItem(LISTING_PUBLISH_PENDING_SESSION_KEY) === "1") {
+        // Asked of the draft too, not only this tab: confirming a day later
+        // must still land on the listing that was waiting.
+        if (listingAwaitingPublish()) {
           window.location.assign("/dashboard");
           return;
         }

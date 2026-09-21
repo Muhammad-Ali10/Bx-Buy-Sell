@@ -127,14 +127,37 @@ export const PackagesStep = ({
   const { data: plans, isLoading: plansLoading } = usePlans();
   // The seller is asked their own category's questions, not everybody's.
   const categoryId = useListingCategoryId(formData);
-  const { data: brandQuestions } = useBrandQuestions(categoryId);
-  const { data: statisticQuestions } = useStatisticQuestions(categoryId);
-  const { data: productQuestions } = useProductQuestions(categoryId);
-  const { data: managementQuestions } = useManagementQuestions(categoryId);
-  const { data: adQuestions } = useAdInformationQuestions(categoryId);
-  const { data: handoverQuestions } = useHandoverQuestions(categoryId);
+  const { data: brandQuestions, isFetched: brandFetched } = useBrandQuestions(categoryId);
+  const { data: statisticQuestions, isFetched: statisticFetched } = useStatisticQuestions(categoryId);
+  const { data: productQuestions, isFetched: productFetched } = useProductQuestions(categoryId);
+  const { data: managementQuestions, isFetched: managementFetched } =
+    useManagementQuestions(categoryId);
+  const { data: adQuestions, isFetched: adFetched } = useAdInformationQuestions(categoryId);
+  const { data: handoverQuestions, isFetched: handoverFetched } = useHandoverQuestions(categoryId);
   const { data: socialAccounts } = useAccounts();
-  const { data: accountQuestions } = useAccountQuestions(categoryId);
+  const { data: accountQuestions, isFetched: accountFetched } = useAccountQuestions(categoryId);
+
+  /*
+   * Every answer is written against a question, so the questions have to be here.
+   *
+   * The listing is built by walking the loaded questions and picking each one's
+   * answer out of the form. A guest who signs up is brought straight back here
+   * and the publish runs at once — before the category was resolved and before
+   * the questions had arrived. It walked empty lists, and a listing went out
+   * with its category, tools and figures and not one answer besides: the
+   * seller's brand, statistics, products, handover and ad text all dropped.
+   * Until everything has loaded for the listing's own category, nothing is sent.
+   */
+  const categoryResolved = !formData?.category || Boolean(categoryId);
+  const questionsReady =
+    categoryResolved &&
+    brandFetched &&
+    statisticFetched &&
+    productFetched &&
+    managementFetched &&
+    adFetched &&
+    handoverFetched &&
+    accountFetched;
 
   // Mirrors handleSubmit, which returns the saved listing id for the checkout flow.
   const handleSubmitRef = useRef<
@@ -273,9 +296,16 @@ export const PackagesStep = ({
           ? JSON.stringify(answer)
           : (Array.isArray(answerValue) ? answerValue.join(", ") : answerValue);
 
-      // Skip if answer is too short (backend requires min 2 characters)
-      if (answerStr.length < 2) {
-        console.warn(`Skipping question "${question.question}" - answer too short: "${answerStr}"`);
+      /*
+       * Only an empty answer is left out.
+       *
+       * This used to drop anything shorter than two characters, because the
+       * server once refused them — so "5" employees and a "3" per cent
+       * conversion rate were thrown away without a word, and a listing could
+       * go out with most of its figures missing. The server takes one
+       * character now.
+       */
+      if (String(answerStr).trim().length === 0) {
         return null;
       }
 
@@ -382,8 +412,8 @@ export const PackagesStep = ({
       const segments = [urlPart, followerSegment].filter(Boolean);
       const answer = segments.join("|");
 
-      if (answer.length < 2) {
-        console.warn(`Skipping ${platform} account - answer too short: "${answer}"`);
+      // Nothing given for this account; one character still counts.
+      if (answer.trim().length === 0) {
         return;
       }
 
@@ -622,9 +652,11 @@ export const PackagesStep = ({
   useEffect(() => {
     if (!resumePublishNonce || resumePublishNonce === lastResumeNonce.current) return;
     if (isGuest) return;
+    // Held, not dropped: this runs again once the questions are in.
+    if (!questionsReady) return;
     lastResumeNonce.current = resumePublishNonce;
     void handleSubmitRef.current();
-  }, [resumePublishNonce, isGuest]);
+  }, [resumePublishNonce, isGuest, questionsReady]);
 
   if (plansLoading) {
     return (

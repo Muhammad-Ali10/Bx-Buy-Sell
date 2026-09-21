@@ -51,7 +51,8 @@ const Index = () => {
       <Header />
       <Hero searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
       <BrandCarousel />
-      <Listings searchQuery={searchQuery} />
+      {/* The rows are fixed; the hero's search opens All Listings instead. */}
+      <Listings />
       <HowItWorks />
       <SecureSimpleSeamless />
       <Features />

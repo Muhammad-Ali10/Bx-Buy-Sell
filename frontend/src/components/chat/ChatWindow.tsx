@@ -19,6 +19,7 @@ import StartDealProcessDialog from "@/components/chat/StartDealProcessDialog";
 import { formatChatTime, formatAdminMessageTime } from "@/lib/timeFormatter";
 import { cn } from "@/lib/utils";
 import { downloadAttachment } from "@/lib/downloadFile";
+import { callerProfile, isTeamCaller, ringIsForMe, TEAM_CALLER } from "@/lib/videoCallPeer";
 import { toast } from "sonner";
 import { Socket } from "socket.io-client";
 import { useAuth } from "@/hooks/useAuth";
@@ -82,6 +83,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   const [chatRoom, setChatRoom] = useState<any>(null);
   const [otherUser, setOtherUser] = useState<any>(null);
   const [callUser, setCallUser] = useState<any>(null);
+  // Who is on the other end of the current call and which conversation it is
+  // about. Not always the other person in this chat: the team can ring either
+  // side, and a call can come in about another conversation.
+  const [callPeer, setCallPeer] = useState<{ id: string; chatId?: string } | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -1053,40 +1058,36 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     newSocket.on('video:incoming-call', async (data: { from: string; to: string; channelName: string; chatId: string }) => {
       console.log('📞 ChatWindow: Incoming video call from:', data.from, 'chatId:', data.chatId);
       
-      // Ignore events for calls we initiated (caller may also be in chat room)
-      if (data.from === currentUserId) {
-        console.log('📞 Ignoring incoming-call event for caller:', currentUserId);
+      // Not ours to answer: a call we placed, or the team ringing the other
+      // person in a conversation we have open (the server sends the ring to
+      // everyone in the conversation's room as well).
+      if (!ringIsForMe(data, currentUserId)) {
         return;
       }
-      
+
       // Show call immediately - don't check if it's for current chat
       // This allows calls to show even if user is on a different page
       setIncomingVideoCall(data);
+      setCallPeer({ id: data.from, chatId: data.chatId });
       setIsIncomingCall(true); // Mark as incoming call
       setCallStatus('ringing');
-      
+
       // Start ringing sound immediately
       startRingingSound();
-      
-      // If the call is from a different chat, fetch the caller's info
+
       const currentChatId = chatRoom?.id || conversationId;
-      if (currentChatId && data.chatId !== currentChatId) {
+      if (currentChatId && data.chatId === currentChatId) {
+        // The other person in this chat, or the team calling about it.
+        setCallUser(isTeamCaller({ userId, sellerId }, data.from) ? TEAM_CALLER : null);
+      } else if (currentChatId) {
+        // A call about another conversation: find out who is calling.
         console.log('📞 Incoming call from different chat, fetching caller info...');
         try {
-          // Fetch the chat to get the other user's info
           const chatResponse = await apiClient.getChatById(data.chatId);
           if (chatResponse.success && chatResponse.data) {
             const chat = (chatResponse.data as any).data || chatResponse.data;
-            // Determine which user is the caller
-            const callerId = data.from;
-            const callerInfo = chat.userId === callerId ? chat.user : chat.seller;
-            if (callerInfo) {
-              setCallUser({
-                first_name: callerInfo.first_name,
-                last_name: callerInfo.last_name,
-                profile_pic: callerInfo.profile_pic,
-              });
-            }
+            const profile = callerProfile(chat, data.from);
+            if (profile) setCallUser(profile);
           }
         } catch (error) {
           console.error('Error fetching caller info:', error);
@@ -1141,32 +1142,26 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       const data = customEvent.detail as { from: string; to: string; channelName: string; chatId: string };
       console.log('📞 ChatWindow: Received incoming call from window event:', data);
       
-      if (data.from === currentUserId) {
-        console.log('📞 Ignoring window incoming-call for caller:', currentUserId);
+      if (!ringIsForMe(data, currentUserId)) {
         return;
       }
-      
+
       // Show call immediately regardless of current chat
       setIncomingVideoCall(data);
+      setCallPeer({ id: data.from, chatId: data.chatId });
       setCallStatus('ringing');
       startRingingSound();
-      
-      // If from different chat, fetch caller info
+
+      // Who is calling (same logic as socket handler)
       const currentChatId = chatRoom?.id || conversationId;
-      if (currentChatId && data.chatId !== currentChatId) {
-        // Fetch caller info (same logic as socket handler)
+      if (currentChatId && data.chatId === currentChatId) {
+        setCallUser(isTeamCaller({ userId, sellerId }, data.from) ? TEAM_CALLER : null);
+      } else if (currentChatId) {
         apiClient.getChatById(data.chatId).then(chatResponse => {
           if (chatResponse.success && chatResponse.data) {
             const chat = (chatResponse.data as any).data || chatResponse.data;
-            const callerId = data.from;
-            const callerInfo = chat.userId === callerId ? chat.user : chat.seller;
-            if (callerInfo) {
-              setCallUser({
-                first_name: callerInfo.first_name,
-                last_name: callerInfo.last_name,
-                profile_pic: callerInfo.profile_pic,
-              });
-            }
+            const profile = callerProfile(chat, data.from);
+            if (profile) setCallUser(profile);
           }
         }).catch(error => {
           console.error('Error fetching caller info:', error);
@@ -1225,6 +1220,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       setIsIncomingCall(false); // Reset incoming call flag
       setCallStatus('ended');
       setIncomingVideoCall(null);
+      setCallPeer(null);
       toast.error('Video call rejected');
     });
 
@@ -1239,10 +1235,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       
       setIncomingVideoCall(null);
       setCallUser(null);
-      setIncomingVideoCall(null);
-      setCallUser(null);
-      setIncomingVideoCall(null);
-      setCallUser(null);
+      setCallPeer(null);
       setIsInCall(false);
       setIsIncomingCall(false); // Reset incoming call flag
       setCallStatus('ended');
@@ -2049,6 +2042,9 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         return;
       }
 
+      setCallPeer({ id: otherUserId, chatId: chatIdToUse });
+      setCallUser(null);
+
       // Show loading state
       toast.info("Starting video call...");
 
@@ -2188,7 +2184,9 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     // Stop ringing sound
     stopRingingSound();
 
-    const chatIdToUse = chatRoom?.id || conversationId;
+    // The missed call belongs in the conversation the call was about, which
+    // need not be the one open on screen.
+    const chatIdToUse = incomingVideoCall.chatId || chatRoom?.id || conversationId;
     socketRef.current.emit('video:reject-call', {
       from: currentUserId,
       to: incomingVideoCall.from,
@@ -2196,6 +2194,8 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     });
 
     setIncomingVideoCall(null);
+    setCallPeer(null);
+    setCallUser(null);
     setIsIncomingCall(false); // Reset incoming call flag
     setCallStatus('ended');
     setIsInCall(false);
@@ -2218,9 +2218,11 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       duration = Math.floor((new Date().getTime() - callStartTime.getTime()) / 1000);
     }
 
-    const otherUserId = currentUserId === userId ? sellerId : userId;
-    const chatIdToUse = chatRoom?.id || conversationId;
-    
+    // Whoever the call is with — the team, when they rang — and the
+    // conversation it was about.
+    const otherUserId = callPeer?.id || (currentUserId === userId ? sellerId : userId);
+    const chatIdToUse = callPeer?.chatId || chatRoom?.id || conversationId;
+
     // Send end call event if socket is available (but don't block on it)
     if (socketRef.current && socketRef.current.connected && otherUserId) {
       try {
@@ -2241,6 +2243,8 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     // ALWAYS reset call tracking, regardless of socket status
     setIsInCall(false);
     setIncomingVideoCall(null);
+    setCallPeer(null);
+    setCallUser(null);
     setIsIncomingCall(false); // Reset incoming call flag
     setIsVideoCallDialogOpen(false);
     setCallStatus('ended');
@@ -4229,7 +4233,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             <VideoCall
               socket={socketRef.current}
               fromUserId={currentUserId}
-              toUserId={currentUserId === userId ? (sellerId || '') : (userId || '')}
+              toUserId={callPeer?.id || (currentUserId === userId ? (sellerId || '') : (userId || ''))}
               otherUser={callUser || otherUser}
               isIncoming={isIncomingCall}
               callStatus={callStatus}
@@ -4306,9 +4310,9 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             <div className="relative z-10 mb-8" style={{ animation: 'float 3s ease-in-out infinite' }}>
               <div className="relative">
                 <Avatar className="h-40 w-40 border-4 border-white/30 shadow-2xl ring-4 ring-green-500/20">
-                  <AvatarImage src={otherUser?.profile_pic} className="object-cover" />
+                  <AvatarImage src={(callUser || otherUser)?.profile_pic} className="object-cover" />
                   <AvatarFallback className="text-5xl bg-gradient-to-br from-green-500 to-green-600 text-white font-bold">
-                    {otherUser?.first_name?.[0] || 'U'}{otherUser?.last_name?.[0] || ''}
+                    {(callUser || otherUser)?.first_name?.[0] || 'U'}{(callUser || otherUser)?.last_name?.[0] || ''}
                   </AvatarFallback>
                 </Avatar>
                 {/* Pulsing ring around avatar */}
@@ -4322,7 +4326,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             {/* User Name and Status */}
             <div className="relative z-10 text-center mb-12">
               <h2 className="text-4xl font-bold text-white mb-3 drop-shadow-lg">
-                {otherUser?.first_name || 'Unknown'} {otherUser?.last_name || ''}
+                {(callUser || otherUser)?.first_name || 'Unknown'} {(callUser || otherUser)?.last_name || ''}
               </h2>
               <p className="text-2xl text-gray-300 font-medium">
                 <span className="inline-block animate-pulse">Incoming video call</span>

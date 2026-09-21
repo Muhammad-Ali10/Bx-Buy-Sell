@@ -32,3 +32,26 @@ describe('the listing schema on a Link answer', () => {
     expect(r.success).toBe(true);
   });
 });
+
+/*
+ * A seller's figures went missing from their listing: five employees, a three
+ * per cent conversion rate. The schema wanted two characters, so the form threw
+ * every one-character answer away before sending it.
+ */
+describe('the listing schema on a short answer', () => {
+  const answer = (value: string) =>
+    Question.safeParse({
+      answer_for: 'STATISTIC',
+      answer_type: 'NUMBER',
+      question: 'Conversion Rate',
+      answer: value,
+    });
+
+  it('takes a single character', () => {
+    expect(answer('3').success).toBe(true);
+  });
+
+  it('still refuses an empty one', () => {
+    expect(answer('').success).toBe(false);
+  });
+});

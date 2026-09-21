@@ -442,12 +442,17 @@ export const MonitoringAlertsTable = ({ searchQuery }: MonitoringAlertsTableProp
                 <td className="py-4 px-4">
                   {/* Had no handler at all. Opens whatever the alert is about:
                       the conversation for a reported chat, the listing for a
-                      reported listing, otherwise the person. */}
+                      reported listing, otherwise the person.
+
+                      A listing opens on its normal page, the one buyers see,
+                      not the older admin view of it — the client wants to
+                      judge a report against what was actually published. The
+                      team can open a blocked listing there too. */}
                   {(() => {
                     const target = alert.chat_id
                       ? `/admin/chats?chatId=${encodeURIComponent(alert.chat_id)}`
                       : alert.listing_id
-                        ? `/admin/listings/${alert.listing_id}`
+                        ? `/listing/${alert.listing_id}`
                         : alert.problematic_user?.id
                           ? `/admin/users/${alert.problematic_user.id}`
                           : null;

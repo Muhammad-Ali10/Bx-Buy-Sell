@@ -223,13 +223,22 @@ const Header = ({
   const onDark = dark || overHero;
   const t = onDark ? THEME.dark : THEME.light;
 
+  /*
+   * Nothing behind the bar but the page.
+   *
+   * Beside a sidebar the header used to sit on a full-width white strip, which
+   * cut a band across the top of the page and hid the cards scrolling under
+   * it. The client wants the bar alone, floating as it does on the home page;
+   * it blurs whatever passes beneath it, so it stays readable over content.
+   * The dark variant keeps its black, which is part of that page's design.
+   */
   return (
     <header
       ref={barRef}
       className={
         admin || inColumn
           ? `sticky top-0 z-40 flex justify-center pt-2 pb-2 sm:pt-4 sm:pb-3 ${
-              dark ? "bg-black" : "bg-white"
+              dark ? "bg-black" : "bg-transparent"
             }`
           : "fixed top-0 left-0 right-0 z-50 flex justify-center pt-2 sm:pt-4"
       }

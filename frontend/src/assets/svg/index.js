@@ -59,7 +59,8 @@ import UserLock from "./userlock.svg?react"
 import LockNew from "./locknew.svg?react"
 import Currency from "./currency.svg?react"
 import Language from "./language.svg?react"
-
+import OffMarketSvg from "./OffMarket.svg?react"
+import GoesPublicSvg from "./GoesPublic.svg?react"
 export {
   AccountsSvg,
   AdInformationsSvg,
@@ -121,5 +122,7 @@ export {
   UserLock,
   LockNew,
   Currency,
-  Language
+  Language,
+  OffMarketSvg,
+  GoesPublicSvg
 };

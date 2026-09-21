@@ -9,15 +9,7 @@ import heroCard2 from "@/assets/hero-card-2.png";
 import heroCard3 from "@/assets/hero-card-3.png";
 import { ArrowUpSvg } from "@/assets/svg";
 import { Slider } from "./ui/slider";
-import {
-  Select, 
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import FlagIcon from "./FlagIcon";
-import { ALL_COUNTRY_NAMES } from "@/lib/countryUtils";
+import { CountrySelect } from "./CountrySelect";
 import { useSubscriptionTier } from "@/hooks/useSubscriptionTier";
 import { AGE_MAX, PRICE_MAX } from "./listings/FilterSidebar";
 /**
@@ -315,31 +307,17 @@ const Hero = ({ searchQuery, setSearchQuery }: HeroProps) => {
                         <label className="font-lufga text-sm font-medium">
                           Business Location
                         </label>
-                        <Select value={location} onValueChange={setLocation}>
-                          <SelectTrigger className="h-11 w-full rounded-xl border border-black/10 bg-black/[0.03] text-sm">
-                            <SelectValue placeholder="Select location">
-                              {location !== "all" ? (
-                                <span className="flex items-center gap-2">
-                                  <FlagIcon country={location} className="h-4 w-4" />
-                                  {location}
-                                </span>
-                              ) : (
-                                "All locations"
-                              )}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent className="max-h-64">
-                            <SelectItem value="all">All locations</SelectItem>
-                            {ALL_COUNTRY_NAMES.map((country) => (
-                              <SelectItem key={country} value={country}>
-                                <span className="flex items-center gap-2">
-                                  <FlagIcon country={country} className="h-4 w-4" />
-                                  {country}
-                                </span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {/* The same searchable list Create Listing uses for
+                            Business Location: two hundred and fifty countries
+                            are found by typing, not by scrolling. "All
+                            locations" is the first entry, and is what an empty
+                            choice means here. */}
+                        <CountrySelect
+                          value={location === "all" ? "" : location}
+                          onChange={(country) => setLocation(country || "all")}
+                          allOption="All locations"
+                          className="h-11 rounded-xl border border-black/10 bg-black/[0.03] text-sm text-black"
+                        />
                       </div>
 
                       <div className="mt-5 space-y-3">

@@ -21,6 +21,16 @@ import { Socket } from "socket.io-client";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import chatSearchIcon from "@/assets/chatsearch.svg";
 import { ChatMessageBody } from "@/components/chat/ChatMessageBody";
+import { VideoCall } from "@/components/chat/VideoCall";
+import { ErrorBoundary } from "@/components/chat/ErrorBoundary";
+
+/** A call this moderator placed to one side of the conversation. */
+interface TeamCall {
+  peerId: string;
+  peer: { first_name?: string; last_name?: string; profile_pic?: string };
+  status: 'calling' | 'connected';
+  startedAt: Date | null;
+}
 
 interface Message {
   id: string;
@@ -110,6 +120,113 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  /*
+   * Video calls from this screen. The moderator rings the buyer or the seller,
+   * one at a time; the call is logged in the conversation like any other (the
+   * server writes the missed or completed call into it). Kept in a ref as well
+   * as state because the socket handlers outlive the render that set them up.
+   */
+  const [teamCall, setTeamCallState] = useState<TeamCall | null>(null);
+  const teamCallRef = useRef<TeamCall | null>(null);
+  const setTeamCall = (next: TeamCall | null) => {
+    teamCallRef.current = next;
+    setTeamCallState(next);
+  };
+
+  useEffect(() => {
+    if (!socket) return;
+    const peerName = (call: TeamCall) =>
+      `${call.peer.first_name || ''} ${call.peer.last_name || ''}`.trim() || 'They';
+
+    const onAccepted = (data: { from: string }) => {
+      const call = teamCallRef.current;
+      if (!call || data.from !== call.peerId) return;
+      setTeamCall({ ...call, status: 'connected', startedAt: new Date() });
+    };
+    const onRejected = (data: { from: string }) => {
+      const call = teamCallRef.current;
+      if (!call || data.from !== call.peerId) return;
+      setTeamCall(null);
+      toast.info(`${peerName(call)} declined the call`);
+    };
+    const onEnded = (data: { from: string }) => {
+      const call = teamCallRef.current;
+      if (!call || data.from !== call.peerId) return;
+      setTeamCall(null);
+    };
+    const onOffline = (data: { userId: string }) => {
+      const call = teamCallRef.current;
+      if (!call || data.userId !== call.peerId) return;
+      setTeamCall(null);
+      toast.error(`${peerName(call)} is not online right now — a missed call was left in the chat`);
+    };
+    // A server that still only lets the buyer and the seller call each other
+    // refuses the call outright; say so instead of ringing forever.
+    const onRefused = (payload: any) => {
+      const call = teamCallRef.current;
+      const reason = typeof payload?.message === 'string' ? payload.message : '';
+      if (!call || call.status !== 'calling' || !/video call|caller/i.test(reason)) return;
+      setTeamCall(null);
+      toast.error('This call could not be placed');
+    };
+
+    socket.on('video:call-accepted', onAccepted);
+    socket.on('video:call-rejected', onRejected);
+    socket.on('video:call-ended', onEnded);
+    socket.on('video:user-offline', onOffline);
+    socket.on('exception', onRefused);
+    return () => {
+      socket.off('video:call-accepted', onAccepted);
+      socket.off('video:call-rejected', onRejected);
+      socket.off('video:call-ended', onEnded);
+      socket.off('video:user-offline', onOffline);
+      socket.off('exception', onRefused);
+    };
+  }, [socket]);
+
+  const startTeamCall = (peerId: string | undefined, person: any) => {
+    if (!peerId || !user?.id || teamCallRef.current) return;
+    if (!socket?.connected) {
+      toast.error('Not connected to the chat server yet — try again in a moment');
+      return;
+    }
+    setTeamCall({
+      peerId,
+      peer: {
+        first_name: person?.first_name || '',
+        last_name: person?.last_name || '',
+        profile_pic: person?.profile_pic || undefined,
+      },
+      status: 'calling',
+      startedAt: null,
+    });
+    // Join our own room first so the answer finds its way back here.
+    socket.emit('video:register', { userId: user.id });
+    socket.emit('video:call-user', {
+      from: user.id,
+      to: peerId,
+      channelName: `chat-${conversationId}`,
+      chatId: conversationId,
+    });
+  };
+
+  const endTeamCall = () => {
+    const call = teamCallRef.current;
+    if (!call) return;
+    const duration = call.startedAt
+      ? Math.floor((Date.now() - call.startedAt.getTime()) / 1000)
+      : 0;
+    if (socket?.connected && user?.id) {
+      socket.emit('video:end-call', {
+        from: user.id,
+        to: call.peerId,
+        chatId: conversationId,
+        duration,
+      });
+    }
+    setTeamCall(null);
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -550,6 +667,8 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
 
   const buyerName = `${conversation.user?.first_name || ''} ${conversation.user?.last_name || ''}`.trim() || 'Buyer';
   const sellerName = `${conversation.seller?.first_name || ''} ${conversation.seller?.last_name || ''}`.trim() || 'Seller';
+  const buyerId: string | undefined = conversation.userId || conversation.user?.id;
+  const sellerId: string | undefined = conversation.sellerId || conversation.seller?.id;
 
   /**
    * The listing this conversation is about.
@@ -644,11 +763,52 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
               }}
             />
           </button>
-          {/* The video-call button stood here doing nothing, and it could not
-              have done anything: the gateway rejects any call whose two ends are
-              not the buyer and the seller, by design. A moderator's job on this
-              screen is to read what was said — a call would be the one exchange
-              that left no record on a page built to keep one. */}
+          {/* Video call to one side of the conversation. The moderator picks
+              the buyer or the seller; it is a call between the two of them,
+              and it is logged in the chat (missed, or ended with its length). */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Video call"
+                title={isConnected ? 'Video call' : 'Connecting to the chat server…'}
+                disabled={!!teamCall}
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  padding: '6px',
+                  borderRadius: '16px',
+                  background: 'rgba(249, 251, 252, 1)',
+                  border: 'none',
+                  cursor: teamCall ? 'default' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Video
+                  style={{
+                    width: '14px',
+                    height: '14px',
+                    color: 'rgba(0, 0, 0, 1)',
+                  }}
+                />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {buyerId && buyerId !== user?.id && (
+                <DropdownMenuItem onClick={() => startTeamCall(buyerId, conversation.user)}>
+                  <Video className="mr-2 h-4 w-4" /> Call buyer ({buyerName})
+                </DropdownMenuItem>
+              )}
+              {sellerId && sellerId !== user?.id && (
+                <DropdownMenuItem onClick={() => startTeamCall(sellerId, conversation.seller)}>
+                  <Video className="mr-2 h-4 w-4" /> Call seller ({sellerName})
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1086,6 +1246,36 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
           </div>
         )}
       </div>
+
+      {teamCall && user?.id && (
+        <ErrorBoundary
+          fallback={
+            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center text-white">
+              <div className="text-center p-6 max-w-md">
+                <h2 className="text-2xl font-bold mb-4 text-red-400">Video Call Error</h2>
+                <p className="text-gray-300 mb-6">There was an error starting the video call.</p>
+                <button
+                  onClick={endTeamCall}
+                  className="px-6 py-3 bg-red-600 rounded-full hover:bg-red-700 text-white font-semibold"
+                >
+                  End Call
+                </button>
+              </div>
+            </div>
+          }
+        >
+          <VideoCall
+            socket={socket}
+            fromUserId={user.id}
+            toUserId={teamCall.peerId}
+            otherUser={teamCall.peer}
+            isIncoming={false}
+            callStatus={teamCall.status}
+            onEndCall={endTeamCall}
+            callStartTime={teamCall.startedAt}
+          />
+        </ErrorBoundary>
+      )}
     </div>
   );
 };

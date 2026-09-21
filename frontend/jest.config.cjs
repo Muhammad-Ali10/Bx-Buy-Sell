@@ -5,6 +5,8 @@ module.exports = {
   roots: ["<rootDir>/src"],
   testMatch: ["**/*.test.ts", "**/*.test.tsx"],
   moduleNameMapper: {
+    // The icon index re-exports through Vite's `?react` imports, which Jest cannot read.
+    "^@/assets/svg$": "<rootDir>/src/__mocks__/svgIndexMock.js",
     "^@/assets/.*\\.(svg|png|jpg|jpeg|gif|webp)$": "<rootDir>/src/__mocks__/fileMock.js",
     "^@/(.*)$": "<rootDir>/src/$1",
     "\\.(css|less|scss)$": "identity-obj-proxy",
