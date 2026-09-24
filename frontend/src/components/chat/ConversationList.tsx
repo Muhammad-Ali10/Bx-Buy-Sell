@@ -32,6 +32,7 @@ import { ChatLabelChip } from "./ChatLabelChip";
 import { cn } from "@/lib/utils";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import { Socket } from "socket.io-client";
+import { callLogLabel } from "@/lib/callLog";
 
 // Room shape (participants, last message, labels, unread) comes from the
 // shared chat-rooms module — see lib/chatRooms.ts.
@@ -518,11 +519,8 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
             if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
               try {
                 const parsed = JSON.parse(trimmed);
-                if (parsed?.type === 'missed_video_call') {
-                  return 'Missed video call';
-                }
-                if (parsed?.type === 'video_call_completed') {
-                  return 'Video call ended';
+                if (parsed?.type === 'missed_video_call' || parsed?.type === 'video_call_completed') {
+                  return callLogLabel(parsed);
                 }
               } catch {
                 // Fall through to raw text

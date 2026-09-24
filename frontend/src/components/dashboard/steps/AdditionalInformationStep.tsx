@@ -16,10 +16,10 @@ import { toast } from "sonner";
 import { uploadToCloudinary, uploadMultipleToCloudinary } from "@/lib/cloudinary";
 import { isQuestionHidden } from "@/lib/questionRequired";
 import {
-  ALLOWED_ATTACHMENT_LABEL,
+  asAllowedAttachment,
   formatMaxSize,
   maxBytesFor,
-  isAllowedAttachment,
+  refusedAttachmentsMessage,
 } from "@/lib/fileTypes";
 import { isValidListingDateAnswer } from "@/lib/dateUtils";
 // Shared with the rest of the wizard rather than kept as a private copy.
@@ -323,10 +323,12 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     }
   };
 
-  const handleFileUpload = async (questionId: string, file: File) => {
+  const handleFileUpload = async (questionId: string, picked: File) => {
     // Guard here too, so no caller can slip an unsupported file past the input.
-    if (!isAllowedAttachment(file.name)) {
-      toast.error(`This file type is not supported. Allowed: ${ALLOWED_ATTACHMENT_LABEL}`);
+    // Renamed to its format's extension when only its type gave it away.
+    const file = asAllowedAttachment(picked);
+    if (!file) {
+      toast.error(refusedAttachmentsMessage([picked]));
       return;
     }
     const limit = maxBytesFor(file.name);
@@ -784,10 +786,11 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
               <input
                 type="file"
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    if (!isAllowedAttachment(file.name)) {
-                      toast.error(`This file type is not supported. Allowed: ${ALLOWED_ATTACHMENT_LABEL}`);
+                  const picked = e.target.files?.[0];
+                  if (picked) {
+                    const file = asAllowedAttachment(picked);
+                    if (!file) {
+                      toast.error(refusedAttachmentsMessage([picked]));
                       e.target.value = "";
                       return;
                     }

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { normalizeDomainAnswer } from "@/lib/domainUtils";
 import { serializeMediaUrls } from "@/lib/mediaUtils";
 import { isQuestionHidden, isQuestionRequired } from "@/lib/questionRequired";
+import { financialsComplete, REQUIRED_FIELDS_MESSAGE } from "@/lib/listingPublishCheck";
 import { usePlans } from "@/hooks/usePlans";
 import { LockNew, UserLock } from "@/assets/svg";
 import {
@@ -173,10 +174,13 @@ export const PackagesStep = ({
     listingPrice !== null ? buildPricingOverview(listingPrice, selection) : null;
 
   /**
-   * Final check before publishing. Only questions the admin explicitly marked
-   * mandatory are enforced here — each step already applies its own rules as the
-   * seller passes through it, and treating every legacy question as mandatory
-   * flagged fields the seller was never asked for.
+   * Final check before publishing: everything the steps themselves demand.
+   *
+   * The sidebar lets a seller jump straight here, past every step's own
+   * "Continue", so this is the only check some sellers meet. It skipped the
+   * photo and file questions and never looked at Financials at all, and with
+   * one of those empty "Next Step" went through without a word — which is how
+   * the client came to ask for a message that already existed.
    */
   const getMissingMandatoryFields = (): string[] => {
     const missing: string[] = [];
@@ -189,9 +193,8 @@ export const PackagesStep = ({
     const checkSet = (questions: any[] | undefined, answers: Record<string, any>) => {
       (questions || []).forEach((q: any) => {
         // One shared rule, so this cannot disagree with the step that asked.
+        // Photos and files included: the steps that ask them enforce them.
         if (!isQuestionRequired(q)) return;
-        const type = String(q?.answer_type || "").toUpperCase();
-        if (["PHOTO", "PHOTO_UPLOAD", "FILE", "FILE_UPLOAD"].includes(type)) return;
         /*
          * Likewise for whether the seller was shown it at all. A question the
          * step folded away cannot be missing from a form that never asked it —
@@ -211,6 +214,8 @@ export const PackagesStep = ({
     checkSet(handoverQuestions, formData);
     checkSet(accountQuestions, formData.socialAccountQuestions || {});
 
+    if (!financialsComplete(formData)) missing.push("Financials");
+
     return missing;
   };
 
@@ -218,6 +223,14 @@ export const PackagesStep = ({
   const isPaidPackage = selection.packageId === "STARTER" || selection.packageId === "PREMIUM";
 
   const handleNextStep = () => {
+    // The client's sentence, exactly as they wrote it, and first: an empty
+    // field is the thing to fix before a package is worth choosing.
+    const missing = getMissingMandatoryFields();
+    if (missing.length > 0) {
+      toast.error(REQUIRED_FIELDS_MESSAGE);
+      return;
+    }
+
     /*
      * A package is a choice, not a default.
      *
@@ -228,17 +241,6 @@ export const PackagesStep = ({
      */
     if (!selection.packageId) {
       toast.error("Please choose a package before continuing.");
-      return;
-    }
-
-    const missing = getMissingMandatoryFields();
-    if (missing.length > 0) {
-      // Naming the fields turns a dead end into something the seller can act on.
-      const shown = missing.slice(0, 3).join(", ");
-      const rest = missing.length > 3 ? ` and ${missing.length - 3} more` : "";
-      toast.error(
-        `Before you can publish your listing, please fill out all required fields. Missing: ${shown}${rest}`,
-      );
       return;
     }
     setScreen(isPaidPackage ? "confidentiality" : "agreement");
@@ -1125,11 +1127,12 @@ export const PackagesStep = ({
         >
           {isSubmitting ? "Saving..." : "Save as Draft"}
         </Button>
-        {/* Held closed until a package is picked, so the requirement is visible
-            before the press rather than explained after it. */}
+        {/* Always pressable. It used to be held closed until a package was
+            picked, and a press on a closed button does nothing — no message
+            about empty fields or about the package, only silence. */}
         <Button
           onClick={handleNextStep}
-          disabled={isSubmitting || !selection.packageId}
+          disabled={isSubmitting}
           title={selection.packageId ? undefined : "Choose a package to continue"}
           className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 flex-1 w-full font-semibold"
         >

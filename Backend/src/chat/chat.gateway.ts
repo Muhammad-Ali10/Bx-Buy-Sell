@@ -22,7 +22,8 @@ import { Optional } from '@nestjs/common';
 import { ActivityLogService } from 'src/activity-log/activity-log.service';
 import { socketOrigin } from 'src/activity-log/request-origin';
 import { listingTitleOf } from 'src/listing/listing-notices';
-import { mayPlaceVideoCall } from './video-call-rules';
+import { mayPlaceVideoCall, TEAM_ROLES_THAT_CALL } from './video-call-rules';
+import { GroupCallError, GroupCallRegistry, groupCallCredentials } from './group-call';
 
 @WebSocketGateway({ 
   cors: { 
@@ -48,6 +49,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
    */
   private readonly HEARTBEAT_TIMEOUT_MS = 300_000;
   private readonly HEARTBEAT_CHECK_INTERVAL_MS = 30_000;
+  /** Group video calls running on this server. See group-call.ts. */
+  private readonly groupCalls = new GroupCallRegistry();
   /**
    * A dropped socket is not a departure. Moving between pages, reloading, or a
    * moment of bad wifi all close the socket, and marking someone offline for
@@ -278,6 +281,11 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   handleDisconnect(client: Socket) {
+    // Before anything else returns early: a host who closed the tab has
+    // ended their group call, whatever other tabs they have open.
+    for (const call of this.groupCalls.hostedBySocket(client.id)) {
+      void this.finishGroupCall(call.chatId, call.callId);
+    }
     const userId = (client as any).userId;
     console.log('👋 Client disconnected:', client.id, userId ? `(User: ${userId})` : '');
 
@@ -1466,5 +1474,174 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       to: message.to,
       candidate: message.candidate,
     });
+  }
+  // ─── Group video calls (team + buyer + seller), carried by Agora ───────────
+
+  /** A call-log line in the conversation, sent to whoever has it open. */
+  private async postCallMessage(chatId: string, senderId: string, content: Record<string, unknown>) {
+    try {
+      const saved = await this.chatService.createMessage({
+        chatId,
+        senderId,
+        content: JSON.stringify({ ...content, timestamp: new Date().toISOString() }),
+        type: 'TEXT',
+      });
+      this.io.to(chatId).emit('message', JSON.stringify({
+        id: saved.id,
+        chatId,
+        content: saved.content,
+        senderId: saved.senderId,
+        type: saved.type,
+        createdAt: saved.createdAt,
+      }));
+    } catch (error) {
+      console.error('❌ Could not log the group call in the conversation:', error);
+    }
+  }
+
+  /**
+   * Ends a group call for everyone and writes it into the conversation: one
+   * line for the call, and a missed call for each person who never came in.
+   */
+  private async finishGroupCall(chatId: string, callId?: string) {
+    const ended = this.groupCalls.end(chatId, callId);
+    if (!ended) return;
+    const { call, summary } = ended;
+    const payload = { chatId, callId: call.callId };
+    this.io.to(`group-call:${call.callId}`).emit('group-call:ended', payload);
+    // Those still ringing are in no call room yet.
+    for (const id of call.invited) this.io.to(`user:${id}`).emit('group-call:ended', payload);
+
+    if (summary.participants > 1) {
+      await this.postCallMessage(chatId, call.hostId, {
+        type: 'video_call_completed',
+        group: true,
+        callerId: call.hostId,
+        duration: summary.durationSeconds,
+        participants: summary.participants,
+      });
+    }
+    for (const id of summary.missed) {
+      await this.postCallMessage(chatId, call.hostId, {
+        type: 'missed_video_call',
+        group: true,
+        callerId: call.hostId,
+        receiverId: id,
+        reason: call.declined.has(id) ? 'declined' : 'no_answer',
+      });
+    }
+  }
+
+  @SubscribeMessage('group-call:start')
+  async handleGroupCallStart(
+    @MessageBody() message: { chatId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const hostId = (client as any).userId as string | undefined;
+    if (!hostId || !message?.chatId) return { ok: false, error: 'Not signed in' };
+
+    // The role from the database, never from the token.
+    const host = await this.db.user.findUnique({ where: { id: hostId }, select: { role: true } });
+    if (!(TEAM_ROLES_THAT_CALL as readonly string[]).includes(String(host?.role ?? ''))) {
+      return { ok: false, error: 'Only the team can start a group call' };
+    }
+    const chat = await this.db.chat.findUnique({
+      where: { id: message.chatId },
+      select: { userId: true, sellerId: true },
+    });
+    if (!chat) return { ok: false, error: 'Conversation not found' };
+
+    try {
+      const call = this.groupCalls.start(message.chatId, hostId, [chat.userId, chat.sellerId], {
+        hostSocketId: client.id,
+      });
+      const credentials = groupCallCredentials(call.channel, hostId);
+      if (!credentials) {
+        this.groupCalls.end(message.chatId, call.callId);
+        return { ok: false, error: 'Group calls are not set up on this server (Agora keys missing)' };
+      }
+      client.join(`group-call:${call.callId}`);
+      for (const id of call.invited) {
+        this.io.to(`user:${id}`).emit('group-call:incoming', {
+          chatId: message.chatId,
+          callId: call.callId,
+          from: hostId,
+          invited: call.invited,
+        });
+      }
+      return { ok: true, callId: call.callId, invited: call.invited, ...credentials };
+    } catch (error) {
+      if (error instanceof GroupCallError) return { ok: false, error: error.message };
+      throw error;
+    }
+  }
+
+  @SubscribeMessage('group-call:join')
+  handleGroupCallJoin(
+    @MessageBody() message: { chatId: string; callId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = (client as any).userId as string | undefined;
+    if (!userId) return { ok: false, error: 'Not signed in' };
+    try {
+      const call = this.groupCalls.join(message?.chatId, message?.callId, userId);
+      const credentials = groupCallCredentials(call.channel, userId);
+      if (!credentials) return { ok: false, error: 'Group calls are not set up on this server' };
+      client.join(`group-call:${call.callId}`);
+      this.io.to(`group-call:${call.callId}`).emit('group-call:participant', {
+        callId: call.callId,
+        userId,
+        action: 'joined',
+      });
+      // Another tab of the same person stops ringing.
+      this.io.to(`user:${userId}`).emit('group-call:answered', { callId: call.callId });
+      return { ok: true, callId: call.callId, hostId: call.hostId, invited: call.invited, ...credentials };
+    } catch (error) {
+      if (error instanceof GroupCallError) return { ok: false, error: error.message };
+      throw error;
+    }
+  }
+
+  @SubscribeMessage('group-call:decline')
+  handleGroupCallDecline(
+    @MessageBody() message: { chatId: string; callId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = (client as any).userId as string | undefined;
+    if (!userId) return { ok: false };
+    const changed = this.groupCalls.decline(message?.chatId, message?.callId, userId);
+    if (changed) {
+      this.io.to(`group-call:${message.callId}`).emit('group-call:participant', {
+        callId: message.callId,
+        userId,
+        action: 'declined',
+      });
+      this.io.to(`user:${userId}`).emit('group-call:answered', { callId: message.callId });
+    }
+    return { ok: changed };
+  }
+
+  @SubscribeMessage('group-call:leave')
+  handleGroupCallLeave(
+    @MessageBody() message: { chatId: string; callId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = (client as any).userId as string | undefined;
+    if (!userId) return { ok: false };
+    const call = this.groupCalls.get(message?.chatId);
+    if (!call || call.callId !== message?.callId) return { ok: false };
+    // The host leaving is the end of the call, for everyone.
+    if (call.hostId === userId) {
+      void this.finishGroupCall(message.chatId, message.callId);
+      return { ok: true, ended: true };
+    }
+    this.groupCalls.leave(message.chatId, message.callId, userId);
+    client.leave(`group-call:${message.callId}`);
+    this.io.to(`group-call:${message.callId}`).emit('group-call:participant', {
+      callId: message.callId,
+      userId,
+      action: 'left',
+    });
+    return { ok: true, ended: false };
   }
 }

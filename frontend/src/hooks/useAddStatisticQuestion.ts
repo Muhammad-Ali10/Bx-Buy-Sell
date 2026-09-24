@@ -11,6 +11,7 @@ export const useAddStatisticQuestion = () => {
       answer_type: string;
       options?: string[];
       required?: boolean | null; categoryId?: string | null; hint?: string | null; publicHint?: string | null;
+      visibleWithoutRegistration?: boolean | null;
     }) => {
       const response = await apiClient.createAdminQuestion({
         question: data.question,
@@ -21,6 +22,7 @@ export const useAddStatisticQuestion = () => {
         categoryId: data.categoryId,
         hint: data.hint,
         publicHint: data.publicHint,
+        visibleWithoutRegistration: data.visibleWithoutRegistration,
       });
 
       if (!response.success) {

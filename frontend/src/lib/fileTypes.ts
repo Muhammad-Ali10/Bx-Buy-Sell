@@ -102,3 +102,86 @@ export const getFileExtension = (nameOrUrl: string): string =>
 /** True when the file's extension is one the client allows. */
 export const isAllowedAttachment = (nameOrUrl: string): boolean =>
   ALLOWED_ATTACHMENT_EXTENSIONS.includes(getFileExtension(nameOrUrl));
+
+/**
+ * Other spellings of an allowed format. Windows saves a JPEG downloaded from
+ * the web as ".jfif"; an iPhone photo can arrive as ".heif".
+ */
+const EXTENSION_ALIASES: Record<string, string> = {
+  jfif: "jpg",
+  jpe: "jpg",
+  pjpeg: "jpg",
+  pjp: "jpg",
+  heif: "heic",
+  qt: "mov",
+};
+
+/** The allowed formats as the browser names them, whatever the file is called. */
+const EXTENSION_FOR_MIME: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "text/csv": "csv",
+  "application/csv": "csv",
+  "text/plain": "txt",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/pjpeg": "jpg",
+  "image/heic": "heic",
+  "image/heif": "heic",
+  "image/heic-sequence": "heic",
+  "image/heif-sequence": "heic",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+};
+
+/**
+ * Which of the allowed formats this file is, or null when it is none of them.
+ *
+ * The name alone refused files of an allowed format: a JPEG saved as ".jfif",
+ * or a PDF handed over by a phone or a cloud drive with no extension in its
+ * name at all ("Invoice" rather than "Invoice.pdf"). The type the browser
+ * reports decides when the name cannot.
+ */
+export function allowedAttachmentExtension(file: { name: string; type?: string }): string | null {
+  const name = String(file.name || "");
+  const ext = name.includes(".") ? getFileExtension(name) : "";
+  if (ALLOWED_ATTACHMENT_EXTENSIONS.includes(ext)) return ext;
+  if (EXTENSION_ALIASES[ext]) return EXTENSION_ALIASES[ext];
+  return EXTENSION_FOR_MIME[String(file.type || "").toLowerCase()] ?? null;
+}
+
+/**
+ * The file ready to upload, or null when its format is not allowed.
+ *
+ * A file accepted by its type is renamed to carry the extension of its format
+ * ("photo.jfif" -> "photo.jpg", "Invoice" -> "Invoice.pdf"): the uploaded
+ * address keeps the name, and the listing page picks each file's icon from the
+ * extension at the end of it.
+ */
+export function asAllowedAttachment(file: File): File | null {
+  const ext = allowedAttachmentExtension(file);
+  if (!ext) return null;
+  const name = String(file.name || "").trim();
+  const current = name.includes(".") ? getFileExtension(name) : "";
+  if (current === ext) return file;
+  const base =
+    current && EXTENSION_ALIASES[current] ? name.slice(0, -(current.length + 1)) : name || "file";
+  return new File([file], `${base}.${ext}`, { type: file.type, lastModified: file.lastModified });
+}
+
+/**
+ * What the seller is told about the files turned away, by name — "1 file(s)
+ * skipped" read like a fault, because it never said which file or why.
+ */
+export function refusedAttachmentsMessage(files: { name: string }[]): string {
+  const first = `"${files[0]?.name || "file"}"`;
+  const who = files.length > 1 ? `${first} and ${files.length - 1} more` : first;
+  const verb = files.length > 1 ? "weren't" : "wasn't";
+  return `${who} ${verb} uploaded — only these file types are accepted: ${ALLOWED_ATTACHMENT_LABEL}`;
+}

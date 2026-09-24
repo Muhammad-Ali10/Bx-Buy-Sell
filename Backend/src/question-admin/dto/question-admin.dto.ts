@@ -35,6 +35,8 @@ export const QuestionAdminSchema = z.object({
   // filling the form, `publicHint` to the buyer reading the finished ad.
   hint: z.string().nullish(),
   publicHint: z.string().nullish(),
+  // "Visible without registration?" on a statistic; null leaves the default rule.
+  visibleWithoutRegistration: z.boolean().nullish(),
 }).superRefine((data, ctx) => {
   if (data.answer_type === 'SELECT' || data.answer_type === 'CHECKBOX') {
     if (!data.options || data.options.length < 2) {
@@ -64,6 +66,8 @@ export const UpdateQuestionAdminSchema = z.object({
   // filling the form, `publicHint` to the buyer reading the finished ad.
   hint: z.string().nullish(),
   publicHint: z.string().nullish(),
+  // "Visible without registration?" on a statistic; null leaves the default rule.
+  visibleWithoutRegistration: z.boolean().nullish(),
 }).superRefine((data, ctx) => {
   if ((data.answer_type === 'SELECT' || data.answer_type === 'CHECKBOX') && data.options !== undefined && data.options.length < 2) {
     ctx.addIssue({

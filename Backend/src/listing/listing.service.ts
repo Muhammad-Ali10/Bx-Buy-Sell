@@ -45,8 +45,10 @@ import {
   type PackageId,
 } from './package-pricing';
 import {
+  buildGuestStatisticRules,
   canViewBlockedListing,
   grantsConfidentialAccess,
+  type GuestStatisticRules,
   hiddenListingStatuses,
   maskListingFor,
 } from './listing-visibility';
@@ -946,9 +948,10 @@ export class ListingService {
     // than one lookup per row.
     // trimListingFeedRecord widens the record, so read the id back as a string.
     const listingIds = rotatedListings.map((listing) => String(listing.id));
-    const [accessibleIds, activity] = await Promise.all([
+    const [accessibleIds, activity, guestStatistics] = await Promise.all([
       this.confidentialAccessIds(listingIds, resolvedViewer.userId),
       this.listingActivityFor(listingIds),
+      this.guestStatisticsFor(resolvedViewer.userId),
     ]);
 
     return rotatedListings.map((listing) =>
@@ -964,9 +967,45 @@ export class ListingService {
           userId: resolvedViewer.userId,
           role: resolvedViewer.role,
           hasConfidentialAccess: accessibleIds.has(String(listing.id)),
+          guestStatistics,
         },
       ),
     );
+  }
+
+  /**
+   * The administrators' "Visible without registration?" answers, for masking
+   * a listing to a visitor who is not signed in.
+   *
+   * Read at most every thirty seconds: the public feed asks on every page load,
+   * and the answers only change when somebody edits a question in Content
+   * Management. If the read fails, no rule is applied and the written default
+   * decides — which hides, never reveals, anything an administrator set.
+   */
+  private guestStatisticRulesCache: { at: number; rules: GuestStatisticRules } | null = null;
+
+  private async guestStatisticRules(): Promise<GuestStatisticRules> {
+    const cached = this.guestStatisticRulesCache;
+    if (cached && Date.now() - cached.at < 30_000) return cached.rules;
+    try {
+      const [questions, categories] = await Promise.all([
+        this.db.adminQuestion.findMany({
+          where: { answer_for: 'STATISTIC' },
+          select: { question: true, categoryId: true, visibleWithoutRegistration: true },
+        }),
+        this.db.category.findMany({ select: { id: true, name: true } }),
+      ]);
+      const rules = buildGuestStatisticRules(questions, categories);
+      this.guestStatisticRulesCache = { at: Date.now(), rules };
+      return rules;
+    } catch {
+      return cached?.rules ?? new Map();
+    }
+  }
+
+  /** The rules above, but only fetched for a visitor who is not signed in. */
+  private async guestStatisticsFor(viewerUserId?: string | null) {
+    return viewerUserId ? undefined : this.guestStatisticRules();
   }
 
   /**
@@ -1135,10 +1174,13 @@ export class ListingService {
       resolvedViewer.viewerType === 'REGISTERED_PRO' ||
       this.isStaffRole(resolvedViewer.role);
 
-    const accessibleIds = await this.confidentialAccessIds(
-      listings.map((listing) => listing.id),
-      resolvedViewer.userId,
-    );
+    const [accessibleIds, guestStatistics] = await Promise.all([
+      this.confidentialAccessIds(
+        listings.map((listing) => listing.id),
+        resolvedViewer.userId,
+      ),
+      this.guestStatisticsFor(resolvedViewer.userId),
+    ]);
 
     return {
       total: listings.length,
@@ -1150,6 +1192,7 @@ export class ListingService {
             userId: resolvedViewer.userId,
             role: resolvedViewer.role,
             hasConfidentialAccess: accessibleIds.has(listing.id),
+            guestStatistics,
           },
         ),
         // Read out as well, for a card that has nothing else to go on.
@@ -1241,6 +1284,7 @@ export class ListingService {
         listing.id,
         resolvedViewer.userId,
       ),
+      guestStatistics: await this.guestStatisticsFor(resolvedViewer.userId),
     });
   }
 

@@ -795,6 +795,14 @@ model AdminQuestion {
   /// text, kept where an administrator can edit it. Left empty, the page keeps
   /// the wording it already had.
   publicHint          String?
+  /// Whether a visitor who is not signed in may read this statistic on a
+  /// published listing ("Visible without registration?" in the admin dialog).
+  ///
+  /// Null means nobody has set it, and the rule in listing-visibility.ts
+  /// decides as it always has: Returning customers and Refund rate shown,
+  /// every other statistic held back. So existing questions are unchanged
+  /// until an administrator flips one.
+  visibleWithoutRegistration Boolean?
   /// Where this question sits in its step, smallest first.
   ///
   /// There was no such field: the list came back in whatever order the

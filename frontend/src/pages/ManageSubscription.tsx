@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Building2, CircleCheck, Globe, LayoutGrid, Sparkles } from "lucide-react";
+import { AlertTriangle, Building2, Globe, LayoutGrid, Sparkles } from "lucide-react";
+import {CircleCheck, Premium, Minimum, Starter} from "@/assets/svg";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { ListingsSidebar } from "@/components/listings/ListingsSidebar";
@@ -353,7 +354,7 @@ const ManageSubscription = () => {
                 </div>
               )}
 
-              <div className="mt-10 grid gap-6 md:grid-cols-3 items-start">
+              <div className="mt-10 flex flex-col md:flex-row gap-4 items-start">
                 {cards.map(({ tier, plan }) => (
                   <PlanCard
                     key={tier}
@@ -541,22 +542,24 @@ const PlanCard = ({
 
   return (
     <div
-      className={`flex h-full flex-col rounded-2xl border p-5 sm:p-6 ${
+      className={`flex max-w-[410px] w-full h-full flex-col rounded-2xl border p-5 sm:p-6 ${
         featured ? "border-transparent" : "border-[#E9EBF2] bg-white"
       } ${isOpen ? "ring-2 ring-[#16A34A]" : ""}`}
-      style={featured ? { background: LIME } : undefined}
+      style={featured ? { background: "#C6FE1F" } : undefined}
     >
       {/* A pill, not a heading: the design names the plan on a chip at the top
           of the card rather than in a line of type. */}
       <span
-        className="inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-[11.5px] font-medium"
+        className="inline-flex w-fit items-center gap-1.5 rounded-full px-3  text-[11.5px] font-medium"
         style={{
           fontFamily: "Lufga",
-          background: featured ? "#0F172A" : "#F1F5F9",
-          color: featured ? "#FFFFFF" : "#0F172A",
+          background: featured ? "#000000" : "#F1F5F9",
+          color: featured ? "#FFFFFF" : "#000000",
         }}
       >
-        <Sparkles className="h-3 w-3" />
+      {featured && <Premium className="h-3 w-3" />}
+      {plan.title === "Minimum" && <Minimum className="h-3 w-3" />}
+      {plan.title === "Starter" && <Starter className="h-3 w-3" />}
         {plan.title}
       </span>
 
@@ -569,7 +572,7 @@ const PlanCard = ({
 
       {/* "99$/monthly", the way the design writes it — the sign follows the
           number and the period is one word. */}
-      <div className="mt-4 flex items-baseline">
+      <div className="mt-1 flex items-baseline">
         <span
           className="text-[30px] font-semibold text-[#0F172A] sm:text-[34px]"
           style={{ fontFamily: "Lufga" }}
@@ -586,12 +589,12 @@ const PlanCard = ({
       </div>
 
       {banner && (
-        <div className={`mt-4 rounded-lg px-3 py-2 text-[13px] font-medium text-center ${bannerClass}`}>
+        <div className={` rounded-lg px-3 py-2 text-[13px] font-medium text-center ${bannerClass}`}>
           {banner.text}
         </div>
       )}
 
-      <ul className="mt-5 space-y-2.5 flex-1">
+      <ul className="mt-2 space-y-2.5 flex-1">
         {plan.feature.map((f) => (
           <li key={f} className="flex items-start gap-2.5">
             <CircleCheck
@@ -699,7 +702,7 @@ const PlanCard = ({
           // The highlighted card sits on the accent, so its button goes dark to
           // stand out; the others use the accent itself.
           <ActionButton tone={featured ? "dark" : "green"} busy={busy} onClick={onOpen}>
-            Upgrade to {plan.title}
+            Upgrade
           </ActionButton>
         ) : (
           // Minimum is a plan like any other, so moving to it reads as the
@@ -731,11 +734,11 @@ const ActionButton = ({
   children: React.ReactNode;
 }) => {
   const styles: Record<string, string> = {
-    green: "bg-[#16A34A] text-white hover:bg-[#15803D]",
+    green: "bg-[#C5FD1F] text-black hover:bg-[#C5FD1F]",
     red: "bg-[#DC2626] text-white hover:bg-[#B91C1C]",
     "red-outline": "border border-[#FCA5A5] text-[#DC2626] hover:bg-[#FEF2F2]",
     grey: "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]",
-    dark: "bg-[#0F172A] text-white hover:bg-[#1E293B]",
+    dark: "bg-[#000000] text-white hover:bg-[#000000]",
     "dark-invert": "bg-white text-[#0F172A] hover:bg-white/90",
   };
   return (
@@ -743,7 +746,7 @@ const ActionButton = ({
       type="button"
       disabled={busy || disabled}
       onClick={onClick}
-      className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${styles[tone]}`}
+      className={`w-full py-2.5 rounded-lg text-[13px] font-medium transition-colors ${styles[tone]}`}
     >
       {children}
     </button>

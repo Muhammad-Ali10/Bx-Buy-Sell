@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, useRef, useCallback } from "react";
-import { Send, Search, Video, MoreVertical, X, UserX, Trash2, User, PhoneOff, Archive, MessageSquare, Paperclip, Edit2, Check, XCircle, Pin, Info } from "lucide-react";
+import { useEffect, useState, useRef, useCallback, lazy, Suspense } from "react";
+import { Send, Search, Video, Users, MoreVertical, X, UserX, Trash2, User, PhoneOff, Archive, MessageSquare, Paperclip, Edit2, Check, XCircle, Pin, Info } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { VideoCall } from "./VideoCall";
 import { ErrorBoundary } from "./ErrorBoundary";
+import type { GroupCallCredentials } from "./GroupVideoCall";
 import { apiClient } from "@/lib/api";
 import { getCachedChatRoom, setCachedChatRoom } from "@/lib/chatRoomCache";
 import { getChatListingTitle } from "@/lib/chatListing";
@@ -29,6 +30,10 @@ import chatSearchIcon from "@/assets/chatsearch.svg";
 import videoCallIcon from "@/assets/vedio call.svg";
 import fileIcon from "@/assets/file.svg";
 import sendIcon from "@/assets/send.svg";
+import { callLogLabel } from "@/lib/callLog";
+
+// The Agora SDK is large; it loads only when a group call opens.
+const GroupVideoCall = lazy(() => import("./GroupVideoCall"));
 
 interface Message {
   id: string;
@@ -87,6 +92,28 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   // about. Not always the other person in this chat: the team can ring either
   // side, and a call can come in about another conversation.
   const [callPeer, setCallPeer] = useState<{ id: string; chatId?: string } | null>(null);
+  /*
+   * A group video call the team rang us into (see GroupVideoCall.tsx). The
+   * invitation first, then the call itself once we join. Kept in refs as well,
+   * because the socket handlers outlive the render that set them up.
+   */
+  const [groupInvite, setGroupInviteState] = useState<{ chatId: string; callId: string; from: string } | null>(null);
+  const groupInviteRef = useRef(groupInvite);
+  const setGroupInvite = (next: typeof groupInvite) => {
+    groupInviteRef.current = next;
+    setGroupInviteState(next);
+  };
+  const [groupCall, setGroupCallState] = useState<{
+    chatId: string;
+    callId: string;
+    hostId: string;
+    credentials: GroupCallCredentials;
+  } | null>(null);
+  const groupCallRef = useRef(groupCall);
+  const setGroupCall = (next: typeof groupCall) => {
+    groupCallRef.current = next;
+    setGroupCallState(next);
+  };
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -1281,6 +1308,33 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       }
     });
 
+    // Group video calls: the team rings the buyer and the seller together.
+    newSocket.removeAllListeners('group-call:incoming');
+    newSocket.on('group-call:incoming', (data: { chatId: string; callId: string; from: string }) => {
+      if (groupCallRef.current || data.from === currentUserId) return;
+      setGroupInvite({ chatId: data.chatId, callId: data.callId, from: data.from });
+      startRingingSound();
+    });
+    // Answered or turned down in another tab: stop ringing here too.
+    newSocket.removeAllListeners('group-call:answered');
+    newSocket.on('group-call:answered', (data: { callId: string }) => {
+      if (groupInviteRef.current?.callId === data.callId && !groupCallRef.current) {
+        setGroupInvite(null);
+        stopRingingSound();
+      }
+    });
+    newSocket.removeAllListeners('group-call:ended');
+    newSocket.on('group-call:ended', (data: { callId: string }) => {
+      if (groupInviteRef.current?.callId === data.callId) {
+        setGroupInvite(null);
+        stopRingingSound();
+      }
+      if (groupCallRef.current?.callId === data.callId) {
+        setGroupCall(null);
+        toast.info('The group call has ended');
+      }
+    });
+
     listenersRegisteredRef.current = true;
     console.log('👂 Registered message and video call listeners on socket:', newSocket.id);
   };
@@ -2254,6 +2308,42 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     console.log('✅ Video call ended, all state reset');
   };
 
+  const handleJoinGroupCall = () => {
+    const invite = groupInviteRef.current;
+    if (!invite || !socketRef.current?.connected) return;
+    stopRingingSound();
+    socketRef.current.timeout(10_000).emit('group-call:join', { chatId: invite.chatId, callId: invite.callId }, (err: Error | null, reply: any) => {
+      setGroupInvite(null);
+      if (err) {
+        toast.error('The chat server did not answer. Please try again.');
+        return;
+      }
+      if (!reply?.ok) {
+        toast.error(reply?.error || 'Could not join the group call');
+        return;
+      }
+      setGroupCall({
+        chatId: invite.chatId,
+        callId: invite.callId,
+        hostId: reply.hostId,
+        credentials: { appId: reply.appId, channel: reply.channel, token: reply.token, uid: reply.uid },
+      });
+    });
+  };
+
+  const handleDeclineGroupCall = () => {
+    const invite = groupInviteRef.current;
+    stopRingingSound();
+    setGroupInvite(null);
+    if (invite) socketRef.current?.emit('group-call:decline', { chatId: invite.chatId, callId: invite.callId });
+  };
+
+  const handleLeaveGroupCall = () => {
+    const call = groupCallRef.current;
+    setGroupCall(null);
+    if (call) socketRef.current?.emit('group-call:leave', { chatId: call.chatId, callId: call.callId });
+  };
+
   // Cleanup ringing sound on unmount
   useEffect(() => {
     return () => {
@@ -3039,7 +3129,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                     </div>
                     <div className="flex flex-col">
                       <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                        {isCompleted ? 'Video call ended' : 'Missed video call'}
+                        {callLogLabel(callData)}
                       </span>
                       {isCompleted && duration > 0 && (
                         <span className="text-sm lg:text-xs xl:text-sm text-gray-600 dark:text-gray-300 font-medium mt-0.5">
@@ -4364,6 +4454,72 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
             </div>
           </div>
         </div>
+      )}
+      {/* A group call the team rang us into: join or decline. */}
+      {groupInvite && !groupCall && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/90 p-6">
+          <div className="w-full max-w-sm rounded-3xl bg-[#0b0f19] p-8 text-center text-white shadow-2xl">
+            <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-[#C6FE1F] text-black">
+              <Users className="h-9 w-9" />
+            </div>
+            <h2 className="text-2xl font-bold">EX-Support</h2>
+            <p className="mt-2 text-white/70">
+              invites you to a group video call with the {currentUserId === sellerId ? "buyer" : "seller"}
+            </p>
+            <div className="mt-8 flex justify-center gap-4">
+              <Button
+                onClick={handleDeclineGroupCall}
+                variant="destructive"
+                className="h-12 rounded-full px-6"
+              >
+                <PhoneOff className="mr-2 h-5 w-5" /> Decline
+              </Button>
+              <Button
+                onClick={handleJoinGroupCall}
+                className="h-12 rounded-full bg-green-600 px-6 hover:bg-green-700"
+              >
+                <Video className="mr-2 h-5 w-5" /> Join
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {groupCall && currentUserId && (
+        <ErrorBoundary
+          fallback={
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black text-white">
+              <div className="p-6 text-center">
+                <p className="mb-6">There was an error in the group call.</p>
+                <button onClick={handleLeaveGroupCall} className="rounded-full bg-red-600 px-6 py-3 font-semibold">
+                  Leave
+                </button>
+              </div>
+            </div>
+          }
+        >
+          <Suspense fallback={<div className="fixed inset-0 z-[60] bg-[#0b0f19]" />}>
+            <GroupVideoCall
+              credentials={groupCall.credentials}
+              people={{
+                [groupCall.hostId]: { name: "EX-Support" },
+                [currentUserId]: {
+                  name: `${currentUser?.first_name || ""} ${currentUser?.last_name || ""}`.trim() || "You",
+                },
+                // The other side of this conversation, when it is the one on screen.
+                ...(groupCall.chatId === (chatRoom?.id || conversationId) && otherUser
+                  ? {
+                      [currentUserId === userId ? sellerId : userId]: {
+                        name: `${otherUser.first_name || ""} ${otherUser.last_name || ""}`.trim() || "Participant",
+                      },
+                    }
+                  : {}),
+              }}
+              isHost={false}
+              onLeave={handleLeaveGroupCall}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
     </div>
   );

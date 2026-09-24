@@ -17,7 +17,7 @@ import { useSubscriptionTier } from "@/hooks/useSubscriptionTier";
 import { VerificationDialog } from "@/components/account/VerificationDialog";
 import { ChangePasswordDialog } from "@/components/account/ChangePasswordDialog";
 import { IdentityVerificationDialog } from "@/components/account/IdentityVerificationDialog";
-
+import {ActPhone, ActEmail ,FaceId, LockIcon, PassLock} from "@/assets/svg";
 /**
  * Account Details — everything about the account in one place.
  *
@@ -319,7 +319,7 @@ const Profile = () => {
                     {/* An unconfirmed address is offered the check first; the
                         Verification tab used to be the only place saying so. */}
                     <StatusRow
-                      icon={<Mail className="h-4 w-4" />}
+                      icon={<ActEmail className="h-4 w-4" />}
                       label={orUnknown(user.email)}
                       action={
                         (user as any).is_email_verified
@@ -331,12 +331,12 @@ const Profile = () => {
                     {/* The one row in this column with nothing to press. The
                         rest all offer the thing they describe. */}
                     <StatusRow
-                      icon={<Lock className="h-4 w-4" />}
+                      icon={<PassLock className="h-4 w-4" />}
                       label="Password: ••••••"
                       action={{ text: "Edit", onClick: () => setPasswordDialogOpen(true) }}
                     />
                     <StatusRow
-                      icon={<Smartphone className="h-4 w-4" />}
+                      icon={<ActPhone className="h-4 w-4" />}
                       label={profile.phone || "No phone number"}
                       action={
                         (user as any).is_phone_verified && profile.phone
@@ -346,7 +346,7 @@ const Profile = () => {
                       pending={!(user as any).is_phone_verified}
                     />
                     <StatusRow
-                      icon={<IdCard className="h-4 w-4" />}
+                      icon={<FaceId className="h-4 w-4" />}
                       label={(user as any).verified ? "ID verified" : "ID not verified"}
                       action={
                         (user as any).verified
@@ -359,7 +359,7 @@ const Profile = () => {
                         "Verified"; both open the page listing the documents
                         and their verdicts, where more can be added. */}
                     <StatusRow
-                      icon={<Wallet className="h-4 w-4" />}
+                      icon={<LockIcon className="h-4 w-4" />}
                       label="Acquisition Capacity"
                       action={
                         fundsState === "VERIFIED"

@@ -12,6 +12,7 @@ export const useUpdateStatisticQuestion = () => {
       answer_type: string;
       options?: string[];
       required?: boolean | null; hint?: string | null; publicHint?: string | null;
+      visibleWithoutRegistration?: boolean | null;
     }) => {
       const response = await apiClient.updateAdminQuestion(data.id, {
         question: data.question,
@@ -21,6 +22,7 @@ export const useUpdateStatisticQuestion = () => {
         required: data.required ?? null,
         hint: data.hint,
         publicHint: data.publicHint,
+        visibleWithoutRegistration: data.visibleWithoutRegistration,
       });
 
       if (!response.success) {

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useAddStatisticQuestion } from "@/hooks/useAddStatisticQuestion";
 import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
+import { GuestVisibilityToggle } from "./GuestVisibilityToggle";
 
 interface AddStatisticQuestionDialogProps {
   open: boolean;
@@ -36,6 +37,9 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange, categoryId }: A
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
   const [required, setRequired] = useState(true);
+  // A new statistic is held back from visitors who are not signed in, like
+  // the rest of its section, until someone chooses otherwise.
+  const [visibleToGuests, setVisibleToGuests] = useState(false);
   const addQuestion = useAddStatisticQuestion();
 
   const handleSave = () => {
@@ -60,6 +64,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange, categoryId }: A
         categoryId,
         hint: hintText.trim(),
         publicHint: publicHint.trim(),
+        visibleWithoutRegistration: visibleToGuests,
       },
       {
         onSuccess: () => {
@@ -68,6 +73,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange, categoryId }: A
           setQuestionType("TEXT");
           setOptions("");
           setRequired(true);
+          setVisibleToGuests(false);
           onOpenChange(false);
         },
       }
@@ -80,6 +86,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange, categoryId }: A
     setQuestionType("TEXT");
     setOptions("");
     setRequired(true);
+    setVisibleToGuests(false);
     onOpenChange(false);
   };
 
@@ -117,6 +124,7 @@ export const AddStatisticQuestionDialog = ({ open, onOpenChange, categoryId }: A
               className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
             />
           </div>
+          <GuestVisibilityToggle visible={visibleToGuests} onChange={setVisibleToGuests} />
           <div className="space-y-2">
             <Label className="text-sm font-medium text-black">Options</Label>
             <Select value={questionType} onValueChange={setQuestionType}>

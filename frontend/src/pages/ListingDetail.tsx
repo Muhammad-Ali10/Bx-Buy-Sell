@@ -3157,6 +3157,19 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
    * to. Null when the table is shown as the seller wrote it.
    */
   const convertedPnl = pnlFiguresIn(listing, viewerCurrency);
+  /*
+   * The table's figures with their currency, like the averages above it. They
+   * were bare numbers, so a reader could not tell dollars from francs. The
+   * currency is the visitor's once converted, else the one the seller used.
+   */
+  const pnlCurrency = convertedPnl ? viewerCurrency : listingCurrencyCode(listing);
+  const formatPnlMoney = (value: unknown) => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return formatNumber(value as any);
+    const money = formatMoneyIn({ amount: Math.abs(amount), currency: pnlCurrency, approx: false });
+    // A loss reads "-$500", not "$-500".
+    return amount < 0 ? `-${money}` : money;
+  };
   const financialData = (() => {
     // The figures as the resolver files them, so a listing saved under the old
     // keys is read from the year each figure belongs to rather than from the
@@ -4514,7 +4527,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                               textAlign: 'center',
                             }}
                           >
-                            {String(cellValue).trim() !== '' ? formatNumber(cellValue) : '-'}
+                            {String(cellValue).trim() !== '' ? formatPnlMoney(cellValue) : '-'}
                           </span>
                         </div>
                       );
@@ -4590,7 +4603,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                           textAlign: 'center',
                         }}
                       >
-                        {hasFigures ? formatNumber(profit) : '-'}
+                        {hasFigures ? formatPnlMoney(profit) : '-'}
                       </span>
                     </div>
                   );

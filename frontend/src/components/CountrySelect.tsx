@@ -46,6 +46,13 @@ interface CountrySelectProps {
    * placeholder.
    */
   allOption?: string;
+  /**
+   * What the button reads while nothing is chosen. Defaults to `allOption`,
+   * else `placeholder`; the All Listings sidebar keeps its "Select location".
+   */
+  emptyLabel?: string;
+  /** The list drawn dark, for the All Listings filter sidebar. */
+  dark?: boolean;
 }
 
 export const CountrySelect = ({
@@ -54,6 +61,8 @@ export const CountrySelect = ({
   placeholder = "Select country",
   className,
   allOption,
+  emptyLabel,
+  dark = false,
 }: CountrySelectProps) => {
   const [open, setOpen] = useState(false);
 
@@ -89,16 +98,24 @@ export const CountrySelect = ({
             // Preserve any previously saved value that isn't an exact match.
             <span className="truncate">{value}</span>
           ) : (
-            allOption ?? placeholder
+            emptyLabel ?? allOption ?? placeholder
           )}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[var(--radix-popover-trigger-width)] p-0"
+        className={cn(
+          "w-[var(--radix-popover-trigger-width)] p-0",
+          dark && "border-gray-700 bg-[rgba(24,24,26,1)] text-white",
+        )}
         align="start"
       >
-        <Command>
+        <Command
+          className={cn(
+            dark &&
+              "bg-transparent text-white [&_[cmdk-input-wrapper]]:border-gray-700 [&_[cmdk-input]]:text-white [&_[cmdk-input]]:placeholder:text-white/40",
+          )}
+        >
           <CommandInput placeholder="Search country..." />
           <CommandList>
             <CommandEmpty>No country found.</CommandEmpty>

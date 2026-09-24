@@ -11,8 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCategories } from "@/hooks/useCategories";
-import FlagIcon from "@/components/FlagIcon";
-import { ALL_COUNTRY_NAMES } from "@/lib/countryUtils";
+import CountrySelect from "@/components/CountrySelect";
 import { Link } from "react-router-dom";
 import { useSubscriptionTier } from "@/hooks/useSubscriptionTier";
 
@@ -81,10 +80,6 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
       name !== "managed by ex" &&
       name?.trim() !== ""
     );
-
-  // Every country, so the filter matches the real world rather than a
-  // hand-picked two dozen. Flags resolve from the same dataset.
-  const countries = ALL_COUNTRY_NAMES;
 
   const updateFilter = (key: string, value: any) => {
     if (key.startsWith("advanced.")) {
@@ -428,50 +423,17 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
           >
             Business Location
           </label>
-          <Select
-            value={filters.businessLocation}
-            onValueChange={(value) => updateFilter("businessLocation", value)}
-          >
-            <SelectTrigger 
-              className="text-white border-0 focus:ring-0 focus:ring-offset-0"
-              style={{
-                width: "100%",
-                height: "48px",
-                borderRadius: "12px",
-                justifyContent: "space-between",
-                paddingTop: "12px",
-                paddingRight: "12px",
-                paddingBottom: "12px",
-                paddingLeft: "16px",
-                backgroundColor: "rgba(255, 255, 255, 0.05)",
-                fontSize: "14px",
-              }}
-            >
-              <SelectValue placeholder="Select location">
-                {filters.businessLocation && filters.businessLocation !== "all" ? (
-                  <div className="flex items-center gap-2">
-                    <FlagIcon country={filters.businessLocation} className="w-4 h-4" />
-                    <span>{filters.businessLocation}</span>
-                  </div>
-                ) : (
-                  "Select location"
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent className="bg-[rgba(24,24,26,1)] border-gray-700">
-              <SelectItem value="all" className="text-white hover:bg-gray-800">
-                All Locations
-              </SelectItem>
-              {countries.map((country) => (
-                <SelectItem key={country} value={country} className="text-white hover:bg-gray-800">
-                  <div className="flex items-center gap-2">
-                    <FlagIcon country={country} className="w-4 h-4" />
-                    <span>{country}</span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Searchable, like Business Location in Create Listing: a list of
+              two hundred and fifty countries was only scrollable. The filter
+              keeps "all" for no choice; the picker speaks in "". */}
+          <CountrySelect
+            dark
+            value={filters.businessLocation === "all" ? "" : filters.businessLocation}
+            onChange={(country) => updateFilter("businessLocation", country || "all")}
+            allOption="All Locations"
+            emptyLabel="Select location"
+            className="h-12 rounded-xl border-0 bg-white/5 px-4 text-sm text-white hover:bg-white/10 hover:text-white focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
         </div>
 
         {/* Advanced Filter Section */}
@@ -548,36 +510,19 @@ const FilterSidebar = ({ filters, onFiltersChange, onClearFilters, onFind }: Fil
                     min. {filters.advancedFilters.targetCountryPercentage}%
                   </span>
                 </div>
-                <Select
-                  value={filters.advancedFilters.targetCountry}
-                  onValueChange={(value) => updateFilter("advanced.targetCountry", value)}
-                >
-                  <SelectTrigger className="bg-[rgba(24,24,26,1)] border-gray-700 text-white rounded-lg">
-                    <SelectValue placeholder="Select country">
-                      {filters.advancedFilters.targetCountry && filters.advancedFilters.targetCountry !== "all" ? (
-                        <div className="flex items-center gap-2">
-                          <FlagIcon country={filters.advancedFilters.targetCountry} className="w-4 h-4" />
-                          <span>{filters.advancedFilters.targetCountry}</span>
-                        </div>
-                      ) : (
-                        "Select country"
-                      )}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="bg-[rgba(24,24,26,1)] border-gray-700">
-                    <SelectItem value="all" className="text-white hover:bg-gray-800">
-                      All Countries
-                    </SelectItem>
-                    {countries.map((country) => (
-                      <SelectItem key={country} value={country} className="text-white hover:bg-gray-800">
-                        <div className="flex items-center gap-2">
-                          <FlagIcon country={country} className="w-4 h-4" />
-                          <span>{country}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Searchable, the same as Business Location above. */}
+                <CountrySelect
+                  dark
+                  value={
+                    filters.advancedFilters.targetCountry === "all"
+                      ? ""
+                      : filters.advancedFilters.targetCountry
+                  }
+                  onChange={(country) => updateFilter("advanced.targetCountry", country || "all")}
+                  allOption="All Countries"
+                  emptyLabel="Select country"
+                  className="h-10 rounded-lg border-gray-700 bg-[rgba(24,24,26,1)] text-sm text-white hover:bg-white/10 hover:text-white"
+                />
                 <Slider
                   value={[filters.advancedFilters.targetCountryPercentage]}
                   onValueChange={(value) => updateFilter("advanced.targetCountryPercentage", value[0])}

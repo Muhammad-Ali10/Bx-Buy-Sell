@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Search, ExternalLink, Eye, Edit, MessageCircle, RefreshCw, Trash2, MoreVertical, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Filter, CalendarIcon, X, CheckCircle2, XCircle, Crown, Settings, UserPlus } from "lucide-react";
+import { Search, ExternalLink, Eye, Edit, MessageCircle, MessagesSquare, RefreshCw, Trash2, MoreVertical, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Filter, CalendarIcon, X, CheckCircle2, XCircle, Crown, Settings, UserPlus } from "lucide-react";
 import { useAdminListings } from "@/hooks/useAdminListings";
 import { useCategories } from "@/hooks/useCategories";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -1054,12 +1054,29 @@ export default function AdminListings() {
                                   <Edit className="h-3 w-3 sm:h-4 sm:w-4 mr-2 text-gray-600" />
                                   <span>Edit</span>
                                 </DropdownMenuItem>
-                                <DropdownMenuItem 
+                                {/* Your own one-on-one conversation with the owner,
+                                    as "Chat" in the users table does. It used to open
+                                    the owner's thread with a buyer about this listing,
+                                    which is someone else's conversation. Not offered
+                                    on your own listing: nobody chats with themselves. */}
+                                {(listing.userId || listing.user_id) &&
+                                  (listing.userId || listing.user_id) !== currentUser?.id && (
+                                  <DropdownMenuItem
+                                    className="cursor-pointer hover:bg-accent/20 rounded-md"
+                                    onClick={() => navigate(`/admin/users/${listing.userId || listing.user_id}/chats?direct=1`)}
+                                  >
+                                    <MessageCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-2 text-gray-600" />
+                                    <span>Chat</span>
+                                  </DropdownMenuItem>
+                                )}
+                                {/* What "Chat" used to do: read the conversations
+                                    buyers have had with the owner about this listing. */}
+                                <DropdownMenuItem
                                   className="cursor-pointer hover:bg-accent/20 rounded-md"
                                   onClick={() => navigate(`/admin/users/${listing.userId || listing.user_id}/chats?listingId=${listing.id}`)}
                                 >
-                                  <MessageCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-2 text-gray-600" />
-                                  <span>Chat</span>
+                                  <MessagesSquare className="h-3 w-3 sm:h-4 sm:w-4 mr-2 text-gray-600" />
+                                  <span>View listing chats</span>
                                 </DropdownMenuItem>
                                 {canModerateOwner && (
                                   <DropdownMenuItem 

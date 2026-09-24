@@ -28,6 +28,62 @@ export interface ListingViewer {
   role?: string | null;
   /** True once this viewer has accepted the listing's confidentiality agreement. */
   hasConfidentialAccess?: boolean;
+  /** The administrators' "Visible without registration?" answers. See below. */
+  guestStatistics?: GuestStatisticRules;
+}
+
+/**
+ * "Visible without registration?", as administrators set it per statistic:
+ * category name, then question wording, to whether a visitor who is not signed
+ * in may read the answer. The key '' holds questions that belong to no
+ * category.
+ *
+ * By name and wording because that is all a listing keeps: its category is a
+ * copy of the name, its answers carry a copy of the question, and neither
+ * points back to the admin's records by id.
+ */
+export type GuestStatisticRules = Map<string, Map<string, boolean>>;
+
+const normalizeKey = (value: unknown) =>
+  String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+export function buildGuestStatisticRules(
+  questions: Array<{
+    question?: string | null;
+    categoryId?: string | null;
+    visibleWithoutRegistration?: boolean | null;
+  }>,
+  categories: Array<{ id: string; name?: string | null }>,
+): GuestStatisticRules {
+  const nameById = new Map(categories.map((c) => [c.id, normalizeKey(c.name)]));
+  const rules: GuestStatisticRules = new Map();
+  for (const q of questions) {
+    // Unset stays unset, so the default rule still decides for it.
+    if (typeof q.visibleWithoutRegistration !== 'boolean') continue;
+    const category = q.categoryId ? nameById.get(q.categoryId) : '';
+    if (category === undefined) continue; // a category since deleted
+    const inCategory = rules.get(category) ?? new Map<string, boolean>();
+    inCategory.set(normalizeKey(q.question), q.visibleWithoutRegistration);
+    rules.set(category, inCategory);
+  }
+  return rules;
+}
+
+/**
+ * What the administrators said about this statistic, or undefined when nobody
+ * has said anything: the listing's own category first, then the questions that
+ * belong to no category.
+ */
+export function guestStatisticSetting(
+  question: string,
+  categoryName: string | null | undefined,
+  rules: GuestStatisticRules | undefined,
+): boolean | undefined {
+  if (!rules || rules.size === 0) return undefined;
+  const key = normalizeKey(question);
+  const own = rules.get(normalizeKey(categoryName))?.get(key);
+  if (own !== undefined) return own;
+  return rules.get('')?.get(key);
 }
 
 /** How much of the description a logged-out visitor gets — roughly three lines. */
@@ -130,8 +186,14 @@ export function resolveViewerLevel(
   return viewer.hasConfidentialAccess ? 'CONFIDENTIAL' : 'REGISTERED';
 }
 
+/** Where the listing sits, for rules set per category. */
+interface QuestionContext {
+  categoryName?: string | null;
+  guestStatistics?: GuestStatisticRules;
+}
+
 /** What a single answer requires. */
-function levelForQuestion(section: string, item: any): VisibilityLevel {
+function levelForQuestion(section: string, item: any, context: QuestionContext = {}): VisibilityLevel {
   if (CONFIDENTIAL_ANSWER_TYPES.has(String(item?.answer_type || ''))) {
     return 'CONFIDENTIAL';
   }
@@ -140,11 +202,11 @@ function levelForQuestion(section: string, item: any): VisibilityLevel {
   if (CONFIDENTIAL_QUESTION_PATTERNS.some((re) => re.test(question))) {
     return 'CONFIDENTIAL';
   }
-  if (
-    section === 'statistics' &&
-    PUBLIC_STATISTIC_PATTERNS.some((re) => re.test(question))
-  ) {
-    return 'PUBLIC';
+  if (section === 'statistics') {
+    // An administrator's Yes or No wins; with neither, the written default.
+    const setting = guestStatisticSetting(question, context.categoryName, context.guestStatistics);
+    if (setting !== undefined) return setting ? 'PUBLIC' : 'REGISTERED';
+    if (PUBLIC_STATISTIC_PATTERNS.some((re) => re.test(question))) return 'PUBLIC';
   }
 
   const sectionLevel = SECTION_LEVEL[section] ?? 'PUBLIC';
@@ -233,11 +295,16 @@ function blurredPreview(url: string): string | null {
   return url.replace('/upload/', '/upload/w_600,e_blur:900,q_auto/');
 }
 
-function maskSection(section: string, items: any[], viewerLevel: VisibilityLevel) {
+function maskSection(
+  section: string,
+  items: any[],
+  viewerLevel: VisibilityLevel,
+  context: QuestionContext = {},
+) {
   if (!Array.isArray(items)) return items;
 
   return items.map((item) => {
-    const required = levelForQuestion(section, item);
+    const required = levelForQuestion(section, item, context);
     if (!canSee(viewerLevel, required)) {
       // Photos stay visible as blurred previews; everything else is replaced
       // by the unlock prompt.
@@ -368,9 +435,13 @@ export function maskListingFor(listing: any, viewer?: ListingViewer) {
     user: maskSeller(listing.user, viewerLevel),
   });
 
+  const context: QuestionContext = {
+    categoryName: Array.isArray(listing.category) ? listing.category[0]?.name : null,
+    guestStatistics: viewer?.guestStatistics,
+  };
   for (const section of LISTING_SECTIONS) {
     if (masked[section] !== undefined) {
-      masked[section] = maskSection(section, masked[section], viewerLevel);
+      masked[section] = maskSection(section, masked[section], viewerLevel, context);
     }
   }
 

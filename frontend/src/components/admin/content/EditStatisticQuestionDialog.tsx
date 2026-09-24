@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { X } from "lucide-react";
 import { useUpdateStatisticQuestion } from "@/hooks/useUpdateStatisticQuestion";
 import { QuestionRequiredToggle } from "./QuestionRequiredToggle";
+import { GuestVisibilityToggle } from "./GuestVisibilityToggle";
+import { visibleWithoutRegistrationFor } from "@/lib/guestVisibility";
 
 interface StatisticQuestion {
   id: string;
@@ -19,6 +21,8 @@ interface StatisticQuestion {
   hint?: string | null;
   /** Help for the buyer, shown as the ⓘ beside this figure on the ad. */
   publicHint?: string | null;
+  /** Whether a visitor who is not signed in may read it; null = the default rule. */
+  visibleWithoutRegistration?: boolean | null;
 }
 
 interface EditStatisticQuestionDialogProps {
@@ -43,6 +47,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
   const [questionType, setQuestionType] = useState("TEXT");
   const [options, setOptions] = useState("");
   const [required, setRequired] = useState(true);
+  const [visibleToGuests, setVisibleToGuests] = useState(false);
   const updateQuestion = useUpdateStatisticQuestion();
 
   useEffect(() => {
@@ -53,6 +58,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
       setRequired(question.required !== false);
       setHintText(question.hint || "");
       setPublicHint(question.publicHint || "");
+      setVisibleToGuests(visibleWithoutRegistrationFor(question));
     }
   }, [question]);
 
@@ -75,6 +81,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
         required,
         hint: hintText.trim(),
         publicHint: publicHint.trim(),
+        visibleWithoutRegistration: visibleToGuests,
       },
       {
         onSuccess: () => {
@@ -90,6 +97,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
       setQuestionType(question.answer_type);
       setOptions(question.option && Array.isArray(question.option) ? question.option.join(", ") : "");
       setHintText("");
+      setVisibleToGuests(visibleWithoutRegistrationFor(question));
     }
     onOpenChange(false);
   };
@@ -128,6 +136,7 @@ export const EditStatisticQuestionDialog = ({ open, onOpenChange, question }: Ed
               className="bg-gray-50 border-gray-200 text-black min-h-[80px] resize-none"
             />
           </div>
+          <GuestVisibilityToggle visible={visibleToGuests} onChange={setVisibleToGuests} />
           <div className="space-y-2">
             <Label className="text-sm font-medium text-black">Options</Label>
             <Select value={questionType} onValueChange={setQuestionType}>

@@ -13,6 +13,7 @@ import {
   type ChatFilters,
 } from "./AdminChatFilters";
 import { ChatResponsiblePicker } from "./ChatResponsiblePicker";
+import { callLogLabel } from "@/lib/callLog";
 
 /**
  * The four states a conversation can be in, in the words the design uses.
@@ -593,8 +594,9 @@ export const AdminConversationList = ({
               if (!text) return 'No messages yet';
               try {
                 const parsed = JSON.parse(text);
-                if (parsed?.type === 'missed_video_call') return 'Missed video call';
-                if (parsed?.type === 'video_call_completed') return 'Video call ended';
+                if (parsed?.type === 'missed_video_call' || parsed?.type === 'video_call_completed') {
+                  return callLogLabel(parsed);
+                }
               } catch {
                 // Not JSON, show it as written.
               }

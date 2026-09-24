@@ -61,6 +61,17 @@ import Currency from "./currency.svg?react"
 import Language from "./language.svg?react"
 import OffMarketSvg from "./OffMarket.svg?react"
 import GoesPublicSvg from "./GoesPublic.svg?react"
+import CircleCheck from "./CircleCheck.svg?react"
+import Premium from "./Premium.svg?react"
+import Minimum from "./Minimum.svg?react"
+import Starter from "./Starter.svg?react"
+import ActPhone from "./actphone.svg?react"
+import FaceId from "./faceid.svg?react"
+import LockIcon from "./lockicon.svg?react"
+import PassLock from "./passlock.svg?react"
+import ActEmail from "./actemail.svg?react"
+
+
 export {
   AccountsSvg,
   AdInformationsSvg,
@@ -124,5 +135,14 @@ export {
   Currency,
   Language,
   OffMarketSvg,
-  GoesPublicSvg
+  GoesPublicSvg,
+  CircleCheck,
+  Premium,
+  Minimum,
+  Starter,
+  ActPhone,
+  FaceId,
+  LockIcon,
+  PassLock,
+  ActEmail
 };

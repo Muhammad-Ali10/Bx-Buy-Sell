@@ -1118,6 +1118,8 @@ class ApiClient {
     categoryId?: string | null;
     hint?: string | null;
     publicHint?: string | null;
+    /** "Visible without registration?" on a statistic; null = the default rule. */
+    visibleWithoutRegistration?: boolean | null;
   }) {
     // Backend DTO expects 'options' (plural), not 'option' (singular)
     const payload: any = {
@@ -1141,6 +1143,9 @@ class ApiClient {
     if (questionData.categoryId) payload.categoryId = questionData.categoryId;
     if (questionData.hint) payload.hint = questionData.hint;
     if (questionData.publicHint) payload.publicHint = questionData.publicHint;
+    if (typeof questionData.visibleWithoutRegistration === 'boolean') {
+      payload.visibleWithoutRegistration = questionData.visibleWithoutRegistration;
+    }
 
     return this.request('/question-admin', {
       method: 'POST',
@@ -1159,6 +1164,8 @@ class ApiClient {
     required?: boolean | null;
     hint?: string | null;
     publicHint?: string | null;
+    /** "Visible without registration?" on a statistic; null = the default rule. */
+    visibleWithoutRegistration?: boolean | null;
   }) {
     // Backend DTO expects 'options' (plural), not 'option' (singular)
     const payload: any = {};
@@ -1184,6 +1191,9 @@ class ApiClient {
     if (questionData.hint !== undefined) payload.hint = questionData.hint || null;
     if (questionData.publicHint !== undefined) {
       payload.publicHint = questionData.publicHint || null;
+    }
+    if (questionData.visibleWithoutRegistration !== undefined) {
+      payload.visibleWithoutRegistration = questionData.visibleWithoutRegistration;
     }
 
     return this.request(`/question-admin/${id}`, {

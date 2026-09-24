@@ -14,9 +14,9 @@ import { isQuestionRequired } from "@/lib/questionRequired";
 import { sanitizeNumberInput } from "@/lib/numberInput";
 import { getFormCurrencySymbol } from "@/lib/listingCurrency";
 import {
-  ALLOWED_ATTACHMENT_LABEL,
-  isAllowedAttachment,
+  asAllowedAttachment,
   maxBytesFor,
+  refusedAttachmentsMessage,
 } from "@/lib/fileTypes";
 
 interface AdInformationsStepProps {
@@ -125,17 +125,21 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
     questionId: string,
     fileList: FileList | null,
     folder: string,
-    /** Attachments accept only the client's format list; photos stay open. */
-    isAllowedType?: (fileName: string) => boolean,
+    /**
+     * Attachments accept only the client's format list; photos stay open.
+     * Returns the file ready to upload (renamed if need be), or null to refuse it.
+     */
+    prepare?: (file: File) => File | null,
   ) => {
     if (!fileList || fileList.length === 0) return;
     const all = Array.from(fileList);
 
     // `accept` is only a browser hint, so re-check the type here.
-    const rightType = isAllowedType ? all.filter((f) => isAllowedType(f.name)) : all;
-    const wrongType = all.length - rightType.length;
-    if (wrongType > 0) {
-      toast.error(`${wrongType} file(s) skipped — allowed: ${ALLOWED_ATTACHMENT_LABEL}`);
+    const checked = all.map((file) => ({ file, ready: prepare ? prepare(file) : file }));
+    const rightType = checked.flatMap(({ ready }) => (ready ? [ready] : []));
+    const refused = checked.filter(({ ready }) => !ready).map(({ file }) => file);
+    if (refused.length > 0) {
+      toast.error(refusedAttachmentsMessage(refused));
     }
 
     // Video is allowed up to 100 MB; everything else stays at 10 MB.
@@ -324,7 +328,7 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                           question.id,
                           e.target.files,
                           "listings/ad-attachments",
-                          isAllowedAttachment,
+                          asAllowedAttachment,
                         );
                         e.target.value = "";
                       }}

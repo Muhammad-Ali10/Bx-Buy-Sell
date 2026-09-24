@@ -89,11 +89,11 @@ const OffMarketSection = () => {
         <h2 className="text-xl font-bold">
           {data.total} Off-Market {data.total === 1 ? "Listing" : "Listings"}
         </h2>
-        <p className="text-sm text-muted-foreground">
+        {/* <p className="text-sm text-muted-foreground">
           {data.hasEarlyAccess
             ? "Yours to browse before they go public."
             : "Premium members can see these before everyone else."}
-        </p>
+        </p> */}
       </div>
 
       {/* The design's margins: 32px of grey around the panel, 28px inside it. */}
