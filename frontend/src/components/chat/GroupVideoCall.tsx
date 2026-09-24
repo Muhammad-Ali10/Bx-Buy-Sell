@@ -38,6 +38,8 @@ interface GroupVideoCallProps {
   /** Everyone invited and how they answered, so the host sees who is missing. */
   statuses?: Record<string, GroupCallStatus>;
   isHost: boolean;
+  /** Two people, or the team with both sides. Two people both end the call. */
+  kind?: "direct" | "group";
   /** Pressed the red button. The screen has already let go of camera and mic. */
   onLeave: () => void;
 }
@@ -103,7 +105,15 @@ const Tile = ({
   );
 };
 
-export const GroupVideoCall = ({ credentials, people, statuses = {}, isHost, onLeave }: GroupVideoCallProps) => {
+export const GroupVideoCall = ({
+  credentials,
+  people,
+  statuses = {},
+  isHost,
+  kind = "group",
+  onLeave,
+}: GroupVideoCallProps) => {
+  const direct = kind === "direct";
   const clientRef = useRef<IAgoraRTCClient | null>(null);
   const micRef = useRef<IMicrophoneAudioTrack | null>(null);
   const camRef = useRef<ICameraVideoTrack | null>(null);
@@ -265,16 +275,16 @@ export const GroupVideoCall = ({ credentials, people, statuses = {}, isHost, onL
   const waitingFor = Object.entries(statuses).filter(([, status]) => status !== "joined");
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0f19] text-white" role="dialog" aria-label="Group video call">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b0f19] text-white" role="dialog" aria-label={direct ? "Video call" : "Group video call"}>
       <div className="flex items-center justify-between px-4 py-3 sm:px-6">
         <div className="flex items-center gap-2 text-sm">
           <Users className="h-4 w-4" />
-          <span className="font-semibold">Group video call</span>
+          <span className="font-semibold">{direct ? "Video call" : "Group video call"}</span>
           {phase === "live" && joinedAt && (
             <span className="text-white/60">· {formatDuration(Math.floor((now - joinedAt) / 1000))}</span>
           )}
         </div>
-        {isHost && waitingFor.length > 0 && (
+        {isHost && !direct && waitingFor.length > 0 && (
           <div className="flex flex-wrap justify-end gap-2 text-xs">
             {waitingFor.map(([id, status]) => (
               <span key={id} className="rounded-full bg-white/10 px-3 py-1">
@@ -306,7 +316,13 @@ export const GroupVideoCall = ({ credentials, people, statuses = {}, isHost, onL
         {phase === "connecting" && <p className="mt-4 text-center text-sm text-white/60">Connecting…</p>}
         {phase === "live" && remote.length === 0 && (
           <p className="mt-4 text-center text-sm text-white/60">
-            {isHost ? "Waiting for the others to join…" : "Waiting for the others…"}
+            {direct
+              ? isHost
+                ? `Calling ${Object.keys(statuses).map((id) => nameOf(id)).join(", ") || "…"}…`
+                : "Connecting…"
+              : isHost
+                ? "Waiting for the others to join…"
+                : "Waiting for the others…"}
           </p>
         )}
         {notice && <p className="mt-2 text-center text-sm text-amber-300">{notice}</p>}
@@ -332,12 +348,12 @@ export const GroupVideoCall = ({ credentials, people, statuses = {}, isHost, onL
         <button
           type="button"
           onClick={onLeave}
-          aria-label={isHost ? "End the call for everyone" : "Leave the call"}
-          title={isHost ? "End the call for everyone" : "Leave the call"}
+          aria-label={direct ? "End the call" : isHost ? "End the call for everyone" : "Leave the call"}
+          title={direct ? "End the call" : isHost ? "End the call for everyone" : "Leave the call"}
           className="flex h-14 items-center gap-2 rounded-full bg-red-600 px-6 font-semibold hover:bg-red-700"
         >
           <PhoneOff className="h-5 w-5" />
-          <span className="text-sm">{isHost ? "End for everyone" : "Leave"}</span>
+          <span className="text-sm">{direct ? "End call" : isHost ? "End for everyone" : "Leave"}</span>
         </button>
       </div>
     </div>

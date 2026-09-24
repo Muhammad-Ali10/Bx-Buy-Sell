@@ -231,6 +231,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       userId = payload.id;
 
       (client as any).userId = userId;
+      // Every signed-in connection, on any page, hears a group call ring. Its
+      // own room: joining user:<id> would count someone as reachable for a
+      // one-to-one call on screens that cannot show one.
+      client.join(`group-ring:${userId}`);
       (client as any).userRole = userRole;
 
       if (this.isStaffRole(userRole)) {
@@ -1475,7 +1479,16 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       candidate: message.candidate,
     });
   }
-  // ─── Group video calls (team + buyer + seller), carried by Agora ───────────
+  // ─── Video calls, carried by Agora ─────────────────────────────────────────
+  //
+  // One system for every call: two people (buyer ↔ seller, or the team and one
+  // side), or the team with both sides at once. A call rings on every page of
+  // the site — each signed-in connection sits in group-ring:<userId> — so the
+  // person being called does not need the chat open. See group-call.ts.
+
+  /** How long an invitation rings before it counts as not answered. */
+  private readonly RING_TIMEOUT_MS = 60_000;
+  private readonly ringTimers = new Map<string, NodeJS.Timeout>();
 
   /** A call-log line in the conversation, sent to whoever has it open. */
   private async postCallMessage(chatId: string, senderId: string, content: Record<string, unknown>) {
@@ -1495,36 +1508,50 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         createdAt: saved.createdAt,
       }));
     } catch (error) {
-      console.error('❌ Could not log the group call in the conversation:', error);
+      console.error('❌ Could not log the call in the conversation:', error);
     }
   }
 
+  /** Whether this person has the site open anywhere. */
+  private isOnSite(userId: string): boolean {
+    return (this.io?.sockets?.adapter?.rooms?.get(`group-ring:${userId}`)?.size ?? 0) > 0;
+  }
+
   /**
-   * Ends a group call for everyone and writes it into the conversation: one
-   * line for the call, and a missed call for each person who never came in.
+   * Ends a call for everyone and writes it into the conversation: one line for
+   * the call, and a missed call for each person who never came in. The reason
+   * travels with the ending so the caller's screen can say why.
    */
-  private async finishGroupCall(chatId: string, callId?: string) {
+  private async finishGroupCall(
+    chatId: string,
+    callId?: string,
+    reason: 'ended' | 'declined' | 'no_answer' = 'ended',
+  ) {
     const ended = this.groupCalls.end(chatId, callId);
     if (!ended) return;
     const { call, summary } = ended;
-    const payload = { chatId, callId: call.callId };
+    const timer = this.ringTimers.get(call.callId);
+    if (timer) clearTimeout(timer);
+    this.ringTimers.delete(call.callId);
+
+    const payload = { chatId, callId: call.callId, reason };
     this.io.to(`group-call:${call.callId}`).emit('group-call:ended', payload);
     // Those still ringing are in no call room yet.
-    for (const id of call.invited) this.io.to(`user:${id}`).emit('group-call:ended', payload);
+    for (const id of call.invited) this.io.to(`group-ring:${id}`).emit('group-call:ended', payload);
 
+    const group = call.kind === 'group';
     if (summary.participants > 1) {
       await this.postCallMessage(chatId, call.hostId, {
         type: 'video_call_completed',
-        group: true,
+        ...(group ? { group: true, participants: summary.participants } : { receiverId: call.invited[0] }),
         callerId: call.hostId,
         duration: summary.durationSeconds,
-        participants: summary.participants,
       });
     }
     for (const id of summary.missed) {
       await this.postCallMessage(chatId, call.hostId, {
         type: 'missed_video_call',
-        group: true,
+        ...(group ? { group: true } : {}),
         callerId: call.hostId,
         receiverId: id,
         reason: call.declined.has(id) ? 'declined' : 'no_answer',
@@ -1532,44 +1559,124 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
   }
 
+  /**
+   * After a minute, whoever has not answered stops ringing. A call between two
+   * people ends there; a group call goes on with whoever came, and ends only if
+   * nobody did.
+   */
+  private scheduleNoAnswer(chatId: string, callId: string) {
+    const timer = setTimeout(() => {
+      this.ringTimers.delete(callId);
+      const call = this.groupCalls.get(chatId);
+      if (!call || call.callId !== callId) return;
+      const silent = this.groupCalls.unanswered(chatId, callId);
+      if (silent.length === 0) return;
+      if (call.kind === 'direct' || call.joined.size === 0) {
+        void this.finishGroupCall(chatId, callId, 'no_answer');
+        return;
+      }
+      for (const id of silent) {
+        this.io.to(`group-ring:${id}`).emit('group-call:ended', { chatId, callId, reason: 'no_answer' });
+        this.io.to(`group-call:${callId}`).emit('group-call:participant', { callId, userId: id, action: 'no_answer' });
+      }
+    }, this.RING_TIMEOUT_MS);
+    timer.unref?.();
+    this.ringTimers.set(callId, timer);
+  }
+
   @SubscribeMessage('group-call:start')
   async handleGroupCallStart(
-    @MessageBody() message: { chatId: string },
+    @MessageBody() message: { chatId: string; to?: string },
     @ConnectedSocket() client: Socket,
   ) {
     const hostId = (client as any).userId as string | undefined;
     if (!hostId || !message?.chatId) return { ok: false, error: 'Not signed in' };
 
-    // The role from the database, never from the token.
-    const host = await this.db.user.findUnique({ where: { id: hostId }, select: { role: true } });
-    if (!(TEAM_ROLES_THAT_CALL as readonly string[]).includes(String(host?.role ?? ''))) {
-      return { ok: false, error: 'Only the team can start a group call' };
-    }
     const chat = await this.db.chat.findUnique({
       where: { id: message.chatId },
       select: { userId: true, sellerId: true },
     });
     if (!chat) return { ok: false, error: 'Conversation not found' };
 
+    const direct = Boolean(message.to);
+    const hostInChat = [chat.userId, chat.sellerId].includes(hostId);
+    // The role from the database, never from the token — and only when the
+    // caller is not one of the two people in the conversation.
+    const host = hostInChat
+      ? null
+      : await this.db.user.findUnique({ where: { id: hostId }, select: { role: true } });
+    const hostIsTeam = (TEAM_ROLES_THAT_CALL as readonly string[]).includes(String(host?.role ?? ''));
+
+    let invited: string[];
+    if (direct) {
+      if (!mayPlaceVideoCall(chat, hostId, String(message.to), host?.role)) {
+        return { ok: false, error: 'You cannot call this person from this conversation' };
+      }
+      invited = [String(message.to)];
+    } else {
+      if (!hostIsTeam) return { ok: false, error: 'Only the team can start a group call' };
+      invited = [chat.userId, chat.sellerId];
+    }
+
+    // Names for the call screen, so every video is labelled on any page. The
+    // team is "EX-Support" to members; a buyer or seller is themselves.
+    const users = await this.db.user.findMany({
+      where: { id: { in: [...new Set([...invited, hostId])] } },
+      select: { id: true, first_name: true, last_name: true },
+    });
+    const nameOf = (id: string) => {
+      const u = users.find((row) => row.id === id);
+      return `${u?.first_name || ''} ${u?.last_name || ''}`.trim() || 'Participant';
+    };
+
+    // Not on the site at all: nothing to ring. Said at once, and logged.
+    if (direct && !this.isOnSite(invited[0])) {
+      await this.postCallMessage(message.chatId, hostId, {
+        type: 'missed_video_call',
+        callerId: hostId,
+        receiverId: invited[0],
+        reason: 'offline',
+      });
+      return {
+        ok: false,
+        offline: true,
+        error: `${nameOf(invited[0])} is not online right now — a missed call was left in the chat`,
+      };
+    }
+
     try {
-      const call = this.groupCalls.start(message.chatId, hostId, [chat.userId, chat.sellerId], {
+      const call = this.groupCalls.start(message.chatId, hostId, invited, {
         hostSocketId: client.id,
+        kind: direct ? 'direct' : 'group',
       });
       const credentials = groupCallCredentials(call.channel, hostId);
       if (!credentials) {
         this.groupCalls.end(message.chatId, call.callId);
-        return { ok: false, error: 'Group calls are not set up on this server (Agora keys missing)' };
+        return { ok: false, error: 'Video calls are not set up on this server (Agora keys missing)' };
       }
+      call.people = { [hostId]: hostIsTeam && !hostInChat ? 'EX-Support' : nameOf(hostId) };
+      for (const id of call.invited) call.people[id] = nameOf(id);
+
       client.join(`group-call:${call.callId}`);
       for (const id of call.invited) {
-        this.io.to(`user:${id}`).emit('group-call:incoming', {
+        this.io.to(`group-ring:${id}`).emit('group-call:incoming', {
           chatId: message.chatId,
           callId: call.callId,
+          kind: call.kind,
           from: hostId,
           invited: call.invited,
+          people: call.people,
         });
       }
-      return { ok: true, callId: call.callId, invited: call.invited, ...credentials };
+      this.scheduleNoAnswer(message.chatId, call.callId);
+      return {
+        ok: true,
+        callId: call.callId,
+        kind: call.kind,
+        invited: call.invited,
+        people: call.people,
+        ...credentials,
+      };
     } catch (error) {
       if (error instanceof GroupCallError) return { ok: false, error: error.message };
       throw error;
@@ -1586,7 +1693,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     try {
       const call = this.groupCalls.join(message?.chatId, message?.callId, userId);
       const credentials = groupCallCredentials(call.channel, userId);
-      if (!credentials) return { ok: false, error: 'Group calls are not set up on this server' };
+      if (!credentials) return { ok: false, error: 'Video calls are not set up on this server' };
       client.join(`group-call:${call.callId}`);
       this.io.to(`group-call:${call.callId}`).emit('group-call:participant', {
         callId: call.callId,
@@ -1594,8 +1701,16 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         action: 'joined',
       });
       // Another tab of the same person stops ringing.
-      this.io.to(`user:${userId}`).emit('group-call:answered', { callId: call.callId });
-      return { ok: true, callId: call.callId, hostId: call.hostId, invited: call.invited, ...credentials };
+      this.io.to(`group-ring:${userId}`).emit('group-call:answered', { callId: call.callId });
+      return {
+        ok: true,
+        callId: call.callId,
+        kind: call.kind,
+        hostId: call.hostId,
+        invited: call.invited,
+        people: call.people,
+        ...credentials,
+      };
     } catch (error) {
       if (error instanceof GroupCallError) return { ok: false, error: error.message };
       throw error;
@@ -1611,12 +1726,17 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     if (!userId) return { ok: false };
     const changed = this.groupCalls.decline(message?.chatId, message?.callId, userId);
     if (changed) {
+      this.io.to(`group-ring:${userId}`).emit('group-call:answered', { callId: message.callId });
+      // Between two people, a no is the end of the call.
+      if (this.groupCalls.get(message.chatId)?.kind === 'direct') {
+        void this.finishGroupCall(message.chatId, message.callId, 'declined');
+        return { ok: true };
+      }
       this.io.to(`group-call:${message.callId}`).emit('group-call:participant', {
         callId: message.callId,
         userId,
         action: 'declined',
       });
-      this.io.to(`user:${userId}`).emit('group-call:answered', { callId: message.callId });
     }
     return { ok: changed };
   }
@@ -1630,9 +1750,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     if (!userId) return { ok: false };
     const call = this.groupCalls.get(message?.chatId);
     if (!call || call.callId !== message?.callId) return { ok: false };
-    // The host leaving is the end of the call, for everyone.
-    if (call.hostId === userId) {
-      void this.finishGroupCall(message.chatId, message.callId);
+    // The host leaving, or either person in a call between two, ends it.
+    if (call.hostId === userId || call.kind === 'direct') {
+      void this.finishGroupCall(message.chatId, message.callId, 'ended');
       return { ok: true, ended: true };
     }
     this.groupCalls.leave(message.chatId, message.callId, userId);

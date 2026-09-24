@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,21 +21,8 @@ import { Socket } from "socket.io-client";
 import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
 import chatSearchIcon from "@/assets/chatsearch.svg";
 import { ChatMessageBody } from "@/components/chat/ChatMessageBody";
-import { VideoCall } from "@/components/chat/VideoCall";
-import { ErrorBoundary } from "@/components/chat/ErrorBoundary";
-import type { GroupCallCredentials, GroupCallStatus } from "@/components/chat/GroupVideoCall";
 import { callLogLabel } from "@/lib/callLog";
-
-// The Agora SDK is large; it loads only when a group call opens.
-const GroupVideoCall = lazy(() => import("@/components/chat/GroupVideoCall"));
-
-/** A call this moderator placed to one side of the conversation. */
-interface TeamCall {
-  peerId: string;
-  peer: { first_name?: string; last_name?: string; profile_pic?: string };
-  status: 'calling' | 'connected';
-  startedAt: Date | null;
-}
+import { startCall } from "@/lib/calls";
 
 interface Message {
   id: string;
@@ -127,185 +114,15 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
   }, [messages]);
 
   /*
-   * Video calls from this screen. The moderator rings the buyer or the seller,
-   * one at a time; the call is logged in the conversation like any other (the
-   * server writes the missed or completed call into it). Kept in a ref as well
-   * as state because the socket handlers outlive the render that set them up.
+   * Video calls from this screen: the buyer, the seller, or both at once. The
+   * CallCenter at the root of the app runs them (lib/calls.ts), so the person
+   * called hears it on any page of the site and the call survives this screen.
+   * The server logs each call in the conversation when it ends.
    */
-  const [teamCall, setTeamCallState] = useState<TeamCall | null>(null);
-  const teamCallRef = useRef<TeamCall | null>(null);
-  const setTeamCall = (next: TeamCall | null) => {
-    teamCallRef.current = next;
-    setTeamCallState(next);
+  const startTeamCall = (peerId: string | undefined, _person?: unknown) => {
+    if (peerId) startCall({ chatId: conversationId, to: peerId });
   };
-
-  useEffect(() => {
-    if (!socket) return;
-    const peerName = (call: TeamCall) =>
-      `${call.peer.first_name || ''} ${call.peer.last_name || ''}`.trim() || 'They';
-
-    const onAccepted = (data: { from: string }) => {
-      const call = teamCallRef.current;
-      if (!call || data.from !== call.peerId) return;
-      setTeamCall({ ...call, status: 'connected', startedAt: new Date() });
-    };
-    const onRejected = (data: { from: string }) => {
-      const call = teamCallRef.current;
-      if (!call || data.from !== call.peerId) return;
-      setTeamCall(null);
-      toast.info(`${peerName(call)} declined the call`);
-    };
-    const onEnded = (data: { from: string }) => {
-      const call = teamCallRef.current;
-      if (!call || data.from !== call.peerId) return;
-      setTeamCall(null);
-    };
-    const onOffline = (data: { userId: string }) => {
-      const call = teamCallRef.current;
-      if (!call || data.userId !== call.peerId) return;
-      setTeamCall(null);
-      toast.error(`${peerName(call)} is not online right now — a missed call was left in the chat`);
-    };
-    // A server that still only lets the buyer and the seller call each other
-    // refuses the call outright; say so instead of ringing forever.
-    const onRefused = (payload: any) => {
-      const call = teamCallRef.current;
-      const reason = typeof payload?.message === 'string' ? payload.message : '';
-      if (!call || call.status !== 'calling' || !/video call|caller/i.test(reason)) return;
-      setTeamCall(null);
-      toast.error('This call could not be placed');
-    };
-
-    socket.on('video:call-accepted', onAccepted);
-    socket.on('video:call-rejected', onRejected);
-    socket.on('video:call-ended', onEnded);
-    socket.on('video:user-offline', onOffline);
-    socket.on('exception', onRefused);
-    return () => {
-      socket.off('video:call-accepted', onAccepted);
-      socket.off('video:call-rejected', onRejected);
-      socket.off('video:call-ended', onEnded);
-      socket.off('video:user-offline', onOffline);
-      socket.off('exception', onRefused);
-    };
-  }, [socket]);
-
-  const startTeamCall = (peerId: string | undefined, person: any) => {
-    if (!peerId || !user?.id || teamCallRef.current) return;
-    if (!socket?.connected) {
-      toast.error('Not connected to the chat server yet — try again in a moment');
-      return;
-    }
-    setTeamCall({
-      peerId,
-      peer: {
-        first_name: person?.first_name || '',
-        last_name: person?.last_name || '',
-        profile_pic: person?.profile_pic || undefined,
-      },
-      status: 'calling',
-      startedAt: null,
-    });
-    // Join our own room first so the answer finds its way back here.
-    socket.emit('video:register', { userId: user.id });
-    socket.emit('video:call-user', {
-      from: user.id,
-      to: peerId,
-      channelName: `chat-${conversationId}`,
-      chatId: conversationId,
-    });
-  };
-
-  const endTeamCall = () => {
-    const call = teamCallRef.current;
-    if (!call) return;
-    const duration = call.startedAt
-      ? Math.floor((Date.now() - call.startedAt.getTime()) / 1000)
-      : 0;
-    if (socket?.connected && user?.id) {
-      socket.emit('video:end-call', {
-        from: user.id,
-        to: call.peerId,
-        chatId: conversationId,
-        duration,
-      });
-    }
-    setTeamCall(null);
-  };
-
-  /*
-   * Group video call: this moderator with the buyer and the seller together.
-   * Carried by Agora (GroupVideoCall.tsx); the server rings both, hands out
-   * the tokens, and logs the call in the conversation when it ends.
-   */
-  const [groupCall, setGroupCall] = useState<{
-    chatId: string;
-    callId: string;
-    credentials: GroupCallCredentials;
-    statuses: Record<string, GroupCallStatus>;
-  } | null>(null);
-  const groupCallRef = useRef(groupCall);
-  groupCallRef.current = groupCall;
-  // Names for the toasts below, which outlive the render that set them up.
-  const groupCallNamesRef = useRef<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!socket) return;
-    const onParticipant = (data: { callId: string; userId: string; action: GroupCallStatus }) => {
-      const call = groupCallRef.current;
-      if (!call || call.callId !== data.callId) return;
-      setGroupCall({ ...call, statuses: { ...call.statuses, [data.userId]: data.action } });
-      const name = groupCallNamesRef.current[data.userId] || 'Someone';
-      if (data.action === 'declined') toast.info(`${name} declined the group call`);
-      if (data.action === 'left') toast.info(`${name} left the group call`);
-    };
-    const onEnded = (data: { callId: string }) => {
-      if (groupCallRef.current?.callId === data.callId) setGroupCall(null);
-    };
-    socket.on('group-call:participant', onParticipant);
-    socket.on('group-call:ended', onEnded);
-    return () => {
-      socket.off('group-call:participant', onParticipant);
-      socket.off('group-call:ended', onEnded);
-    };
-  }, [socket]);
-
-  const startGroupCall = () => {
-    if (!user?.id || groupCallRef.current || teamCallRef.current) return;
-    if (!socket?.connected) {
-      toast.error('Not connected to the chat server yet — try again in a moment');
-      return;
-    }
-    // Said at once, so a press never looks like nothing happened.
-    toast.loading('Starting the group call…', { id: 'group-call-start' });
-    // A server that does not know group calls (an older build) never answers;
-    // without a time limit the press would just do nothing, silently.
-    socket.timeout(10_000).emit('group-call:start', { chatId: conversationId }, (err: Error | null, reply: any) => {
-      toast.dismiss('group-call-start');
-      if (err) {
-        toast.error('The chat server did not answer. It may need restarting with the latest version.');
-        return;
-      }
-      if (!reply?.ok) {
-        toast.error(reply?.error || 'Could not start the group call');
-        return;
-      }
-      setGroupCall({
-        chatId: conversationId,
-        callId: reply.callId,
-        credentials: { appId: reply.appId, channel: reply.channel, token: reply.token, uid: reply.uid },
-        statuses: Object.fromEntries((reply.invited || []).map((id: string) => [id, 'ringing'])),
-      });
-    });
-  };
-
-  // The host leaving ends the call for everyone; the server does the rest.
-  const endGroupCall = () => {
-    const call = groupCallRef.current;
-    if (!call) return;
-    socket?.emit('group-call:leave', { chatId: call.chatId, callId: call.callId });
-    setGroupCall(null);
-  };
+  const startGroupCall = () => startCall({ chatId: conversationId });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -748,17 +565,6 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
   const sellerName = `${conversation.seller?.first_name || ''} ${conversation.seller?.last_name || ''}`.trim() || 'Seller';
   const buyerId: string | undefined = conversation.userId || conversation.user?.id;
   const sellerId: string | undefined = conversation.sellerId || conversation.seller?.id;
-  const groupCallPeople: Record<string, { name: string }> = {};
-  if (buyerId) groupCallPeople[buyerId] = { name: buyerName };
-  if (sellerId) groupCallPeople[sellerId] = { name: sellerName };
-  if (user?.id) {
-    groupCallPeople[user.id] = {
-      name: `${(user as any).first_name || ''} ${(user as any).last_name || ''}`.trim() || 'You',
-    };
-  }
-  groupCallNamesRef.current = Object.fromEntries(
-    Object.entries(groupCallPeople).map(([id, person]) => [id, person.name]),
-  );
   // Both sides, and neither of them this moderator — otherwise it is a one-to-one call.
   const canGroupCall = Boolean(
     buyerId && sellerId && buyerId !== sellerId && buyerId !== user?.id && sellerId !== user?.id,
@@ -866,7 +672,6 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
                 type="button"
                 aria-label="Video call"
                 title={isConnected ? 'Video call' : 'Connecting to the chat server…'}
-                disabled={!!teamCall || !!groupCall}
                 style={{
                   width: '32px',
                   height: '32px',
@@ -874,7 +679,7 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
                   borderRadius: '16px',
                   background: 'rgba(249, 251, 252, 1)',
                   border: 'none',
-                  cursor: teamCall ? 'default' : 'pointer',
+                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -1345,61 +1150,6 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
           </div>
         )}
       </div>
-
-      {teamCall && user?.id && (
-        <ErrorBoundary
-          fallback={
-            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center text-white">
-              <div className="text-center p-6 max-w-md">
-                <h2 className="text-2xl font-bold mb-4 text-red-400">Video Call Error</h2>
-                <p className="text-gray-300 mb-6">There was an error starting the video call.</p>
-                <button
-                  onClick={endTeamCall}
-                  className="px-6 py-3 bg-red-600 rounded-full hover:bg-red-700 text-white font-semibold"
-                >
-                  End Call
-                </button>
-              </div>
-            </div>
-          }
-        >
-          <VideoCall
-            socket={socket}
-            fromUserId={user.id}
-            toUserId={teamCall.peerId}
-            otherUser={teamCall.peer}
-            isIncoming={false}
-            callStatus={teamCall.status}
-            onEndCall={endTeamCall}
-            callStartTime={teamCall.startedAt}
-          />
-        </ErrorBoundary>
-      )}
-
-      {groupCall && user?.id && (
-        <ErrorBoundary
-          fallback={
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black text-white">
-              <div className="p-6 text-center">
-                <p className="mb-6">There was an error in the group call.</p>
-                <button onClick={endGroupCall} className="rounded-full bg-red-600 px-6 py-3 font-semibold">
-                  End Call
-                </button>
-              </div>
-            </div>
-          }
-        >
-          <Suspense fallback={<div className="fixed inset-0 z-[60] bg-[#0b0f19]" />}>
-            <GroupVideoCall
-              credentials={groupCall.credentials}
-              people={groupCallPeople}
-              statuses={groupCall.statuses}
-              isHost
-              onLeave={endGroupCall}
-            />
-          </Suspense>
-        </ErrorBoundary>
-      )}
     </div>
   );
 };

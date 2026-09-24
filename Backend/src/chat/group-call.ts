@@ -16,8 +16,12 @@ import { RtcRole, RtcTokenBuilder } from 'agora-token';
  * not is shown a missed call in the conversation.
  */
 
+/** A call between two people, or the team with both sides of a conversation. */
+export type CallKind = 'direct' | 'group';
+
 export interface GroupCall {
   callId: string;
+  kind: CallKind;
   chatId: string;
   /** The Agora channel: fresh for every call, so an old token opens nothing. */
   channel: string;
@@ -31,6 +35,8 @@ export interface GroupCall {
   present: Set<string>;
   declined: Set<string>;
   startedAt: number;
+  /** Everyone's name for the call screen, by user id; the host is "EX-Support". */
+  people: Record<string, string>;
 }
 
 export interface GroupCallSummary {
@@ -55,10 +61,10 @@ export class GroupCallRegistry {
     chatId: string,
     hostId: string,
     participants: string[],
-    options: { hostSocketId?: string; now?: number } = {},
+    options: { hostSocketId?: string; now?: number; kind?: CallKind } = {},
   ): GroupCall {
     if (this.byChat.has(chatId)) {
-      throw new GroupCallError('A group call is already running in this conversation');
+      throw new GroupCallError('A call is already running in this conversation');
     }
     const invited = [...new Set(participants.filter((id) => id && id !== hostId))];
     if (invited.length === 0) {
@@ -67,6 +73,7 @@ export class GroupCallRegistry {
     const callId = randomUUID();
     const call: GroupCall = {
       callId,
+      kind: options.kind ?? 'group',
       chatId,
       channel: `gc_${callId.replace(/-/g, '')}`,
       hostId,
@@ -76,6 +83,7 @@ export class GroupCallRegistry {
       present: new Set(),
       declined: new Set(),
       startedAt: options.now ?? Date.now(),
+      people: {},
     };
     this.byChat.set(chatId, call);
     return call;
@@ -107,6 +115,13 @@ export class GroupCallRegistry {
     if (!call || call.callId !== callId) return undefined;
     call.present.delete(userId);
     return call;
+  }
+
+  /** Invited, and neither in the call nor having said no. */
+  unanswered(chatId: string, callId: string): string[] {
+    const call = this.byChat.get(chatId);
+    if (!call || call.callId !== callId) return [];
+    return call.invited.filter((id) => !call.joined.has(id) && !call.declined.has(id));
   }
 
   /** Takes the call off the books and says how it went. */

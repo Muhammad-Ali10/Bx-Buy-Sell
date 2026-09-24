@@ -78,6 +78,23 @@ export const createSocketConnection = (options?: {
 let presenceSocket: Socket | null = null;
 let presenceToken: string | null = null;
 
+/**
+ * Whoever wants the session's connection — the group-call ringer, which has to
+ * hear a ring on any page — is told each time it changes (sign-in, sign-out,
+ * another account), and once at once with the current one.
+ */
+type PresenceListener = (socket: Socket | null) => void;
+const presenceListeners = new Set<PresenceListener>();
+const announcePresence = () => presenceListeners.forEach((listener) => listener(presenceSocket));
+
+export const onPresenceSocket = (listener: PresenceListener): (() => void) => {
+  presenceListeners.add(listener);
+  listener(presenceSocket);
+  return () => {
+    presenceListeners.delete(listener);
+  };
+};
+
 export const openPresenceConnection = (token: string): Socket | null => {
   if (!token) return null;
   if (presenceSocket && presenceToken === token) {
@@ -87,16 +104,19 @@ export const openPresenceConnection = (token: string): Socket | null => {
   closePresenceConnection();
   presenceToken = token;
   presenceSocket = createSocketConnection({ auth: { token } });
+  announcePresence();
   return presenceSocket;
 };
 
 export const closePresenceConnection = () => {
+  const hadSocket = Boolean(presenceSocket);
   if (presenceSocket) {
     presenceSocket.removeAllListeners();
     presenceSocket.disconnect();
   }
   presenceSocket = null;
   presenceToken = null;
+  if (hadSocket) announcePresence();
 };
 
 /**

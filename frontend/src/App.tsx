@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, ScrollRestoration } from "react-router-dom";
 import { AdminProtectedRoute } from "./components/AdminProtectedRoute";
 import { usePresence } from "@/hooks/usePresence";
+import { CallCenter } from "@/components/chat/CallCenter";
 
 /**
  * Wraps every route so a new page opens at the top instead of keeping the
@@ -273,6 +274,8 @@ const App = () => {
     <QueryClientProvider client={queryClient}>
       <Toaster />
       <Sonner />
+      {/* Every video call rings, and runs, on whatever page the person is on. */}
+      <CallCenter />
       <Suspense fallback={<PageLoader />}>
         <RouterProvider
           router={router}
