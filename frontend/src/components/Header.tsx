@@ -41,6 +41,12 @@ interface HeaderProps {
    */
   inColumn?: boolean;
   /**
+   * Show the currency chooser even beside a sidebar. All Listings is a page
+   * of prices, and they are shown in the currency chosen here, so the one
+   * sidebar page that most needs the chooser was the one without it.
+   */
+  currency?: boolean;
+  /**
    * Keep the bar on its dark treatment regardless of what is behind it.
    *
    * The portal screens beside a black sidebar used it so the bar's strip
@@ -110,6 +116,7 @@ const NAV_LINKS = [
 const Header = ({
   admin = false,
   inColumn = false,
+  currency = false,
   dark = false,
   leading,
 }: HeaderProps) => {
@@ -313,7 +320,7 @@ const Header = ({
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-[10px]">
-            {showExtras && <HeaderCurrencySelect onDark={onDark} />}
+            {(showExtras || (currency && !admin)) && <HeaderCurrencySelect onDark={onDark} />}
             {isAuthenticated && user ? (
               <>
                 {showExtras && (
