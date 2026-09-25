@@ -1,10 +1,13 @@
 import { Prisma } from '@prisma/client';
 
 /**
- * Deleting a listing takes its conversations with it — the confirm dialog says
- * so — and a conversation cannot go while rows still point at it. These three
- * had no delete rule, so a listing with any conversation refused to delete:
- * "would violate the required relation 'ChatToChatLabel'".
+ * A conversation cannot go while rows still point at it. These three had no
+ * delete rule, so a listing with any conversation refused to delete: "would
+ * violate the required relation 'ChatToChatLabel'".
+ *
+ * Deleting a listing no longer takes its conversations: ListingService.delete
+ * unhooks them first (listing-delete.spec.ts). The cascade below stays as the
+ * rule for anything that would remove a listing some other way.
  */
 describe('what goes with a deleted conversation', () => {
   const onDelete = (model: string, field: string) =>

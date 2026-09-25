@@ -25,7 +25,7 @@ export type DraftListingPayload = {
   pendingPublish?: boolean;
 };
 
-function isStoredListingStep(value: unknown): value is StoredListingStep {
+export function isStoredListingStep(value: unknown): value is StoredListingStep {
   const steps: StoredListingStep[] = [
     "category",
     "brand-information",

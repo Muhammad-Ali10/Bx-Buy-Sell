@@ -143,6 +143,28 @@ export function listingPriceIn(listing: any, viewer: string): Money | null {
   return original;
 }
 
+/**
+ * Any other amount the seller wrote in the listing's currency — an average
+ * order value, an inventory value — in `viewer`'s currency.
+ *
+ * These were printed with the listing's own symbol whatever currency the
+ * visitor chose, the only figures on the page left unconverted. There is no
+ * rate table on the listing, but the asking price is stored in every currency
+ * at this week's rate, so the price itself gives the rate: the same one the
+ * price is shown at, which keeps the page consistent. With no price to take it
+ * from, the amount stays as written.
+ */
+export function listingAmountIn(listing: any, amount: number, viewer: string): Money {
+  const currency = listingCurrencyCode(listing);
+  if (viewer === currency) return { amount, currency, approx: false };
+  const price = listingFx(listing)?.price;
+  const converted = price?.in?.[viewer];
+  if (price && price.amount > 0 && typeof converted === "number" && Number.isFinite(converted)) {
+    return { amount: (amount * converted) / price.amount, currency: viewer, approx: true };
+  }
+  return { amount, currency, approx: false };
+}
+
 export type ListingFigures = {
   annualRevenue: number | null;
   annualProfit: number | null;

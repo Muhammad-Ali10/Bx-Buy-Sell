@@ -26,7 +26,9 @@ export type SystemMessageKind =
   | "DEAL_STARTED"
   | "CONFIDENTIAL_ACCESS_REQUESTED"
   | "CONFIDENTIAL_ACCESS_APPROVED"
-  | "CONFIDENTIAL_ACCESS_DECLINED";
+  | "CONFIDENTIAL_ACCESS_DECLINED"
+  /** The listing this conversation was about has been deleted; the conversation is kept. */
+  | "LISTING_DELETED";
 
 export interface SystemMessageMeta {
   kind?: SystemMessageKind;
@@ -35,6 +37,8 @@ export interface SystemMessageMeta {
   blockedSenderId?: string;
   requesterId?: string;
   atMessage?: number;
+  /** The deleted listing's name, since it no longer heads the conversation. */
+  listingTitle?: string | null;
 }
 
 /**
@@ -201,6 +205,12 @@ export function systemMessageText(message: any, viewerId?: string): string | nul
   }
 
   if (meta.kind === "DEAL_STARTED") return DEAL_STARTED;
+
+  if (meta.kind === "LISTING_DELETED") {
+    return meta.listingTitle
+      ? `The listing “${meta.listingTitle}” was deleted by its owner. This conversation has been kept.`
+      : "The listing this conversation was about was deleted by its owner. This conversation has been kept.";
+  }
 
   if (meta.kind === "CONFIDENTIAL_ACCESS_REQUESTED") {
     return viewerId && meta.buyerId === viewerId

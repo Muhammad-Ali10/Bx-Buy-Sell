@@ -1,4 +1,13 @@
-import { LISTING_PUBLISH_PENDING_SESSION_KEY, listingAwaitingPublish } from "./listingGuestSession";
+import {
+  LISTING_PUBLISH_PENDING_SESSION_KEY,
+  clearGuestListingPayload,
+  clearServerDraft,
+  guestListingPayloadForSignup,
+  listingAwaitingPublish,
+  readServerDraft,
+  rememberServerDraft,
+  saveGuestListingPayload,
+} from "./listingGuestSession";
 import { writeDraftListing } from "./draftListingStorage";
 
 /**
@@ -42,5 +51,42 @@ describe("a listing waiting to be published", () => {
 
   it("is not claimed when there is no draft at all", () => {
     expect(listingAwaitingPublish()).toBe(false);
+  });
+});
+
+/**
+ * The listing also travels with the sign-up, so the server keeps it as a
+ * draft however long confirming takes and on whichever device.
+ */
+describe("the listing sent with a guest's sign-up", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it("goes with the sign-up while a guest's listing is waiting", () => {
+    sessionStorage.setItem(LISTING_PUBLISH_PENDING_SESSION_KEY, "1");
+    saveGuestListingPayload({ status: "DRAFT", category: [{ name: "E-Commerce" }] });
+    expect(guestListingPayloadForSignup()).toEqual({ status: "DRAFT", category: [{ name: "E-Commerce" }] });
+  });
+
+  it("does not go with an ordinary sign-up, even if one was left behind", () => {
+    saveGuestListingPayload({ status: "DRAFT" });
+    expect(guestListingPayloadForSignup()).toBeUndefined();
+  });
+
+  it("is gone once cleared", () => {
+    sessionStorage.setItem(LISTING_PUBLISH_PENDING_SESSION_KEY, "1");
+    saveGuestListingPayload({ status: "DRAFT" });
+    clearGuestListingPayload();
+    expect(guestListingPayloadForSignup()).toBeUndefined();
+  });
+
+  it("remembers the draft the server made, until it is published", () => {
+    expect(readServerDraft()).toBeNull();
+    rememberServerDraft("listing-7");
+    expect(readServerDraft()).toBe("listing-7");
+    clearServerDraft();
+    expect(readServerDraft()).toBeNull();
   });
 });

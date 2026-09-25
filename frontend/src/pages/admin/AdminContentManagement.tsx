@@ -11,6 +11,7 @@ import {
   REVENUE_ROW,
   type AdminFinancialsTemplate,
   displayColumnLabel,
+  sellerFinancialColumns,
 } from "@/lib/financialTableUtils";
 import { apiClient } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -144,7 +145,16 @@ const DeletePlanDialog = lazy(() =>
   import("@/components/admin/content/DeletePlanDialog").then((m) => ({ default: m.DeletePlanDialog }))
 );
 
-type FinancialColumn = { key: string; label: string; isToday?: boolean; labelCustomized?: boolean };
+type FinancialColumn = { key: string; label: string; year?: number; kind?: "actual" | "ytd" | "forecast"; dataThrough?: string };
+
+/**
+ * The template's columns: this calendar year's four, headed by the year alone.
+ *
+ * The template supplies the rows and nothing else. Its columns used to be
+ * stored with it, date and all, and every listing took that date — 08.06.2026
+ * — for its own. The date a year to date runs to belongs to each listing.
+ */
+const templateColumns = (): FinancialColumn[] => sellerFinancialColumns([]);
 
 /** Keep every row/column cell in sync so edits always read/write the right keys. */
 const syncFinancialGrid = (
@@ -271,21 +281,14 @@ const AdminContentManagement = () => {
     "Transaction Costs",
     "Other Expenses"
   ]);
-  const [columnLabels, setColumnLabels] = useState<FinancialColumn[]>(() => [
-    { key: "2023", label: "2023" },
-    { key: "2024", label: "2024" },
-    { key: "today", label: getTodayDate(), isToday: true },
-    { key: "Forecast 2025", label: "Forecast 2025" }
-  ]);
-  const [financialData, setFinancialData] = useState<Record<string, Record<string, string>>>({
-    [REVENUE_ROW]: { "2023": "", "2024": "", "today": "", "Forecast 2025": "" },
-    "Net Revenue": { "2023": "", "2024": "", "today": "", "Forecast 2025": "" },
-    "Cost of Goods": { "2023": "", "2024": "", "today": "", "Forecast 2025": "" },
-    "Advertising costs": { "2023": "", "2024": "", "today": "", "Forecast 2025": "" },
-    "Freelancer/Employees": { "2023": "", "2024": "", "today": "", "Forecast 2025": "" },
-    "Transaction Costs": { "2023": "", "2024": "", "today": "", "Forecast 2025": "" },
-    "Other Expenses": { "2023": "", "2024": "", "today": "", "Forecast 2025": "" },
-  });
+  const [columnLabels] = useState<FinancialColumn[]>(templateColumns);
+  const [financialData, setFinancialData] = useState<Record<string, Record<string, string>>>(() =>
+    syncFinancialGrid(
+      [REVENUE_ROW, "Net Revenue", "Cost of Goods", "Advertising costs", "Freelancer/Employees", "Transaction Costs", "Other Expenses"],
+      templateColumns(),
+      {},
+    ),
+  );
 
   const financialTableRef = useRef({
     rowLabels,
@@ -299,8 +302,8 @@ const AdminContentManagement = () => {
 
   const applyFinancialTemplate = useCallback((template: AdminFinancialsTemplate) => {
     setRowLabels(template.rowLabels);
-    setColumnLabels(template.columnLabels);
-    setFinancialData(template.financialData);
+    // Rows only: the columns are the calendar's, and no figures are kept here.
+    setFinancialData(syncFinancialGrid(template.rowLabels, templateColumns(), {}));
   }, []);
 
   // Load saved financials table (API first, then local cache)
@@ -977,16 +980,6 @@ const AdminContentManagement = () => {
                   const rows = rowLabels;
                   const columns = columnLabels;
 
-              const handleCellChange = (row: string, col: string, value: string) => {
-                setFinancialData((prev) => ({
-                  ...prev,
-                  [row]: {
-                    ...(prev[row] ?? {}),
-                    [col]: value,
-                  },
-                }));
-              };
-
               // Shared with the seller's form and the listing page, so the
               // template previews the same arithmetic the other two run.
               const calculateNetProfit = (col: string) =>
@@ -1179,19 +1172,8 @@ const AdminContentManagement = () => {
                                   border: isMobile ? '1.5px solid rgba(255, 255, 255, 1)' : '2.66px solid rgba(255, 255, 255, 1)',
                                 }}
                               >
-                                    {isEditMode ? (
-                                      <Input
-                                        type="number"
-                                        value={financialData[row]?.[col.key] ?? ""}
-                                        onChange={(e) => handleCellChange(row, col.key, e.target.value)}
-                                        className={`w-11/12 text-center border-2 px-1 text-xs sm:text-base ${isGrossRevenue ? 'border-white/30 bg-transparent text-white' : 'border-black/30 bg-transparent text-black'}`}
-                                        style={{
-                                          fontSize: isMobile ? '11px' : isTablet ? '12px' : '14px',
-                                          fontFamily: 'Lufga',
-                                          fontWeight: 500,
-                                        }}
-                                      />
-                                    ) : (
+                                    {/* Only the rows are the admin's to edit; the figures
+                                        are each seller's, entered on the listing. */}
                                   <span 
                                     className="font-lufga px-1"
                                     style={{
@@ -1203,7 +1185,6 @@ const AdminContentManagement = () => {
                                   >
                                     {(financialData[row]?.[col.key] ?? "") !== "" ? financialData[row]?.[col.key] : "-"}
                                   </span>
-                                )}
                               </div>
                             ))}
                           </div>

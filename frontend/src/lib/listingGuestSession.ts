@@ -22,3 +22,76 @@ export function listingAwaitingPublish(): boolean {
   }
   return readDraftListing()?.pendingPublish === true;
 }
+
+/*
+ * The listing as the server keeps it for a guest who signs up.
+ *
+ * The draft above lives in this browser only, so confirming the account a day
+ * later on another device — or after clearing the browser — lost it. When
+ * Publish sends a guest to sign up, the listing is also built into the body
+ * "create listing" takes and sent with the sign-up; the server turns it into a
+ * DRAFT listing in the account the moment the code is confirmed.
+ */
+const GUEST_LISTING_PAYLOAD_KEY = "guest_listing_payload";
+const SERVER_DRAFT_KEY = "guest_listing_server_draft";
+
+const readJson = (key: string): unknown => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Kept for the sign-up to carry. */
+export function saveGuestListingPayload(payload: unknown) {
+  try {
+    localStorage.setItem(GUEST_LISTING_PAYLOAD_KEY, JSON.stringify(payload));
+  } catch {
+    /* storage full or unavailable: the listing still waits in the draft */
+  }
+}
+
+/** What the sign-up should carry: only while a guest's listing is waiting. */
+export function guestListingPayloadForSignup(): unknown {
+  if (!listingAwaitingPublish()) return undefined;
+  return readJson(GUEST_LISTING_PAYLOAD_KEY) ?? undefined;
+}
+
+export function clearGuestListingPayload() {
+  try {
+    localStorage.removeItem(GUEST_LISTING_PAYLOAD_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * The draft the server made from it, remembered on the device that is about
+ * to publish it, so publishing updates that draft instead of creating a second
+ * listing beside it.
+ */
+export function rememberServerDraft(id: string) {
+  try {
+    localStorage.setItem(SERVER_DRAFT_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readServerDraft(): string | null {
+  try {
+    return localStorage.getItem(SERVER_DRAFT_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearServerDraft() {
+  try {
+    localStorage.removeItem(SERVER_DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}

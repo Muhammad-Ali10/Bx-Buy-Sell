@@ -3,6 +3,7 @@ import {
   listingCurrencyCode,
   listingFiguresIn,
   listingMultiplesOf,
+  listingAmountIn,
   listingPriceIn,
   originalPriceNote,
   pnlFiguresIn,
@@ -116,5 +117,25 @@ describe("the multiples", () => {
 
   it("are worked out here once the price has changed", () => {
     expect(listingMultiplesOf(swiss({ price: "9450" }))).toMatchObject({ revenue: 10 });
+  });
+});
+
+describe("other amounts the seller wrote — average order value, inventory value", () => {
+  it("stay as written in the listing's own currency", () => {
+    expect(listingAmountIn(swiss(), 100, "CHF")).toEqual({ amount: 100, currency: "CHF", approx: false });
+  });
+
+  it("convert at the rate the asking price is shown at", () => {
+    // CHF 1,216 is $1,500 this week, so CHF 100 is about $123.
+    const usd = listingAmountIn(swiss(), 100, "USD");
+    expect(usd.currency).toBe("USD");
+    expect(usd.approx).toBe(true);
+    expect(formatMoneyIn(usd)).toBe("≈$123");
+    expect(formatMoneyIn(listingAmountIn(swiss(), 100, "EUR"))).toBe("≈€106");
+  });
+
+  it("stay as written when there is no price to take the rate from", () => {
+    const { fx: _fx, ...bare } = swiss();
+    expect(listingAmountIn(bare, 100, "USD")).toEqual({ amount: 100, currency: "CHF", approx: false });
   });
 });

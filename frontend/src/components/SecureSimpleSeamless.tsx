@@ -56,7 +56,7 @@ const SecureSimpleSeamless = () => {
             {/* Right Side - Text Content */}
             <div className="order-1 md:order-2">
               <h2 
-                className="text-white mb-4 sm:mb-6 font-lufga text-[32px] sm:text-[44px] md:text-[56px] lg:text-[72px]"
+                className="text-white mb-4 sm:mb-6 font-lufga text-[32px] md:text-[44px] lg:text-[56px] xl:text-[72]"
                 style={{
                   fontWeight: 400,
                   lineHeight: '118%',
@@ -124,7 +124,7 @@ const SecureSimpleSeamless = () => {
               <Button 
                 className="font-lufga hover:opacity-100 w-full sm:w-auto h-12 sm:h-[63px] rounded-[70px] py-3 px-6 sm:py-4 sm:px-8"
                 style={{
-                  backgroundColor: 'rgba(255, 255, 255, 1)',
+                  backgroundColor: '#C6FE1F',
                   opacity: 1,
                   border: 'none'
                 }}

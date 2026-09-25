@@ -1,16 +1,18 @@
 import {
   DEFAULT_AREA_ORDER,
   keepHiddenAreas,
+  HIDDEN_STEPS,
   listingSteps,
   normalizeAreaOrder,
+  visibleStep,
 } from "./listingAreaOrder";
 
 describe("listing area order", () => {
   it("asks the steps in the order they have always had until someone arranges them", () => {
+    // Tools is hidden for now, so it is not among them.
     expect(listingSteps(normalizeAreaOrder(undefined))).toEqual([
       "category",
       "brand-information",
-      "tools",
       "financials",
       "statistics",
       "products",
@@ -46,7 +48,7 @@ describe("listing area order", () => {
 
   it("asks every step exactly once whatever the order", () => {
     const steps = listingSteps(normalizeAreaOrder([...DEFAULT_AREA_ORDER].reverse()));
-    expect(steps).toHaveLength(11);
+    expect(steps).toHaveLength(10);
     expect(new Set(steps).size).toBe(steps.length);
   });
 
@@ -103,5 +105,27 @@ describe("an area whose row is hidden", () => {
       "tools",
       "brand-info",
     ]);
+  });
+});
+
+describe("a step that is hidden (Tools, for now)", () => {
+  const order = normalizeAreaOrder(undefined);
+
+  it("is not asked, and Next goes straight past it", () => {
+    expect(HIDDEN_STEPS.has("tools")).toBe(true);
+    const steps = listingSteps(order);
+    expect(steps).not.toContain("tools");
+    expect(steps.slice(1, 3)).toEqual(["brand-information", "financials"]);
+  });
+
+  it("sends a draft saved on it on to the next step", () => {
+    expect(visibleStep("tools", order)).toBe("financials");
+    // Wherever the admin has put it.
+    expect(visibleStep("tools", normalizeAreaOrder(["handover", "tools", "accounts"]))).toBe("accounts");
+  });
+
+  it("leaves every other step where it is", () => {
+    expect(visibleStep("statistics", order)).toBe("statistics");
+    expect(visibleStep("packages", order)).toBe("packages");
   });
 });

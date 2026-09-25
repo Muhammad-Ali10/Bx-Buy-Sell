@@ -404,6 +404,8 @@ class ApiClient {
     confirm_password: string;
     user_type?: string;
     business_name?: string;
+    /** A guest's waiting listing, kept by the server as a draft. */
+    listing_draft?: unknown;
   }) {
     const response = await this.request('/auth/signup', {
       method: 'POST',

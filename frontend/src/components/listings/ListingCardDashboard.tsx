@@ -86,8 +86,8 @@ export const ListingCardDashboard = ({
     typeof category === "string"
       ? category
       : category
-      ? String((category as any)?.name ?? "")
-      : "";
+        ? String((category as any)?.name ?? "")
+        : "";
 
   /**
    * Push Listing goes to the package page rather than publishing outright.
@@ -178,7 +178,7 @@ export const ListingCardDashboard = ({
   };
 
   return (
-    
+
     <div
       className="w-full max-w-[485px] flex flex-col gap-2 sm:gap-3 rounded-[20px] bg-[rgba(250,250,250,1)] relative p-3 sm:p-4"
       style={{
@@ -186,30 +186,30 @@ export const ListingCardDashboard = ({
       }}
     >
       <Link to={cardHref}>
-      {/* Image */}
-      <div
-        className="w-full rounded-[20px] overflow-hidden relative bg-[#e5e5e5]"
-        style={{
-          aspectRatio: '460/285',
-          minHeight: '200px',
-        }}
-      >
-        {image_url ? (
-          <img 
-            src={image_url} 
-            alt={title} 
-            className="w-full h-full object-cover"
-            loading="lazy"
-            decoding="async"
-            sizes="(max-width: 768px) 100vw, 485px"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-[rgba(0,0,0,0.5)] font-['Lufga'] text-xs sm:text-sm md:text-base">
-            No image
-          </div>
-        )}
-      
-        {/*
+        {/* Image */}
+        <div
+          className="w-full rounded-[20px] overflow-hidden relative bg-[#e5e5e5]"
+          style={{
+            aspectRatio: '460/285',
+            minHeight: '200px',
+          }}
+        >
+          {image_url ? (
+            <img
+              src={image_url}
+              alt={title}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              decoding="async"
+              sizes="(max-width: 768px) 100vw, 485px"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-[rgba(0,0,0,0.5)] font-['Lufga'] text-xs sm:text-sm md:text-base">
+              No image
+            </div>
+          )}
+
+          {/*
           * Managed by EX.
           *
           * The card has taken this prop since it was written and never drew
@@ -222,55 +222,59 @@ export const ListingCardDashboard = ({
           * anchor inside an anchor is invalid HTML — that exact fault was
           * cleared out of this card once already.
           */}
-        {managed_by_ex && (
-          <div className="absolute top-2 left-2 sm:top-3 sm:left-3">
-            <Badge
-              variant="accent"
-              className="border-0 shadow-lg flex items-center"
-              style={{
-                height: "32px",
-                borderRadius: "60px",
-                padding: "6px 14px 6px 8px",
-                gap: "6px",
-                background: "rgba(197, 253, 31, 1)",
-                backdropFilter: "blur(44px)",
-              }}
-            >
-              <img
-                src={ExIcon}
-                alt=""
-                style={{
-                  width: "18px",
-                  height: "18px",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(0, 0, 0, 1)",
-                }}
-              />
-              <span
-                className="font-lufga whitespace-nowrap"
-                style={{
-                  fontWeight: 500,
-                  fontSize: "14px",
-                  lineHeight: "140%",
-                  color: "rgba(0, 0, 0, 1)",
-                }}
-              >
-                Managed by EX
-              </span>
-            </Badge>
-          </div>
-        )}
+          <div className="flex flex-row gap-1 absolute bottom-2 left-2 pointer-events-none">
 
-        {/* Category Badge */}
-        {categoryLabel && (
-          <div className="absolute bottom-2 sm:bottom-3 left-2 sm:left-3 h-8 sm:h-9 px-3 sm:px-4 md:px-[17px] py-1.5 sm:py-2 md:py-[7px] rounded-full bg-[rgba(0,0,0,0.25)] backdrop-blur-[44px] flex items-center justify-center">
-            <span className="font-['Lufga'] font-medium text-xs sm:text-sm md:text-base leading-[140%] text-center text-white whitespace-nowrap">
-              {categoryLabel}
-            </span>
-          </div>
-        )}
+            {/* Category Badge */}
+            {categoryLabel && (
+              <div className=" h-8 sm:h-9 px-3 sm:px-4 md:px-[17px] py-1.5 sm:py-2 md:py-[7px] rounded-full bg-[rgba(0,0,0,0.25)] backdrop-blur-[44px] flex items-center justify-center">
+                <span className="font-['Lufga'] font-medium text-xs sm:text-sm md:text-base leading-[140%] text-center text-white whitespace-nowrap">
+                  {categoryLabel}
+                </span>
+              </div>
+            )}
+            {managed_by_ex && (
+              <div >
+                <Badge
+                  variant="accent"
+                  className="border-0 shadow-lg flex items-center"
+                  style={{
+                    height: "32px",
+                    borderRadius: "60px",
+                    padding: "6px 14px 6px 8px",
+                    gap: "6px",
+                    background: "rgba(197, 253, 31, 1)",
+                    backdropFilter: "blur(44px)",
+                  }}
+                >
+                  <img
+                    src={ExIcon}
+                    alt=""
+                    style={{
+                      width: "18px",
+                      height: "18px",
+                      borderRadius: "12px",
+                      border: "1px solid rgba(0, 0, 0, 1)",
+                    }}
+                  />
+                  <span
+                    className="font-lufga whitespace-nowrap"
+                    style={{
+                      fontWeight: 500,
+                      fontSize: "14px",
+                      lineHeight: "140%",
+                      color: "rgba(0, 0, 0, 1)",
+                    }}
+                  >
+                    Managed by EX
+                  </span>
+                </Badge>
+              </div>
+            )}
 
-      </div>
+
+          </div>
+
+        </div>
       </Link>
       {/* Top Actions.
 
@@ -348,23 +352,21 @@ export const ListingCardDashboard = ({
         >
           <Share2 className="w-3 h-3 sm:w-4 sm:h-4" />
         </button>
-        </div>
+      </div>
       <ShareListingDialog
         open={shareOpen}
         onOpenChange={setShareOpen}
         url={shareUrl}
         title={title}
       />
-      {/* Deleting a listing is not undoable and does not stop at the listing:
-          the conversations attached to it, and every message inside them, go
-          with it. The dialog says so, because nothing afterwards can. */}
+      {/* The client's wording. Only the listing goes: its conversations and
+          their messages are kept, and each notes which listing it was about. */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this listing?</AlertDialogTitle>
             <AlertDialogDescription>
-              &ldquo;{title}&rdquo; will be permanently deleted, along with every conversation
-              about it and the messages inside them. This cannot be undone.
+              &ldquo;{title}&rdquo; will be permanently deleted. Are you sure you want to proceed?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

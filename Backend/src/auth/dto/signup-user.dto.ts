@@ -18,6 +18,12 @@ export const signUpSchema = z.object({
   email: z.string().email().min(4).trim().toLowerCase(),
   /** The seller sign-up's company name, kept until the account is made. */
   business_name: z.string().trim().max(120).optional(),
+  /**
+   * The listing a guest was publishing when they signed up. Checked against the
+   * listing rules in AuthService.signUp, not here: a bad draft must never stop
+   * somebody registering.
+   */
+  listing_draft: z.unknown().optional(),
 });
 
 export type SignUpSchemaType = z.infer<typeof signUpSchema>;

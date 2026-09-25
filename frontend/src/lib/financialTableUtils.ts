@@ -82,138 +82,105 @@ export const coversFullYear = (dataThrough: unknown): boolean => {
 };
 
 /**
- * The label a column should be drawn with.
+ * The heading a column is drawn with: its calendar year.
  *
- * Two of the four are written by the calendar rather than by a person, and
- * both were freezing. A forecast kept the year it was created in. The
- * year-to-date column kept the day the template was first saved — a table set
- * up in June still headed that column 08.06.2026 in September, and an
- * administrator who had never touched it had no way to tell it was stale.
- *
- * Neither is stored fresh. Both are worked out at the moment they are drawn,
- * so the header is right again tomorrow without anybody saving anything.
- *
- * A label somebody typed is theirs, and is returned exactly as it is — that is
- * what `labelCustomized` records, and it is checked before anything else.
+ * Never a stored label and never a date. A heading that could be edited, or
+ * that carried the day the template was saved, is how figures ended up under
+ * one year while the column said another. The date a year to date runs to is
+ * shown underneath it — see `coverageLabel`.
  */
 export const displayColumnLabel = (col: FinancialColumn): string => {
-  if (col?.labelCustomized) return col.label;
-  if (col?.kind === "ytd" || col?.isToday || col?.key === "today") {
-    /*
-     * The column's own date — today until the seller sets one.
-     *
-     * This used to return today outright, so the heading and the coverage
-     * line beneath it named two different days: the heading always said today
-     * while the line underneath still read the date the listing had inherited
-     * from the admin template.
-     */
-    return col?.dataThrough || formatDmy(new Date());
-  }
-  if (/^Forecast\s+\d{4}$/.test(String(col?.label ?? ""))) {
-    return `Forecast ${col?.year ?? new Date().getFullYear()}`;
+  if (col?.year) {
+    return col.kind === "forecast" ? `Forecast ${col.year}` : String(col.year);
   }
   return col?.label ?? "";
 };
 
 /**
- * How a part year reads in the header: "01.01 - 26.08.2026".
+ * How a part year reads under its heading: "01.01 – 24.09.2026".
  *
- * The range rather than the end date alone, which is how the client wrote it.
- * A bare date leaves the reader to work out whether it means "up to" or "as
- * of"; spelling out both ends removes the question, and this table exists to
- * stop a part year being mistaken for a whole one.
+ * Only while the year is open. A year that runs to 31 December is a whole year
+ * and its heading says all there is to say; a forecast has no date at all.
  */
 export const coverageLabel = (col: FinancialColumn): string | null => {
-  if (!col.dataThrough || coversFullYear(col.dataThrough)) return null;
-  const parts = parseDmy(col.dataThrough);
-  if (!parts) return null;
-  return "01.01 - " + col.dataThrough;
+  if (col?.kind === "forecast") return null;
+  if (!col?.dataThrough || coversFullYear(col.dataThrough)) return null;
+  if (!parseDmy(col.dataThrough)) return null;
+  return "01.01 – " + col.dataThrough;
 };
+
+/**
+ * A year still being filled in: its date is not 31 December.
+ *
+ * Such a column is projected to a full year, shows its date, and is the only
+ * kind that gets a pencil. A completed year and a forecast have nothing to
+ * edit.
+ */
+export const isOpenYear = (col: FinancialColumn): boolean =>
+  col?.kind !== "forecast" && Boolean(col?.year) && !coversFullYear(col?.dataThrough);
 
 /**
  * Fills in year, date and kind for columns saved before those existed.
  *
- * Old listings stored `{ key: "2023" }`, `{ key: "today", isToday: true }` and
- * `{ key: "Forecast 2025" }`. Rather than migrate the database, every read
- * passes through here — no listing has to be touched, and a listing saved by
- * an older build still opens correctly.
+ * Old listings stored `{ key: "2023", label: "2024" }`, `{ key: "today",
+ * label: "08.06.2026" }` and `{ key: "Forecast 2025", label: "Forecast 2026" }`.
+ * What the seller saw above a column is what its figures are about, so the
+ * heading decides the year, not the key.
  */
 export const normalizeFinancialColumns = (
   columns: FinancialColumn[] | undefined | null,
 ): FinancialColumn[] => {
   if (!Array.isArray(columns)) return [];
 
-  return columns.map((col) => {
-    const label = String(col?.label || "").trim();
-    const key = String(col?.key || "").trim();
+  return columns
+    .filter((col) => col && typeof col === "object")
+    .map((col) => {
+      const label = String(col?.label || "").trim();
+      const key = String(col?.key || "").trim();
 
-    if (col?.year && col?.kind) return col;
+      if (col?.year && col?.kind) return col;
 
-    /*
-     * A date stored in its own right beats one read off the heading.
-     *
-     * The heading is where the old template kept the date, so it is only ever
-     * a fallback. A column that carries `dataThrough` has been given one
-     * deliberately, and reading the label over it threw that away.
-     */
-    const stated = parseDmy(col?.dataThrough) ? String(col!.dataThrough) : null;
+      // A date stored in its own right beats one read off the heading.
+      const stated = parseDmy(col?.dataThrough) ? String(col!.dataThrough) : null;
 
-    const isForecast = /forecast/i.test(label) || /forecast/i.test(key);
-    const asDate = parseDmy(label);
-    const isYtd = Boolean(col?.isToday) || key === "today" || (!isForecast && Boolean(asDate));
+      // A kind without a year: the year is in the heading, the key or the date.
+      if (col?.kind) {
+        const year =
+          Number((label.match(/(\d{4})/) || key.match(/(\d{4})/) || [])[1]) ||
+          (stated ? parseDmy(stated)!.year : undefined);
+        return { ...col, ...(year ? { year } : {}) };
+      }
 
-    if (isForecast) {
-      const digits = (label.match(/\d{4}/) || key.match(/\d{4}/) || [])[0];
-      const year = Number(digits) || new Date().getFullYear();
-      return { ...col, year, kind: "forecast" as const, dataThrough: stated ?? lastDayOf(year) };
-    }
+      const isForecast = /forecast/i.test(label) || /forecast/i.test(key);
+      const asDate = parseDmy(label);
+      const isYtd = Boolean(col?.isToday) || key === "today" || (!isForecast && Boolean(asDate));
 
-    if (isYtd) {
-      const year = asDate ? asDate.year : new Date().getFullYear();
+      if (isForecast) {
+        const digits = (label.match(/\d{4}/) || key.match(/\d{4}/) || [])[0];
+        const year = Number(digits) || new Date().getFullYear();
+        return { ...col, year, kind: "forecast" as const, dataThrough: undefined };
+      }
+
+      if (isYtd) {
+        const year = stated ? parseDmy(stated)!.year : asDate ? asDate.year : new Date().getFullYear();
+        return {
+          ...col,
+          year,
+          kind: "ytd" as const,
+          dataThrough: stated ?? (asDate ? label : formatDmy(new Date())),
+        };
+      }
+
+      const yearDigits = (label.match(/^(\d{4})$/) || key.match(/^(\d{4})$/) || [])[1];
+      const year = Number(yearDigits) || undefined;
       return {
         ...col,
-        year,
-        kind: "ytd" as const,
-        // A date sitting in the heading is where the old template kept it; it
-        // says when that table was saved, not what any seller decided.
-        dataThrough: stated ?? (asDate ? label : formatDmy(new Date())),
-        dateCustomized: col?.dateCustomized ?? false,
+        ...(year ? { year } : {}),
+        kind: "actual" as const,
+        // A plain year column has always meant the whole year.
+        dataThrough: stated ?? (year ? lastDayOf(year) : col?.dataThrough),
       };
-    }
-
-    /*
-     * The heading wins over the key.
-     *
-     * These two disagree in every table saved before the keys were derived
-     * from the year: an administrator renaming a heading from 2023 to 2024
-     * changed the label and left the key alone, and the key was read first —
-     * so the column a seller filled in as 2024 was taken for 2023, and its
-     * figures were matched to the wrong year. What the seller saw is what the
-     * figures are about, and that is the label.
-     */
-    const yearDigits = (label.match(/^(\d{4})$/) || key.match(/^(\d{4})$/) || [])[1];
-    const year = Number(yearDigits) || undefined;
-    return {
-      ...col,
-      ...(year ? { year } : {}),
-      kind: "actual" as const,
-      // A plain year column has always meant the whole year.
-      dataThrough: stated ?? (year ? lastDayOf(year) : col?.dataThrough),
-    };
-  });
-};
-
-/**
- * The year the table is currently "living in" — the one still running.
- *
- * Taken from the stored columns, never from today's date. That is the whole
- * point: on 1 January the table must not decide a year is over. It moves on
- * only when the seller says so.
- */
-export const currentYtdYear = (columns: FinancialColumn[] | undefined | null): number | null => {
-  const normalized = normalizeFinancialColumns(columns);
-  const ytd = normalized.find((col) => col.kind === "ytd");
-  return ytd?.year ?? null;
+    });
 };
 
 export type AdminFinancialsTemplate = {
@@ -225,57 +192,6 @@ export type AdminFinancialsTemplate = {
 /** Column keys are the year (and "forecast-<year>"), so figures follow the year. */
 export const columnKeyFor = (year: number, kind: FinancialColumnKind): string =>
   kind === "forecast" ? "forecast-" + year : String(year);
-
-/**
- * The four columns for a table whose running year is `ytdYear`.
- *
- * Two completed years, the running year to date, and that year's forecast —
- * anchored on the year the seller is actually still filling in, not on the
- * calendar. Passing the same `ytdYear` on 31 December and again the next
- * morning gives the same four columns, which is the point.
- */
-export const buildFinancialColumns = (
-  ytdYear: number,
-  today: Date = new Date(),
-): FinancialColumn[] => {
-  // Pre-filled with today only while the running year is the calendar year;
-  // once the calendar has moved past it, the year ended and the figures can
-  // only run to its last day.
-  const through =
-    today.getFullYear() === ytdYear ? formatDmy(today) : lastDayOf(ytdYear);
-
-  return [
-    {
-      key: columnKeyFor(ytdYear - 2, "actual"),
-      label: String(ytdYear - 2),
-      year: ytdYear - 2,
-      kind: "actual",
-      dataThrough: lastDayOf(ytdYear - 2),
-    },
-    {
-      key: columnKeyFor(ytdYear - 1, "actual"),
-      label: String(ytdYear - 1),
-      year: ytdYear - 1,
-      kind: "actual",
-      dataThrough: lastDayOf(ytdYear - 1),
-    },
-    {
-      key: columnKeyFor(ytdYear, "ytd"),
-      label: String(ytdYear),
-      year: ytdYear,
-      kind: "ytd",
-      dataThrough: through,
-      isToday: true,
-    },
-    {
-      key: columnKeyFor(ytdYear, "forecast"),
-      label: "Forecast " + ytdYear,
-      year: ytdYear,
-      kind: "forecast",
-      dataThrough: lastDayOf(ytdYear),
-    },
-  ];
-};
 
 /**
  * True when a column has at least one figure in it.
@@ -292,204 +208,253 @@ export const columnHasFigures = (
   return Object.values(data).some((row) => String(row?.[key] ?? "").trim() !== "");
 };
 
-/**
- * Has the seller finished the running year?
- *
- * Both halves are required. The date reaching 31 December is the only part a
- * program can check — "entered the full-year figures" is a claim, not a fact —
- * so the figures being present at all is the second, weaker guard. Without it,
- * setting the date on an empty column would move the table on and quietly drop
- * a year of history.
- */
-export const isYtdYearComplete = (
-  columns: FinancialColumn[] | undefined | null,
-  data: Record<string, Record<string, string>> | undefined,
-): boolean => {
-  const normalized = normalizeFinancialColumns(columns);
-  const ytd = normalized.find((col) => col.kind === "ytd");
-  if (!ytd) return false;
-  return coversFullYear(ytd.dataThrough) && columnHasFigures(data, ytd.key);
+type FinancialTable = {
+  columns: FinancialColumn[];
+  financialData: Record<string, Record<string, string>>;
 };
 
 /**
- * The columns to show, given what is stored.
+ * The date a year's column runs to, as it is kept.
  *
- * The window advances one year at a time and only when the running year has
- * been closed off. It never jumps because the calendar changed: a year still
- * being filled in must keep being read as a part-year, or its figures get
- * taken for a full twelve months and the business looks a third smaller than
- * it is.
+ * A completed year runs to 31 December. A year to date keeps its own date; one
+ * that somehow has none runs to today while its year lasts, and to the end of
+ * it afterwards — never to a day in a different year.
  */
-export const resolveFinancialColumns = (
+const storedDate = (col: FinancialColumn): string => {
+  const year = col.year as number;
+  if (col.kind === "actual") return lastDayOf(year);
+  if (parseDmy(col.dataThrough)) return String(col.dataThrough);
+  const today = new Date();
+  return today.getFullYear() === year ? formatDmy(today) : lastDayOf(year);
+};
+
+const byYear = (a: FinancialColumn, b: FinancialColumn) =>
+  (a.year ?? 0) - (b.year ?? 0) || (a.kind === "forecast" ? 1 : 0) - (b.kind === "forecast" ? 1 : 0);
+
+/**
+ * A stored table, filed by calendar year.
+ *
+ * Every column comes out keyed by its year ("2026", "forecast-2026") with its
+ * own date, whatever it was stored as, and every figure is moved to the key of
+ * the year it belongs to. A table that is already in this shape comes back
+ * unchanged, so it is safe to run on every read.
+ *
+ * The result can hold more than four years: once the seller's form has moved
+ * on to a new year, the buyer may still be shown the old window, so nothing
+ * that has figures is ever dropped.
+ */
+export const canonicalFinancialTable = (
   stored: FinancialColumn[] | undefined | null,
-  data: Record<string, Record<string, string>> | undefined,
-  today: Date = new Date(),
-): FinancialColumn[] => {
-  const normalized = normalizeFinancialColumns(stored);
-  const storedYtdYear = currentYtdYear(normalized);
-
-  // A table nobody has started yet begins in the current calendar year.
-  if (storedYtdYear === null) return buildFinancialColumns(today.getFullYear(), today);
-
-  /*
-   * Never past the calendar.
-   *
-   * Closing off a year advances the window, but a seller who enters full-year
-   * figures in August and sets 31.12 would otherwise be handed a "year to
-   * date" for a year that has not started — and `buildFinancialColumns`, asked
-   * for a future year, dates it 31 December, which reads as a completed one.
-   * The window waits for the calendar to catch up.
-   */
-  const advanced = isYtdYearComplete(normalized, data) ? storedYtdYear + 1 : storedYtdYear;
-  const ytdYear = Math.min(advanced, today.getFullYear());
-  const fresh = buildFinancialColumns(ytdYear, today);
-
-  return fresh.map((col) => {
-    /**
-     * Find last time's column for this year, whatever it was called then.
-     *
-     * The key is where the figures are stored, so it has to travel with the
-     * year rather than with the slot. Two cases would otherwise lose data:
-     * an older listing kept its year-to-date figures under the key "today",
-     * and when the window advances a year stops being the year to date and
-     * becomes a completed one. Matching on the year — preferring the same
-     * kind, but not requiring it — keeps the figures attached to the year
-     * they belong to, which is the whole point of the change.
-     */
-    const previous =
-      normalized.find((old) => old.year === col.year && old.kind === col.kind) ??
-      normalized.find((old) => old.year === col.year);
-
-    if (!previous) return col;
-
-    /*
-     * The year decides the key and the heading — not what the column used to
-     * be called.
-     *
-     * This carried the stored key and a customised label forward, so a heading
-     * renamed in the admin from 2023 to 2024 left the figures filed under
-     * 2023: the form showed "2024" and the listing page, resolving by key,
-     * read a different column and dropped the oldest one. A seller's 200,000
-     * simply vanished. Only the date the figures run to is the seller's to
-     * keep; `realignFinancialTable` moves the figures onto the new key.
-     */
-    /*
-     * The date is the listing's, and only the seller writes it.
-     *
-     * Carrying every stored date forward is what kept a listing showing
-     * 08.06.2026 in September: that date came from the admin template, not
-     * from the seller, and nothing distinguished the two. A date is kept when
-     * the seller set it, and when it closes the year off — 31 December is
-     * always a decision, and it is what moves the window on, so it can never
-     * be thrown away. Anything else is worked out again now.
-     */
-    const sellersOwn =
-      previous.dateCustomized || coversFullYear(previous.dataThrough);
-
-    return {
-      ...col,
-      ...(sellersOwn
-        ? { dataThrough: previous.dataThrough, dateCustomized: previous.dateCustomized }
-        : {}),
-    };
-  });
-};
-
-/**
- * Do the stored headings describe one consistent set of years?
- *
- * Two closed years, the year those run up to, and a forecast for it. A table
- * saved by the current form always does. The hardcoded template never did:
- * its two "closed" years were fixed at 2023 and 2024 while the year-to-date
- * column carried whatever date the listing was created on.
- */
-const yearsAreConsistent = (columns: FinancialColumn[]): boolean => {
-  const ytdYear = columns.find((col) => col.kind === "ytd")?.year;
-  // Nothing to check against; treat the years at face value.
-  if (!ytdYear) return true;
-  return columns.every((col) => {
-    if (!col.year) return true;
-    if (col.kind === "actual") return col.year === ytdYear - 1 || col.year === ytdYear - 2;
-    return col.year === ytdYear;
-  });
-};
-
-/**
- * The columns to show and the figures filed under them.
- *
- * A column's key is derived from its year now, so a table stored under the old
- * keys has its figures moved across at the same time — otherwise correcting
- * the key would be what loses the data. Old and new are matched by year and
- * kind, which is the only thing about a column that means anything.
- */
-export const realignFinancialTable = (
-  stored: FinancialColumn[] | undefined | null,
-  data: Record<string, Record<string, string>> | undefined,
-  today: Date = new Date(),
-): { columns: FinancialColumn[]; financialData: Record<string, Record<string, string>> } => {
-  const columns = resolveFinancialColumns(stored, data, today);
-  const previous = normalizeFinancialColumns(stored);
-
+  data: Record<string, Record<string, string>> | undefined | null,
+): FinancialTable => {
   const moved = new Map<string, string>();
-  const claimed = new Set<string>();
+  const columns = new Map<string, FinancialColumn>();
 
-  if (yearsAreConsistent(previous)) {
-    for (const col of columns) {
-      /*
-       * One old column each.
-       *
-       * Without the claim, a year that has both a year-to-date column and a
-       * forecast could match the same old column twice, and the second win
-       * overwrote the first — the figures for the year so far were carried
-       * into the forecast column and the year to date came out empty.
-       */
-      const match =
-        previous.find(
-          (old) => old.year === col.year && old.kind === col.kind && !claimed.has(old.key),
-        ) ?? previous.find((old) => old.year === col.year && !claimed.has(old.key));
-      if (!match?.key) continue;
-      claimed.add(match.key);
-      if (match.key !== col.key) moved.set(match.key, col.key);
-    }
-  } else {
-    /*
-     * A table from before the columns meant anything.
-     *
-     * The old template hardcoded its headings, so a listing made in 2026 was
-     * given "2023", "2024", the date that day, and "Forecast 2025" — a set of
-     * years that never described the same business. Matching those headings
-     * against real years drops the oldest column and shifts the rest a year to
-     * the left, which is worse than not reading them at all.
-     *
-     * For these the slot is the only thing that ever carried meaning: the
-     * seller was filling in two closed years, the year so far and a forecast,
-     * whatever the headings above them said. So they are taken in order. The
-     * years are a reading of what the seller meant, not a record of what they
-     * were told — which is why it applies only where the stored years are
-     * already self-contradictory, and never to a table that adds up.
-     */
-    for (let i = 0; i < Math.min(previous.length, columns.length); i++) {
-      const from = previous[i]?.key;
-      const to = columns[i]?.key;
-      if (from && to && from !== to) moved.set(from, to);
-    }
-  }
+  for (const col of normalizeFinancialColumns(stored)) {
+    if (!col.year || !col.kind) continue;
+    const kind = col.kind === "forecast" ? "forecast" : col.kind;
+    const key = columnKeyFor(col.year, kind);
+    const oldKey = String(col.key ?? "");
+    if (oldKey && oldKey !== key) moved.set(oldKey, key);
 
-  if (moved.size === 0) {
-    return { columns, financialData: data ?? {} };
+    const clean: FinancialColumn = {
+      key,
+      label: kind === "forecast" ? `Forecast ${col.year}` : String(col.year),
+      year: col.year,
+      kind,
+      ...(kind === "forecast" ? {} : { dataThrough: storedDate(col) }),
+    };
+    const already = columns.get(key);
+    // Two stored columns for one year: the one with figures in it wins.
+    if (!already || (!columnHasFigures(data ?? {}, already.key) && columnHasFigures(data ?? {}, oldKey))) {
+      columns.set(key, clean);
+    }
   }
 
   const financialData: Record<string, Record<string, string>> = {};
   for (const [row, cells] of Object.entries(data ?? {})) {
     const next: Record<string, string> = {};
+    // Figures already under their year's key first, so a figure moved from an
+    // old key never overwrites one the seller entered under the new one.
     for (const [key, value] of Object.entries(cells ?? {})) {
-      next[moved.get(key) ?? key] = value;
+      if (!moved.has(key)) next[key] = value;
+    }
+    for (const [key, value] of Object.entries(cells ?? {})) {
+      const to = moved.get(key);
+      if (!to) continue;
+      if (String(next[to] ?? "").trim() === "") next[to] = value;
     }
     financialData[row] = next;
   }
 
-  return { columns, financialData };
+  return { columns: [...columns.values()].sort(byYear), financialData };
 };
+
+const isAfterToday = (dmy: string | undefined, today: Date): boolean => {
+  const parts = parseDmy(dmy);
+  if (!parts) return false;
+  const day = new Date(parts.year, parts.month - 1, parts.day);
+  return day.getTime() > new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+};
+
+/** A year's column as the table has it, or a fresh one when it has none. */
+const columnOf = (
+  columns: FinancialColumn[],
+  year: number,
+  kind: FinancialColumnKind,
+  today: Date,
+): FinancialColumn => {
+  const key = columnKeyFor(year, kind === "forecast" ? "forecast" : "actual");
+  const stored = columns.find((col) => col.key === key);
+  const current = year === today.getFullYear();
+
+  if (kind === "forecast") {
+    return stored ?? { key, label: `Forecast ${year}`, year, kind: "forecast" };
+  }
+
+  if (stored) {
+    // The running year is never a whole year before 31 December comes, and no
+    // year runs to a day that has not happened yet — a date the old picker let
+    // through (31.12.2026 chosen in September) reads as today.
+    if (current && (stored.kind === "actual" || isAfterToday(stored.dataThrough, today))) {
+      return { ...stored, kind: "ytd", dataThrough: formatDmy(today) };
+    }
+    return stored;
+  }
+
+  if (kind === "ytd" && current) {
+    // Until the seller saves, the year so far runs to today.
+    return { key, label: String(year), year, kind: "ytd", dataThrough: formatDmy(today) };
+  }
+  return { key, label: String(year), year, kind: "actual", dataThrough: lastDayOf(year) };
+};
+
+/** The four columns around a running year: two before it, it, and its forecast. */
+const windowAround = (columns: FinancialColumn[], year: number, today: Date): FinancialColumn[] => [
+  columnOf(columns, year - 2, "actual", today),
+  columnOf(columns, year - 1, "actual", today),
+  columnOf(columns, year, "ytd", today),
+  columnOf(columns, year, "forecast", today),
+];
+
+/**
+ * The seller's form: always the calendar's window.
+ *
+ * On 1 January 2027 it is 2025 | 2026 | 2027 | Forecast 2027 straight away. A
+ * 2026 that was never closed off keeps its date, its pencil and its projection
+ * in that window — two open years side by side — until the seller sets it to
+ * 31.12.2026.
+ */
+export const sellerFinancialColumns = (
+  columns: FinancialColumn[],
+  today: Date = new Date(),
+): FinancialColumn[] => windowAround(columns, today.getFullYear(), today);
+
+/**
+ * The year the listing page is built around.
+ *
+ * It does not follow the calendar. On 1 January a buyer still sees the year
+ * that was running, projected, because nothing about the business has changed
+ * overnight. It moves on once the seller has done something about the new
+ * year: entered figures for it, or closed the old one off at 31 December. A
+ * forecast on its own is a hope, not a figure, and moves nothing.
+ */
+export const buyerFinancialYear = (
+  columns: FinancialColumn[],
+  data: Record<string, Record<string, string>> | undefined,
+  today: Date = new Date(),
+): number => {
+  const thisYear = today.getFullYear();
+  const years = columns.filter((col) => col.kind !== "forecast" && col.year && col.year <= thisYear);
+
+  // Where the listing started: the first year it was filled in as a year to date.
+  const started = years.filter((col) => col.kind === "ytd").map((col) => col.year as number);
+  let year = started.length ? Math.min(...started) : thisYear;
+
+  for (const col of years) {
+    if (!columnHasFigures(data, col.key)) continue;
+    year = Math.max(year, col.year as number);
+    if (coversFullYear(col.dataThrough)) year = Math.max(year, (col.year as number) + 1);
+  }
+  return Math.min(year, thisYear);
+};
+
+/** The listing page's four columns — see `buyerFinancialYear`. */
+export const buyerFinancialColumns = (
+  columns: FinancialColumn[],
+  data: Record<string, Record<string, string>> | undefined,
+  today: Date = new Date(),
+): FinancialColumn[] => windowAround(columns, buyerFinancialYear(columns, data, today), today);
+
+/**
+ * The stored table after the seller's form has been saved.
+ *
+ * The form's four columns go in with their dates — which is how a new
+ * listing's year to date gets today's date stored with it — and every other
+ * year the table already had stays, figures and all, because the listing page
+ * may still be showing it.
+ */
+export const financialColumnsToStore = (
+  stored: FinancialColumn[],
+  shown: FinancialColumn[],
+): FinancialColumn[] => {
+  const merged = new Map(stored.map((col) => [col.key, col]));
+  for (const col of shown) merged.set(col.key, col);
+  return [...merged.values()].sort(byYear);
+};
+
+/**
+ * The dates a column's date may be set to, as YYYY-MM-DD for a date input.
+ *
+ * Within its own year and never after today: in September 2026 there is no
+ * 31.12.2026 to choose yet, because figures cannot run to a day that has not
+ * happened.
+ */
+export const dataThroughLimits = (
+  col: FinancialColumn,
+  today: Date = new Date(),
+): { min: string; max: string } | null => {
+  if (!col?.year) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const todayIso = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  const endIso = `${col.year}-12-31`;
+  return { min: `${col.year}-01-01`, max: todayIso < endIso ? todayIso : endIso };
+};
+
+/** A date the seller picked, kept inside `dataThroughLimits`. Null when outside the column's year. */
+export const clampDataThrough = (
+  col: FinancialColumn,
+  dmy: string,
+  today: Date = new Date(),
+): string | null => {
+  const parts = parseDmy(dmy);
+  const limits = dataThroughLimits(col, today);
+  if (!parts || !limits) return null;
+  const iso = `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+  if (iso < limits.min) return null;
+  const chosen = iso > limits.max ? limits.max : iso;
+  const [y, m, d] = chosen.split("-");
+  return `${d}.${m}.${y}`;
+};
+
+/**
+ * What the seller needs to hear, one line per year left open.
+ *
+ * Only for a year that is over. During the year it is normal that the figures
+ * only go up to today, and telling the seller otherwise every time they open
+ * the form is noise.
+ */
+export const financialsReminders = (
+  columns: FinancialColumn[] | undefined | null,
+  today: Date = new Date(),
+): string[] =>
+  (columns ?? [])
+    .filter((col) => isOpenYear(col) && (col.year as number) < today.getFullYear())
+    .map(
+      (col) =>
+        "Your figures for " + col.year + " only cover 01.01 – " + col.dataThrough +
+        ". Please enter the full-year values and set the date to 31.12." + col.year + ".",
+    );
 
 /** A P&L table in whichever shape it happens to be stored. */
 export type FinancialTableLike = {
@@ -537,23 +502,6 @@ export const calculateNetProfitForColumn = (
     else total -= value;
   }
   return total;
-};
-
-/**
- * What the seller needs to hear when a year is still open.
- *
- * Only for a part-year; a column already closed off has nothing to chase.
- */
-export const financialsReminder = (
-  columns: FinancialColumn[] | undefined | null,
-): string | null => {
-  const ytd = normalizeFinancialColumns(columns).find((col) => col.kind === "ytd");
-  if (!ytd?.year || coversFullYear(ytd.dataThrough)) return null;
-  const through = ytd.dataThrough || "";
-  return (
-    "Your figures for " + ytd.year + " only cover 01.01 - " + through +
-    ". Please enter the full-year values and set the date to 31.12." + ytd.year + "."
-  );
 };
 
 export const syncFinancialGrid = (
@@ -821,21 +769,10 @@ const parseAmount = (raw: unknown): number => {
  * moment January arrived, and take about a third off the valuation.
  */
 const monthsCovered = (col: FinancialColumn): number => {
-  const source = col.dataThrough || col.label;
-  const match = String(source || "").match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  const month = match ? parseInt(match[2], 10) : new Date().getMonth() + 1;
+  const parts = parseDmy(col.dataThrough);
+  const month = parts ? parts.month : new Date().getMonth() + 1;
   return Math.min(Math.max(month, 1), 12);
 };
-
-const isForecastColumn = (col: FinancialColumn): boolean =>
-  col.kind === "forecast" ||
-  /forecast/i.test(col.label || "") ||
-  /forecast/i.test(col.key || "");
-
-const isFullYearColumn = (col: FinancialColumn): boolean =>
-  col.kind === "actual" ||
-  /^\d{4}$/.test(String(col.key || "")) ||
-  /^\d{4}$/.test(String(col.label || "").trim());
 
 export function computeListingFinancialMetrics(
   tableData: {
@@ -844,6 +781,7 @@ export function computeListingFinancialMetrics(
     financialData?: Record<string, Record<string, string>>;
     financialType?: string;
   } | null | undefined,
+  today: Date = new Date(),
 ): ListingFinancialMetrics {
   const empty: ListingFinancialMetrics = {
     annualRevenue: null,
@@ -854,9 +792,13 @@ export function computeListingFinancialMetrics(
     yearsUsed: 0,
   };
 
-  const data = tableData?.financialData;
-  const columns = tableData?.columnLabels;
-  if (!data || !Array.isArray(columns) || columns.length === 0) return empty;
+  if (!tableData?.financialData || !Array.isArray(tableData?.columnLabels)) return empty;
+  if (tableData.columnLabels.length === 0) return empty;
+
+  // Filed by year, then the four columns the buyer is shown.
+  const table = canonicalFinancialTable(tableData.columnLabels, tableData.financialData);
+  const data = table.financialData;
+  const columns = buyerFinancialColumns(table.columns, data, today);
 
   const rowLabels = Array.isArray(tableData?.rowLabels) ? tableData!.rowLabels! : [];
   const isSimple = tableData?.financialType === "simple";
@@ -881,22 +823,21 @@ export function computeListingFinancialMetrics(
   const profits: number[] = [];
 
   /**
-   * Only the completed years and the year to date feed the averages and the
-   * multiples. A forecast is what the seller hopes will happen, and letting a
-   * hope into a valuation is how a business ends up priced on a wish.
+   * Only the years the buyer is shown, and never their forecast. A forecast is
+   * what the seller hopes will happen, and letting a hope into a valuation is
+   * how a business ends up priced on a wish. A year still open — the running
+   * one, or last year before the seller closed it off — is projected to twelve
+   * months from its own date.
    */
   columns.forEach((col) => {
-    if (isForecastColumn(col)) return;
-
-    const isYtd = col.kind === "ytd" || Boolean(col.isToday) || col.key === "today";
-    if (!isYtd && !isFullYearColumn(col)) return;
+    if (col.kind === "forecast") return;
 
     const revenue = revenueFor(col.key);
     const profit = profitFor(col.key);
     // A year with nothing entered is a year that does not exist.
     if (revenue === 0 && profit === 0) return;
 
-    if (isYtd) {
+    if (isOpenYear(col)) {
       const months = monthsCovered(col);
       revenues.push((revenue / months) * 12);
       profits.push((profit / months) * 12);

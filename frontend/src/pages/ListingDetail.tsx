@@ -35,8 +35,9 @@ import {
   getMultipleRating,
   OVERALL_COSTS_ROW,
   type MultipleKind,
-  realignFinancialTable,
-  resolveFinancialColumns,
+  canonicalFinancialTable,
+  buyerFinancialColumns,
+  displayColumnLabel,
   coversFullYear,
   coverageLabel,
   formatMultipleValue,
@@ -149,6 +150,7 @@ import {
   formatMoneyIn,
   listingCurrencyCode,
   listingFiguresIn,
+  listingAmountIn,
   listingMultiplesOf,
   listingPriceIn,
   pnlFiguresIn,
@@ -2892,6 +2894,20 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
    * so money answers are labelled with it. Older listings fall back to USD.
    */
   const listingCurrencySymbol = getListingCurrencySymbol(listing);
+  /*
+   * An amount the seller typed — average order value, inventory value — in the
+   * currency chosen in the header, at the rate the asking price is shown at.
+   * They kept the listing's own symbol whatever the visitor chose. Only a plain
+   * number converts; "100–200", "Unknown" or a lock prompt reads as before.
+   */
+  const sellerAmount = (value: string | number): string | number => {
+    const text = String(value ?? "").trim();
+    if (/^\d[\d,]*(\.\d+)?$/.test(text)) {
+      const amount = Number(text.replace(/,/g, ""));
+      if (Number.isFinite(amount)) return formatMoneyIn(listingAmountIn(listing, amount, viewerCurrency));
+    }
+    return withCurrencySymbol(value, listingCurrencySymbol);
+  };
 
   // Read defensively: the query is still in flight on first paint, and a cache
   // left over from an older build can hold a different shape entirely.
@@ -3134,7 +3150,6 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
   ];
   // Worked out the same way the seller's editor does, rather than a second
   // hardcoded list that would drift away from it.
-  const defaultColumnLabels = resolveFinancialColumns(null, {});
 
   const rowLabels = (financialTableData?.rowLabels || defaultRowLabels).map((r: string) =>
     r === 'Gross Revenue' ? 'Revenue' : r,
@@ -3144,13 +3159,16 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
    * resolver — including the year and the date a part-year runs to, which an
    * older listing has not stored.
    */
-  const realignedTable = financialTableData?.columnLabels
-    ? realignFinancialTable(
-        financialTableData.columnLabels,
-        financialTableData.financialData,
-      )
-    : null;
-  const columnLabels = realignedTable ? realignedTable.columns : defaultColumnLabels;
+  const realignedTable = canonicalFinancialTable(
+    financialTableData?.columnLabels,
+    financialTableData?.financialData,
+  );
+  /*
+   * The buyer's window, which does not move on 1 January: it stays on the year
+   * that was running until the seller enters figures for the new one or closes
+   * the old one off at 31 December.
+   */
+  const columnLabels = buyerFinancialColumns(realignedTable.columns, realignedTable.financialData);
   /*
    * In another currency, each figure at the average rate of its own year —
    * filed through the same resolver, so it lands under the column it belongs
@@ -3175,11 +3193,10 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
     // keys is read from the year each figure belongs to rather than from the
     // slot it happened to sit in.
     const fd =
-      (convertedPnl && financialTableData?.columnLabels
-        ? realignFinancialTable(financialTableData.columnLabels, convertedPnl).financialData
+      (convertedPnl
+        ? canonicalFinancialTable(financialTableData?.columnLabels, convertedPnl).financialData
         : null) ||
-      realignedTable?.financialData ||
-      financialTableData?.financialData ||
+      realignedTable.financialData ||
       {};
     if (fd['Gross Revenue'] && !fd['Revenue']) {
       return { ...fd, Revenue: fd['Gross Revenue'] };
@@ -3195,6 +3212,8 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
    */
   const profitLossTable = {
     ...financialTableData,
+    // The figures are filed by year now, so the columns have to be as well.
+    columnLabels: realignedTable.columns,
     financialData,
     rowLabels,
   };
@@ -4433,7 +4452,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                         textAlign: 'center',
                       }}
                     >
-                      {col.label}
+                      {displayColumnLabel(col)}
                       {/* The date only when the year is unfinished — same rule
                           as the seller's side. No pencil: a buyer has nothing
                           to correct here. */}
@@ -4676,7 +4695,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
             />
             <MetricCard
               label="Average order value"
-              value={withCurrencySymbol(avgOrderValue, listingCurrencySymbol)}
+              value={sellerAmount(avgOrderValue)}
               onUnlockClick={handleUpgradeUnlockClick}
               info={statisticHints.avgOrderValue || "The average amount a customer spends per order."}
             />
@@ -5058,7 +5077,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
               />
               <MetricCard
                 label="Inventory Value"
-                value={withCurrencySymbol(inventoryValue, listingCurrencySymbol)}
+                value={sellerAmount(inventoryValue)}
                 onUnlockClick={handleUpgradeUnlockClick}
                 info={productHints.inventoryValue || "What the stock currently in hand is worth."}
               />

@@ -1241,6 +1241,12 @@ model PendingSignup {
   last_name      String
   password_hash  String
   business_name  String?
+  /// A listing the visitor was about to publish as a guest when they signed
+  /// up: the same body "create listing" takes, already checked. It becomes a
+  /// DRAFT listing in the new account the moment the code is confirmed —
+  /// wherever and whenever that happens — so nothing depends on the browser
+  /// the listing was typed in. Deleted with the sign-up if it is never confirmed.
+  listing_draft  Json?
   otp_code       String?
   otp_expires_at DateTime?
   otp_attempts   Int       @default(0)

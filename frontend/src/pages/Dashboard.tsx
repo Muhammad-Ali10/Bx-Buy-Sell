@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api";
 import {
   clearInvalidDraftListing,
+  isStoredListingStep,
   readDraftListing,
   writeDraftListing,
 } from "@/lib/draftListingStorage";
@@ -27,7 +28,7 @@ import { LISTING_PUBLISH_PENDING_SESSION_KEY, listingAwaitingPublish } from "@/l
 import { toast } from "sonner";
 import { getAdminFinancialsTemplateVersion } from "@/lib/financialTableUtils";
 import { useListingAreaOrder } from "@/hooks/useListingAreaOrder";
-import { listingSteps } from "@/lib/listingAreaOrder";
+import { listingSteps, visibleStep } from "@/lib/listingAreaOrder";
 
 export type DashboardStep = 
   | "category" 
@@ -61,7 +62,12 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
     (modeProp === "edit" && Boolean(listingIdProp)) ||
     Boolean(matchListingEdit || matchDashboardEdit);
   const { user, isAuthenticated, loading: authLoading } = useAuth();
-  const [activeStep, setActiveStep] = useState<DashboardStep>("category");
+  // A link can open the form on a given step: a guest's listing the server
+  // kept is opened at Packages (?step=packages) to review and publish.
+  const [activeStep, setActiveStep] = useState<DashboardStep>(() => {
+    const asked = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("step");
+    return isStoredListingStep(asked) ? (asked as DashboardStep) : "category";
+  });
   const [formData, setFormData] = useState<any>({});
   /** Edit flow: start true so we never paint steps with empty formData before hydrate (fixes broken pre-fill). */
   const [loadingListing, setLoadingListing] = useState(() =>
@@ -662,6 +668,12 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
    */
   const areaOrder = useListingAreaOrder();
   const steps = listingSteps(areaOrder);
+  // A draft saved on a step that is no longer asked (Tools, for now) goes on
+  // to the next one instead of opening on a screen the form does not have.
+  useEffect(() => {
+    const shown = visibleStep(activeStep, areaOrder);
+    if (shown !== activeStep) setActiveStep(shown);
+  }, [activeStep, areaOrder]);
   const stepIndex = steps.indexOf(activeStep);
   const goNext = (data: any) => {
     updateFormData(data);

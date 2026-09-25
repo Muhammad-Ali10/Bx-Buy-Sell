@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api";
-import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
+import { LISTING_PUBLISH_PENDING_SESSION_KEY, guestListingPayloadForSignup } from "@/lib/listingGuestSession";
 
 export interface User {
   id: string;
@@ -213,7 +213,10 @@ export const useAuth = () => {
   }) => {
     // Nothing is registered yet: the account is made when the emailed code
     // comes back right (`confirmSignup`), so there is no user to set here.
-    const response = await apiClient.signUp(userData);
+    // A listing a guest was publishing goes with the sign-up, so the server
+    // keeps it as a draft wherever and whenever the code is confirmed.
+    const listingDraft = guestListingPayloadForSignup();
+    const response = await apiClient.signUp(listingDraft ? { ...userData, listing_draft: listingDraft } : userData);
     if (response.success) {
       const data = (response.data ?? {}) as { email?: string };
       return { success: true as const, email: data.email ?? userData.email };
@@ -224,10 +227,10 @@ export const useAuth = () => {
   /** Enter the emailed code: the account is made and signed in. */
   const confirmSignup = async (email: string, code: string) => {
     const response = await apiClient.verifyOTP({ email, otp_code: code });
-    const data = response.data as { user?: User } | undefined;
+    const data = response.data as { user?: User; draftListingId?: string } | undefined;
     if (response.success && data?.user) {
       setUser(data.user);
-      return { success: true as const, user: data.user };
+      return { success: true as const, user: data.user, draftListingId: data.draftListingId ?? null };
     }
     return { success: false as const, error: response.error };
   };

@@ -6,7 +6,11 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api";
 import { PENDING_SIGNUP_EMAIL_KEY } from "@/lib/emailConfirmation";
-import { listingAwaitingPublish } from "@/lib/listingGuestSession";
+import {
+  clearGuestListingPayload,
+  listingAwaitingPublish,
+  rememberServerDraft,
+} from "@/lib/listingGuestSession";
 
 /**
  * Sign-up, step two: confirm the email address.
@@ -146,12 +150,25 @@ const VerifyOTP = () => {
           return;
         }
         sessionStorage.removeItem(PENDING_SIGNUP_EMAIL_KEY);
+        // Sent with the sign-up; the server has made its draft from it now.
+        clearGuestListingPayload();
         toast.success("Email confirmed — your account is ready");
         // Someone who was publishing a listing as a guest goes back to it.
         // Asked of the draft too, not only this tab: confirming a day later
         // must still land on the listing that was waiting.
         if (listingAwaitingPublish()) {
+          // This device still holds the listing: publishing carries on as
+          // before, onto the draft the server made rather than beside it.
+          if (result.draftListingId) rememberServerDraft(result.draftListingId);
           window.location.assign("/dashboard");
+          return;
+        }
+        // Confirmed on another device, or after the browser was cleared: the
+        // server kept the listing. Open it to review and publish — it is not
+        // published by itself, since a paid package may be involved.
+        if (result.draftListingId) {
+          toast.success("Your listing was saved — review and publish");
+          window.location.assign(`/dashboard/edit/${result.draftListingId}?step=packages`);
           return;
         }
         navigate("/phone-verification");

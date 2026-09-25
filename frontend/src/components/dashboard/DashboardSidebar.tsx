@@ -63,7 +63,10 @@ const SidebarContent = ({ activeStep, onStepChange, onLinkClick }: { activeStep:
   // arranges in Content Management.
   const areaOrder = useListingAreaOrder();
   const steps = listingSteps(areaOrder);
-  const orderedItems = [...menuItems].sort((a, b) => steps.indexOf(a.id) - steps.indexOf(b.id));
+  // Only the steps the form asks: a hidden one (Tools, for now) is not listed.
+  const orderedItems = menuItems
+    .filter((item) => steps.includes(item.id))
+    .sort((a, b) => steps.indexOf(a.id) - steps.indexOf(b.id));
 
   return (
     <>

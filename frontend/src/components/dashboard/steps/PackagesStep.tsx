@@ -55,7 +55,13 @@ import { useHandoverQuestions } from "@/hooks/useHandoverQuestions";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useAccountQuestions } from "@/hooks/useAccountQuestions";
 import { clearDraftListing } from "@/lib/draftListingStorage";
-import { LISTING_PUBLISH_PENDING_SESSION_KEY } from "@/lib/listingGuestSession";
+import {
+  LISTING_PUBLISH_PENDING_SESSION_KEY,
+  clearGuestListingPayload,
+  clearServerDraft,
+  readServerDraft,
+  saveGuestListingPayload,
+} from "@/lib/listingGuestSession";
 import { ADDON_CARDS, PACKAGE_CARDS } from "@/lib/packageContent";
 import { BillingCycleChooser } from "@/components/listings/BillingCycleChooser";
 import { TrustBand, WhyPanel } from "@/components/marketing/TrustAndWhy";
@@ -433,6 +439,108 @@ export const PackagesStep = ({
 
   // The Draft / Checkout buttons decide the status, so it is passed in rather
   // than read from state (which would still hold the previous value here).
+  /**
+   * The body "create listing" takes, built from everything the steps
+   * collected. Used to publish, and — for a guest — sent with the sign-up so
+   * the server keeps the listing even if they confirm elsewhere or later.
+   */
+  const buildListingPayload = async (status: "DRAFT" | "PUBLISH") => {
+    // Fetch categories and tools to get names from IDs
+    const categoriesResponse = await apiClient.getCategories();
+    const toolsResponse = await apiClient.getTools();
+
+    const categories = categoriesResponse.success && Array.isArray(categoriesResponse.data)
+      ? categoriesResponse.data
+      : [];
+    const tools = toolsResponse.success && Array.isArray(toolsResponse.data)
+      ? toolsResponse.data
+      : [];
+
+    // Transform category from ID to { name }
+    let categoryArray: any[] = [];
+    if (formData.category) {
+      if (Array.isArray(formData.category)) {
+        // If category is already an array, map each ID to name
+        categoryArray = formData.category.map((catId: string) => {
+          const cat = categories.find((c: any) => c.id === catId);
+          return { name: cat?.name || catId };
+        });
+      } else {
+        // If category is a single ID, find the name
+        const categoryName = categories.find((c: any) => c.id === formData.category)?.name || formData.category;
+        if (categoryName) {
+          categoryArray = [{ name: categoryName }];
+        }
+      }
+    }
+
+    // Transform tools from IDs to { name }
+    const toolsArray = (formData.tools || []).map((toolId: string) => {
+      const tool = tools.find((t: any) => t.id === toolId);
+      return { name: tool?.name || toolId };
+    });
+
+    // Transform all question-based data
+    const brandArray = transformQuestions(brandQuestions || [], formData, 'BRAND');
+    const statisticsArray = transformQuestions(statisticQuestions || [], formData, 'STATISTIC');
+    const productQuestionArray = transformQuestions(productQuestions || [], formData, 'PRODUCT');
+    const managementQuestionArray = transformQuestions(managementQuestions || [], formData, 'MANAGEMENT');
+    const advertisementArray = transformQuestions(adQuestions || [], formData, 'ADVERTISMENT');
+    const handoverArray = transformQuestions(handoverQuestions || [], formData, 'HANDOVER');
+    const socialAccountPlatformsArray = transformSocialAccounts();
+    // Transform account questions (questions created by admin)
+    const accountQuestionsArray = transformQuestions(
+      accountQuestions || [],
+      formData.socialAccountQuestions || {},
+      'SOCIAL'
+    );
+    // Combine social account platforms and account questions
+    const socialAccountArray = [...socialAccountPlatformsArray, ...accountQuestionsArray];
+
+    // Transform financials
+    const financialsArray = transformFinancials();
+    console.log('💰 Transformed financials array:', JSON.stringify(financialsArray, null, 2));
+
+    // Prepare listing data for API
+    // Backend REQUIRES these fields as arrays (even if empty):
+    // - productQuestion, managementQuestion, social_account
+    // Other fields can be omitted if empty
+    const listingPayload: any = {
+      status, // DRAFT (Save as Draft) or PUBLISH (checkout)
+      confidentialControl: sellerFeatures.confidentialControl,
+      featuredOnCategoryPage: sellerFeatures.featuredOnCategoryPage,
+      featuredOnStartPage: sellerFeatures.featuredOnStartPage,
+      // Chosen package + add-ons. These record what the seller picked; the
+      // paid features themselves are switched on once payment is wired up.
+      selectedPackage: selection.packageId,
+      packageBillingCycle: isPaidPackage ? selection.billingCycle : null,
+      addonBillingCycle:
+        selection.addon === "NONE" ? null : selection.addonBillingCycle,
+      packageAddons: selection.addon === "NONE" ? [] : [selection.addon],
+      successFeePercent: overview ? overview.successFeePercent : null,
+      approveBuyersManually: isPaidPackage ? approveBuyersManually : false,
+      // Required fields - always send as arrays (even if empty)
+      productQuestion: productQuestionArray, // REQUIRED by backend
+      managementQuestion: managementQuestionArray, // REQUIRED by backend
+      social_account: socialAccountArray, // REQUIRED by backend
+      // Other required fields
+      brand: brandArray.length > 0 ? brandArray : [],
+      category: categoryArray.length > 0 ? categoryArray : [],
+      tools: toolsArray.length > 0 ? toolsArray : [],
+      financials: financialsArray.length > 0 ? financialsArray : [],
+      statistics: statisticsArray.length > 0 ? statisticsArray : [],
+      advertisement: advertisementArray.length > 0 ? advertisementArray : [],
+      handover: handoverArray.length > 0 ? handoverArray : [],
+    };
+
+    // Optional fields - only include if they have data
+    if (formData.portfolioLink && formData.portfolioLink.trim()) {
+      listingPayload.portfolioLink = formData.portfolioLink.trim();
+    }
+
+    return listingPayload;
+  };
+
   const handleSubmit = async (
     statusOverride?: "DRAFT" | "PUBLISH",
     opts?: { skipRedirect?: boolean },
@@ -449,6 +557,13 @@ export const PackagesStep = ({
         }
         onGuestPersistDraft?.({ pendingPublish: true });
         sessionStorage.setItem(LISTING_PUBLISH_PENDING_SESSION_KEY, "1");
+        // Sent with the sign-up, so the server keeps it as a draft in the
+        // account however long confirming takes and on whichever device.
+        try {
+          saveGuestListingPayload(await buildListingPayload("DRAFT"));
+        } catch (error) {
+          console.warn("Could not prepare the listing for sign-up; it still waits on this device.", error);
+        }
         onGuestAuthOpenChange?.(true);
       } finally {
         setIsSubmitting(false);
@@ -459,107 +574,19 @@ export const PackagesStep = ({
     setIsSubmitting(true);
 
     try {
-      // Fetch categories and tools to get names from IDs
-      const categoriesResponse = await apiClient.getCategories();
-      const toolsResponse = await apiClient.getTools();
-
-      const categories = categoriesResponse.success && Array.isArray(categoriesResponse.data)
-        ? categoriesResponse.data
-        : [];
-      const tools = toolsResponse.success && Array.isArray(toolsResponse.data)
-        ? toolsResponse.data
-        : [];
-
-      // Transform category from ID to { name }
-      let categoryArray: any[] = [];
-      if (formData.category) {
-        if (Array.isArray(formData.category)) {
-          // If category is already an array, map each ID to name
-          categoryArray = formData.category.map((catId: string) => {
-            const cat = categories.find((c: any) => c.id === catId);
-            return { name: cat?.name || catId };
-          });
-        } else {
-          // If category is a single ID, find the name
-          const categoryName = categories.find((c: any) => c.id === formData.category)?.name || formData.category;
-          if (categoryName) {
-            categoryArray = [{ name: categoryName }];
-          }
-        }
-      }
-
-      // Transform tools from IDs to { name }
-      const toolsArray = (formData.tools || []).map((toolId: string) => {
-        const tool = tools.find((t: any) => t.id === toolId);
-        return { name: tool?.name || toolId };
-      });
-
-      // Transform all question-based data
-      const brandArray = transformQuestions(brandQuestions || [], formData, 'BRAND');
-      const statisticsArray = transformQuestions(statisticQuestions || [], formData, 'STATISTIC');
-      const productQuestionArray = transformQuestions(productQuestions || [], formData, 'PRODUCT');
-      const managementQuestionArray = transformQuestions(managementQuestions || [], formData, 'MANAGEMENT');
-      const advertisementArray = transformQuestions(adQuestions || [], formData, 'ADVERTISMENT');
-      const handoverArray = transformQuestions(handoverQuestions || [], formData, 'HANDOVER');
-      const socialAccountPlatformsArray = transformSocialAccounts();
-      // Transform account questions (questions created by admin)
-      const accountQuestionsArray = transformQuestions(
-        accountQuestions || [],
-        formData.socialAccountQuestions || {},
-        'SOCIAL'
-      );
-      // Combine social account platforms and account questions
-      const socialAccountArray = [...socialAccountPlatformsArray, ...accountQuestionsArray];
-
-      // Transform financials
-      const financialsArray = transformFinancials();
-      console.log('💰 Transformed financials array:', JSON.stringify(financialsArray, null, 2));
-
-      // Prepare listing data for API
-      // Backend REQUIRES these fields as arrays (even if empty):
-      // - productQuestion, managementQuestion, social_account
-      // Other fields can be omitted if empty
-      const listingPayload: any = {
-        status, // DRAFT (Save as Draft) or PUBLISH (checkout)
-        confidentialControl: sellerFeatures.confidentialControl,
-        featuredOnCategoryPage: sellerFeatures.featuredOnCategoryPage,
-        featuredOnStartPage: sellerFeatures.featuredOnStartPage,
-        // Chosen package + add-ons. These record what the seller picked; the
-        // paid features themselves are switched on once payment is wired up.
-        selectedPackage: selection.packageId,
-        packageBillingCycle: isPaidPackage ? selection.billingCycle : null,
-        addonBillingCycle:
-          selection.addon === "NONE" ? null : selection.addonBillingCycle,
-        packageAddons: selection.addon === "NONE" ? [] : [selection.addon],
-        successFeePercent: overview ? overview.successFeePercent : null,
-        approveBuyersManually: isPaidPackage ? approveBuyersManually : false,
-        // Required fields - always send as arrays (even if empty)
-        productQuestion: productQuestionArray, // REQUIRED by backend
-        managementQuestion: managementQuestionArray, // REQUIRED by backend
-        social_account: socialAccountArray, // REQUIRED by backend
-        // Other required fields
-        brand: brandArray.length > 0 ? brandArray : [],
-        category: categoryArray.length > 0 ? categoryArray : [],
-        tools: toolsArray.length > 0 ? toolsArray : [],
-        financials: financialsArray.length > 0 ? financialsArray : [],
-        statistics: statisticsArray.length > 0 ? statisticsArray : [],
-        advertisement: advertisementArray.length > 0 ? advertisementArray : [],
-        handover: handoverArray.length > 0 ? handoverArray : [],
-      };
-
-      // Optional fields - only include if they have data
-      if (formData.portfolioLink && formData.portfolioLink.trim()) {
-        listingPayload.portfolioLink = formData.portfolioLink.trim();
-      }
+      const listingPayload = await buildListingPayload(status);
 
       console.log("Transformed listing payload:", JSON.stringify(listingPayload, null, 2));
 
       console.log("Submitting listing:", listingPayload);
 
+      // A guest's listing the server already keeps as a draft (made when the
+      // account was confirmed) is published onto that draft, not created again.
+      const targetId = listingId || readServerDraft();
       let response;
-      if (listingId) {
+      if (targetId) {
         // Update existing listing
-        response = await apiClient.updateListing(listingId, listingPayload);
+        response = await apiClient.updateListing(targetId, listingPayload);
       } else {
         // Create new listing
         response = await apiClient.createListing(listingPayload);
@@ -567,6 +594,8 @@ export const PackagesStep = ({
 
       if (response.success) {
         clearDraftListing();
+        clearServerDraft();
+        clearGuestListingPayload();
         const statusMessage = listingId
           ? (status === 'PUBLISH'
             ? "Listing updated and published successfully!"
@@ -577,7 +606,7 @@ export const PackagesStep = ({
         toast.success(statusMessage);
         console.log(listingId ? "Updated listing:" : "Created listing:", response.data);
 
-        const savedId = listingId || (response.data as any)?.id || null;
+        const savedId = targetId || (response.data as any)?.id || null;
         // The checkout flow needs the id and sends the user to Stripe instead.
         if (opts?.skipRedirect) return savedId;
 

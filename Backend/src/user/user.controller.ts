@@ -113,7 +113,11 @@ export class UserController {
   @Get('/favourite')
   @ApiParam({ name: 'id', description: 'User ID', type: String })
   async getAllFavourite(@Req() req: Request) {
-    return await this.userService.getAllFavourite((req as any).user.id);
+    const me = (req as any).user;
+    // Who is looking, role included. Without it an admin was masked as an
+    // ordinary member here — photos blurred on Favourites that the listing
+    // page, which does pass the role, showed them in full.
+    return await this.userService.getAllFavourite(me.id, { userId: me.id, role: me.role });
   }
 
   @Roles(['ADMIN', 'MONITER', 'STAFF'])

@@ -60,12 +60,40 @@ export function normalizeAreaOrder(saved: unknown): ListingArea[] {
   return order;
 }
 
-/** Every step of the seller's form, first to last. */
-export const listingSteps = (order: ListingArea[]): DashboardStep[] => [
+/**
+ * Steps the seller is not asked, for now.
+ *
+ * The client had Tools taken out of the admin menu, then out of Create Listing
+ * as well. Like the admin row it is hidden, not deleted: the step, its screen
+ * and what existing listings saved in it all stay, and bringing it back is
+ * deleting the id from this set. It keeps its place in the arranged order, so
+ * it returns where it was.
+ */
+export const HIDDEN_STEPS: ReadonlySet<DashboardStep> = new Set<DashboardStep>(["tools"]);
+
+/** Every step, hidden ones included, first to last. */
+const allSteps = (order: ListingArea[]): DashboardStep[] => [
   "category",
   ...order.flatMap((area) => AREA_STEPS[area]),
   "packages",
 ];
+
+/** Every step of the seller's form, first to last. */
+export const listingSteps = (order: ListingArea[]): DashboardStep[] =>
+  allSteps(order).filter((step) => !HIDDEN_STEPS.has(step));
+
+/**
+ * Where to be instead of a hidden step: the next one that is asked.
+ *
+ * A draft saved on the Tools step, or a link to it, would otherwise open on a
+ * screen that is no longer in the form.
+ */
+export function visibleStep(step: DashboardStep, order: ListingArea[]): DashboardStep {
+  if (!HIDDEN_STEPS.has(step)) return step;
+  const steps = allSteps(order);
+  const after = steps.slice(steps.indexOf(step) + 1).find((next) => !HIDDEN_STEPS.has(next));
+  return after ?? "packages";
+}
 
 /**
  * A dragged order, with the areas whose rows are not on screen put back where

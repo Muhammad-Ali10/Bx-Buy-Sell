@@ -2,6 +2,16 @@ import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CurrencySelect, getCurrencySymbol } from "@/components/CurrencySelect";
 import { toast } from "sonner";
 import {
@@ -14,15 +24,18 @@ import {
   displayColumnLabel,
   fetchAdminFinancialsTemplate,
   loadAdminFinancialsTemplate,
-  mergeFinancialCellValues,
   normalizeFinancialData,
   normalizeRowLabels,
   syncFinancialGrid,
   type AdminFinancialsTemplate,
   type FinancialColumn,
-  realignFinancialTable,
-  resolveFinancialColumns,
-  financialsReminder,
+  canonicalFinancialTable,
+  sellerFinancialColumns,
+  financialColumnsToStore,
+  financialsReminders,
+  isOpenYear,
+  dataThroughLimits,
+  clampDataThrough,
   coversFullYear,
   coverageLabel,
 } from "@/lib/financialTableUtils";
@@ -98,13 +111,14 @@ const padOverallCostsData = (
 };
 
 /**
- * The four columns, worked out rather than written down.
+ * The stored columns and every figure, and the four of them the form shows.
  *
- * These used to be the literals "2023", "2024", today and "Forecast 2025", so
- * a listing created in 2026 still opened on 2023 and 2024. They now come from
- * whatever year the table is still being filled in for.
+ * What is stored can hold more years than the form shows: the listing page may
+ * still be showing last year's window after the form has moved on to the new
+ * year, so a year the form no longer draws keeps its figures.
  */
-const defaultColumnLabels = (): FinancialColumn[] => resolveFinancialColumns(null, {});
+const tableColumnsFor = (stored: FinancialColumn[], today: Date = new Date()) =>
+  financialColumnsToStore(stored, sellerFinancialColumns(stored, today));
 
 const defaultRowLabels = [
   REVENUE_ROW,
@@ -132,42 +146,24 @@ const resolveRowsForMode = (
   return insertOverallCostsRow(normalized);
 };
 
-const buildDefaultTableState = () => {
-  const cols = defaultColumnLabels();
-  const rows = defaultRowLabels;
-  return {
-    rowLabels: rows,
-    columnLabels: cols,
-    financialData: syncFinancialGrid(rows, cols, {}),
-    fromAdmin: false,
-  };
-};
+const buildDefaultTableState = (rows: string[] = defaultRowLabels) => ({
+  rowLabels: rows,
+  columnLabels: [] as FinancialColumn[],
+  financialData: syncFinancialGrid(rows, tableColumnsFor([]), {}),
+});
 
+/**
+ * The table before the listing's own figures are loaded.
+ *
+ * The admin template supplies the rows and nothing else: its columns carried a
+ * date — 08.06.2026, the day it was saved — that every listing then took for
+ * its own. The years come from the calendar and the date from the listing.
+ */
 const buildInitialTableState = (isEditListing: boolean) => {
-  if (!isEditListing) {
-    return buildDefaultTableState();
-  }
-
-  const adminTemplate = loadAdminFinancialsTemplate();
-  if (adminTemplate) {
-    const rows = normalizeRowLabels(adminTemplate.rowLabels);
-    // Re-resolved on open: a table saved before the seller closed off last
-    // year should now be showing the next window, one saved in an older build
-    // has no year or date on its columns at all, and one saved under the old
-    // keys has its figures carried across to the year they belong to.
-    const realigned = realignFinancialTable(
-      adminTemplate.columnLabels,
-      adminTemplate.financialData,
-    );
-    return {
-      rowLabels: rows,
-      columnLabels: realigned.columns,
-      financialData: realigned.financialData,
-      fromAdmin: true,
-    };
-  }
-
-  return buildDefaultTableState();
+  const adminTemplate = isEditListing ? loadAdminFinancialsTemplate() : null;
+  return buildDefaultTableState(
+    adminTemplate ? normalizeRowLabels(adminTemplate.rowLabels) : defaultRowLabels,
+  );
 };
 
 export const FinancialsStep = ({
@@ -187,6 +183,18 @@ export const FinancialsStep = ({
   const [templateLoading, setTemplateLoading] = useState(!isEditListing);
   const financialDataRef = useRef(financialData);
   financialDataRef.current = financialData;
+  const columnLabelsRef = useRef(columnLabels);
+  columnLabelsRef.current = columnLabels;
+
+  // The four the seller fills in, and everything that is saved.
+  const shownColumns = sellerFinancialColumns(columnLabels);
+  const tableColumns = financialColumnsToStore(columnLabels, shownColumns);
+  // A date of 31 December waiting for the seller to confirm it.
+  const [closingYear, setClosingYear] = useState<{ col: FinancialColumn; dmy: string } | null>(null);
+  // Kept while the dialog fades out, so its text does not go blank.
+  const lastClosingYear = useRef<number | undefined>(undefined);
+  if (closingYear) lastClosingYear.current = closingYear.col.year;
+  const closingYearLabel = closingYear?.col.year ?? lastClosingYear.current;
 
   // The listing's currency. Figures are entered and stored in it exactly as
   // typed; what they come to in other currencies is worked out by the server
@@ -214,21 +222,23 @@ export const FinancialsStep = ({
    * much of it is covered. Storing the date *as* the label is what made a
    * column's meaning depend on its position.
    */
-  const setColumnDataThrough = (key: string, dmy: string) => {
-    setColumnLabels((prev) =>
-      prev.map((col) =>
-        // Marked as the seller's, so re-opening the listing does not work it
-        // out again and overwrite what they typed.
-        col.key === key ? { ...col, dataThrough: dmy, dateCustomized: true } : col,
-      ),
-    );
+  const setColumnDataThrough = (col: FinancialColumn, dmy: string) => {
+    // Kept inside the column's year and never after today.
+    const date = clampDataThrough(col, dmy);
+    if (!date) return;
+    if (date !== col.dataThrough && coversFullYear(date)) {
+      // Closing a year is final — the pencil goes with it — so it is asked first.
+      setClosingYear({ col, dmy: date });
+      return;
+    }
+    saveColumnDate(col, date);
   };
 
-  const setColumnLabel = (key: string, label: string) => {
+  const saveColumnDate = (col: FinancialColumn, date: string) => {
     setColumnLabels((prev) =>
-      prev.map((c) =>
-        c.key === key ? { ...c, label, labelCustomized: true } : c,
-      ),
+      financialColumnsToStore(prev, [
+        { ...col, kind: col.kind === "forecast" ? "forecast" : "ytd", dataThrough: date },
+      ]),
     );
   };
 
@@ -241,7 +251,7 @@ export const FinancialsStep = ({
     }
     const newRows = [...rowLabels, name];
     setRowLabels(newRows);
-    setFinancialData((prev) => syncFinancialGrid(newRows, columnLabels, prev));
+    setFinancialData((prev) => syncFinancialGrid(newRows, tableColumns, prev));
     setCustomRows((prev) => [...prev, name]);
     setNewRowName("");
     setAddingRow(false);
@@ -257,6 +267,13 @@ export const FinancialsStep = ({
     setCustomRows((prev) => prev.filter((r) => r !== label));
   };
 
+  /**
+   * Loads a table in whatever shape it was stored.
+   *
+   * Filed by calendar year on the way in: older listings keep their figures
+   * under keys like "2023" and "today" that no longer say which year they are
+   * about, and the form only ever works with years.
+   */
   const applyTable = (
     rows: string[],
     cols: FinancialColumn[],
@@ -265,29 +282,41 @@ export const FinancialsStep = ({
     fromAdmin = false,
   ) => {
     const resolvedRows = resolveRowsForMode(rows, type, fromAdmin);
+    const table = canonicalFinancialTable(cols, data);
+    const allColumns = tableColumnsFor(table.columns);
     setRowLabels(resolvedRows);
-    setColumnLabels(cols);
+    setColumnLabels(table.columns);
     setFinancialData(
-      padOverallCostsData(syncFinancialGrid(resolvedRows, cols, data), cols),
+      padOverallCostsData(syncFinancialGrid(resolvedRows, allColumns, table.financialData), allColumns),
     );
     setFinancialType(type);
   };
 
+  /**
+   * The admin template's rows around the seller's own figures.
+   *
+   * Only the rows. The template's columns and their date are not the
+   * listing's; the listing brings its own, or starts from the calendar.
+   */
   const applyAdminTemplate = (
     adminTemplate: AdminFinancialsTemplate,
     draftFinancialData?: Record<string, Record<string, string>>,
+    draftColumns?: FinancialColumn[],
   ) => {
     const baseRows = normalizeRowLabels(adminTemplate.rowLabels);
-    const mergedData = mergeFinancialCellValues(
-      adminTemplate.financialData,
-      draftFinancialData ?? parentFormData?.financialData,
-      baseRows,
-      adminTemplate.columnLabels,
-    );
+    let data = normalizeFinancialData(draftFinancialData ?? parentFormData?.financialData ?? {});
+    const ownColumns = draftColumns ?? parentFormData?.columnLabels;
+    const hasOwnColumns = Array.isArray(ownColumns) && ownColumns.length > 0;
+    if (!hasOwnColumns) {
+      // A draft saved without its columns filed its figures under the
+      // template's keys. Those keys say where the figures are, but the
+      // template's columns — and their date — are not taken on.
+      data = canonicalFinancialTable(adminTemplate.columnLabels, data).financialData;
+    }
     applyTable(
       baseRows,
-      adminTemplate.columnLabels,
-      mergedData,
+      hasOwnColumns ? ownColumns : [],
+      data,
       parentFormData?.financialType === "simple" ? "simple" : "detailed",
       true,
     );
@@ -326,7 +355,7 @@ export const FinancialsStep = ({
     if (parentFormData?.financialData && parentFormData?.rowLabels) {
       applyTable(
         parentFormData.rowLabels,
-        parentFormData.columnLabels || defaultColumnLabels(),
+        parentFormData.columnLabels || [],
         normalizeFinancialData(parentFormData.financialData),
         parentFormData.financialType === "simple" ? "simple" : "detailed",
         false,
@@ -363,7 +392,7 @@ export const FinancialsStep = ({
         setTemplateLoading(true);
         void fetchAdminFinancialsTemplate(true, { serverOnly: true }).then((template) => {
           if (template) {
-            applyAdminTemplate(template, financialDataRef.current);
+            applyAdminTemplate(template, financialDataRef.current, tableColumnsFor(columnLabelsRef.current));
           }
           setTemplateLoading(false);
         });
@@ -401,7 +430,9 @@ export const FinancialsStep = ({
   usePersistOnUnmount(onPersist, () => ({
     financialType,
     rowLabels,
-    columnLabels,
+    // Every year with its date — this is where a new listing's year to date
+    // gets today's date stored with it.
+    columnLabels: tableColumnsFor(columnLabelsRef.current),
     financialData,
     currency,
     financialsFromListing: isEditListing ? parentFormData?.financialsFromListing : false,
@@ -409,7 +440,7 @@ export const FinancialsStep = ({
 
   const handleContinue = () => {
     const isFilled = (row: string) =>
-      columnLabels.some(
+      tableColumns.some(
         (col) =>
           !!financialData[row]?.[col.key] &&
           parseFloat(financialData[row][col.key] || "0") !== 0,
@@ -436,7 +467,7 @@ export const FinancialsStep = ({
     onNext({
       financialType,
       rowLabels,
-      columnLabels,
+      columnLabels: tableColumns,
       financialData,
       currency,
       financialsFromListing: isEditListing ? parentFormData?.financialsFromListing : false,
@@ -445,9 +476,10 @@ export const FinancialsStep = ({
 
   // Compact column width so the table stays a reasonable size.
   const columnWidth = 150;
-  const gridWidth = columnWidth * (columnLabels.length + 1);
+  const gridWidth = columnWidth * (shownColumns.length + 1);
 
   const currencySymbol = getCurrencySymbol(currency);
+  const reminders = financialsReminders(shownColumns);
   const formatAmount = (value: string): string => {
     const n = parseFloat(value || "0");
     if (Number.isNaN(n)) return "0";
@@ -522,7 +554,7 @@ export const FinancialsStep = ({
             setFinancialType("simple");
             setRowLabels((prev) => insertOverallCostsRow(prev));
             setFinancialData((prev) =>
-              padOverallCostsData(prev, columnLabels),
+              padOverallCostsData(prev, tableColumns),
             );
           }}
           style={{
@@ -568,7 +600,7 @@ export const FinancialsStep = ({
             ];
             setFinancialType("detailed");
             setRowLabels(baseRows);
-            setFinancialData((prev) => syncFinancialGrid(baseRows, columnLabels, prev));
+            setFinancialData((prev) => syncFinancialGrid(baseRows, tableColumns, prev));
           }}
           style={{
             width: '160px',
@@ -616,9 +648,10 @@ export const FinancialsStep = ({
         </p>
       )}
 
-      {/* Only while a year is still open, and only for the seller — a buyer
-          can see the date in the header and cannot do anything about it. */}
-      {financialsReminder(columnLabels) && (
+      {/* Only for a year that is over and still open — from 1 January until
+          the seller sets it to 31 December. During the year it is normal that
+          the figures only run to today. Only the seller sees it. */}
+      {reminders.length > 0 && (
         <div
           style={{
             width: '100%',
@@ -634,7 +667,9 @@ export const FinancialsStep = ({
             color: 'rgba(120, 53, 15, 1)',
           }}
         >
-          {financialsReminder(columnLabels)}
+          {reminders.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
         </div>
       )}
 
@@ -720,7 +755,7 @@ export const FinancialsStep = ({
               Timeframe
             </span>
           </div>
-          {columnLabels.map((col) => (
+          {shownColumns.map((col) => (
             <div
               key={col.key}
               className="flex items-center justify-center"
@@ -734,19 +769,25 @@ export const FinancialsStep = ({
                 <input
                   type="date"
                   autoFocus
-                  defaultValue={dmyToIso(col.dataThrough || col.label)}
-                  // Nothing beyond the column's own year: a date in the future
-                  // would let a part year be passed off as a whole one, which
-                  // is the exact thing these dates exist to prevent.
-                  max={col.year ? `${col.year}-12-31` : undefined}
-                  min={col.year ? `${col.year}-01-01` : undefined}
+                  defaultValue={dmyToIso(col.dataThrough || "")}
+                  // Within the column's own year and never after today: in
+                  // September there is no 31 December to choose yet, and a
+                  // date in the future would pass a part year off as a whole
+                  // one — the exact thing these dates exist to prevent.
+                  min={dataThroughLimits(col)?.min}
+                  max={dataThroughLimits(col)?.max}
                   onBlur={(e) => {
                     const dmy = isoToDmy(e.target.value);
-                    if (dmy) setColumnDataThrough(col.key, dmy);
+                    if (dmy) setColumnDataThrough(col, dmy);
                     setEditingDateKey(null);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    if (e.key === "Enter") {
+                      // Or the same Enter goes on to press the first button of
+                      // the dialog that closing a year opens — "Cancel".
+                      e.preventDefault();
+                      (e.target as HTMLInputElement).blur();
+                    }
                     if (e.key === "Escape") setEditingDateKey(null);
                   }}
                   style={{
@@ -765,17 +806,11 @@ export const FinancialsStep = ({
                 >
                   <span className="inline-flex items-center gap-1">
                     {displayColumnLabel(col)}
-                    {/* The pencil belongs on any column still open — the year
-                        to date, and any year the seller has not closed off. A
-                        column that already runs to 31 December has nothing
-                        left to correct. */}
-                    {/* Any open column, and always the year to date.
-                        The client's rule alone — a pencil only where the date
-                        is not 31 December — would take the pencil away the
-                        moment it was used, so a seller who set the date by
-                        mistake could never put it back. */}
-                    {col.kind !== 'forecast' &&
-                      (col.kind === 'ytd' || !coversFullYear(col.dataThrough)) && (
+                    {/* Only on a year still open: the running year, and last
+                        year until it is closed off at 31 December — so for a
+                        while after New Year there are two. A completed year
+                        and a forecast have no date and nothing to edit. */}
+                    {isOpenYear(col) && (
                         <button
                           type="button"
                           onClick={() => setEditingDateKey(col.key)}
@@ -788,7 +823,7 @@ export const FinancialsStep = ({
                   </span>
                   {/* Shown only while the year is unfinished; on a whole year
                       the date says nothing the heading does not. */}
-                  {col.kind !== 'forecast' && coverageLabel(col) && (
+                  {coverageLabel(col) && (
                     <span style={{ fontWeight: 500, fontSize: '11px', opacity: 0.75 }}>
                       {coverageLabel(col)}
                     </span>
@@ -841,7 +876,7 @@ export const FinancialsStep = ({
                     </button>
                   )}
                 </div>
-                {columnLabels.map((col) => (
+                {shownColumns.map((col) => (
                   <div 
                     key={col.key}
                     className="flex items-center justify-center"
@@ -956,7 +991,7 @@ export const FinancialsStep = ({
                 Net Profit
               </span>
             </div>
-            {columnLabels.map((col) => {
+            {shownColumns.map((col) => {
               const profit = calculateNetProfit(col.key);
               const profitNum = parseFloat(profit) || 0;
               return (
@@ -994,6 +1029,33 @@ export const FinancialsStep = ({
           </div>
         </div>
       </div>
+
+      {/* Closing a year off. Once it runs to 31 December it is a completed
+          year — no projection and no pencil — so a slip of the date picker is
+          caught here rather than being impossible to undo. */}
+      <AlertDialog open={closingYear !== null} onOpenChange={(open) => !open && setClosingYear(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Complete {closingYearLabel}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are these the full-year figures for {closingYearLabel}? After this,{" "}
+              {closingYearLabel} counts as a complete year: it is no longer projected and its
+              date can no longer be changed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (closingYear) saveColumnDate(closingYear.col, closingYear.dmy);
+                setClosingYear(null);
+              }}
+            >
+              Yes, complete {closingYearLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Navigation Buttons */}
       <div style={{ display: 'flex', gap: '16px', marginTop: 'auto', paddingTop: '24px' }}>

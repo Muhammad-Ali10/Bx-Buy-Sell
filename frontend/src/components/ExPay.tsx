@@ -5,34 +5,34 @@ import item2Icon from "@/assets/item 2.svg";
 import item3Icon from "@/assets/item 3.svg";
 import item4Icon from "@/assets/item 4.svg";
 
-const ExPay = () => {
+const ExPay = () => { 
   const features = [
     {
       icon: item1Icon,
-      title: "No Risk",
-      description: "EX PAY removes the risk of the whole transaction. So you can focus on the deal."
+      title: "Secure Process",
+      description: "Every transaction is coordinated securely from start to finish with trusted partners."
     },
     {
       icon: item2Icon,
-      title: "Trustworthy Escrow Service",
-      description: "Get your money safe through EX Pay. We protect (buyers & sellers)."
+      title: "Trusted Escrow Partners",
+      description: "Escrow services are provided through licensed partners to help protect buyers and sellers."
     },
     {
       icon: item3Icon,
       title: "Fast and Safe",
-      description: "Receive or send payments quickly. No unnecessary steps & low fees."
+      description: "Complete your transaction quickly through a streamlined process."
     },
     {
       icon: item4Icon,
-      title: "Seamless Integration",
-      description: "Complete your business transactions smoothly without leaving our platform."
+      title: "Guided Process",
+      description: "Follow every step with a clear and structured transaction process."
     }
   ];
 
   return (
     <section className="bg-black text-white py-12 sm:py-16 md:py-20">
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="text-center mb-8 sm:mb-12">
+        <div className="text-center mb-8 sm:mb-12 max-w-3xl  mx-auto ">
           <h2 
             className="mb-4 sm:mb-6 font-lufga text-[32px] sm:text-[44px] md:text-[56px] lg:text-[72px]"
             style={{
@@ -43,10 +43,10 @@ const ExPay = () => {
               color: 'rgba(255, 255, 255, 1)'
             }}
           >
-            Secure Payments with EX PAY
+            Secure Transactions with EX PAY
           </h2>
           <p 
-            className="max-w-3xl mx-auto px-4 font-lufga text-base sm:text-lg md:text-xl lg:text-2xl"
+            className="px-4 font-lufga text-base sm:text-lg md:text-xl lg:text-2xl"
             style={{
               fontWeight: 400,
               lineHeight: '150%',
@@ -55,7 +55,7 @@ const ExPay = () => {
               color: 'rgba(255, 255, 255, 0.7)'
             }}
           >
-            EX PAY is the trusted payment solution on our marketplace, ensuring every transaction is secure, fast, and reliable. Whether you are buying or selling a business, Ex Pay offers safe and seamless payments directly on our platform.
+           EX PAY helps buyers and sellers complete transactions securely by coordinating the process with trusted payment and escrow partners. Payments are handled through licensed third-party providers, ensuring a smooth, secure, and reliable transaction.
           </p>
         </div>
 
@@ -111,7 +111,7 @@ const ExPay = () => {
                 paddingRight: '30px',
                 paddingBottom: '15px',
                 paddingLeft: '30px',
-                backgroundColor: 'rgba(255, 255, 255, 1)',
+                backgroundColor: '#C6FE1F',
                 opacity: 1,
                 border: 'none'
               }}

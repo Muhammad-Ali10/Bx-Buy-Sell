@@ -58,6 +58,7 @@ import {
   ensureRequestChat,
   manualApprovalApplies,
   postAccessNotice,
+  postListingDeletedNotice,
 } from './confidential-notice';
 
 type ViewerType = 'UNREGISTERED' | 'REGISTERED_FREE' | 'REGISTERED_PRO';
@@ -2596,8 +2597,9 @@ export class ListingService {
    * checked either: `delete(id)` deleted whatever id it was handed.
    *
    * That matters more here than almost anywhere else, because the deletion
-   * cascades: the listing takes its conversations, their messages, its
-   * monitoring alerts and every confidential-access grant with it.
+   * cannot be undone: the listing takes its photos and answers, its
+   * favourites, its alerts and every confidential-access grant with it. (Its
+   * conversations are kept — see `delete`.)
    */
   async assertMayDelete(id: string, viewerId?: string, viewerRole?: string | null) {
     const listing = await this.db.listing.findUnique({
@@ -2617,7 +2619,41 @@ export class ListingService {
     throw new ForbiddenException('You can only delete your own listing');
   }
 
+  /**
+   * Deletes a listing — and only the listing.
+   *
+   * Conversations were tied to their listing by a cascade, so deleting a
+   * listing deleted every conversation about it and every message in them. The
+   * client asked for the messages to stay. So the conversations are unhooked
+   * from the listing first, and each is told in its own history which listing
+   * it was about, since the listing's name no longer heads it. Alerts about one
+   * of those conversations stay with it; alerts about the listing alone go with
+   * the listing.
+   */
   async delete(id: string) {
+    const listing = await this.db.listing.findUnique({
+      where: { id },
+      select: { advertisement: true, brand: true },
+    });
+    const title = listingTitleOf(listing as any);
+    const chats = await this.db.chat.findMany({ where: { listingId: id }, select: { id: true } });
+    const chatIds = chats.map((chat) => chat.id);
+    if (chatIds.length > 0) {
+      await this.db.chat.updateMany({ where: { listingId: id }, data: { listingId: null } });
+      await this.db.monitoringAlert.updateMany({
+        where: { listingId: id, chatId: { in: chatIds } },
+        data: { listingId: null },
+      });
+    }
+
+    const deleted = await this.deleteListingRecord(id);
+    for (const chatId of chatIds) {
+      await postListingDeletedNotice(this.db, chatId, title);
+    }
+    return deleted;
+  }
+
+  private deleteListingRecord(id: string) {
     return this.db.listing.delete({
       where: { id },
       include: {

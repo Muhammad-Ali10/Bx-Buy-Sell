@@ -10,9 +10,7 @@ import {
 const NOW = new Date('2026-09-11T12:00:00Z');
 
 describe('which year a column is about', () => {
-  it('reads the old template by position, the way the listing page does', () => {
-    // "2023", "2024", a 2026 date and "Forecast 2025" never described one
-    // business; the page shows them as 2024, 2025, 2026 so far and its forecast.
+  it('reads an old table by its headings, the years the seller saw', () => {
     const columns: StoredColumn[] = [
       { key: '2023', label: '2023' },
       { key: '2024', label: '2024' },
@@ -20,8 +18,8 @@ describe('which year a column is about', () => {
       { key: 'Forecast 2025', label: 'Forecast 2026' },
     ];
     expect(Object.fromEntries(columnYears(columns, {}, NOW))).toEqual({
-      '2023': { year: 2024, kind: 'actual' },
-      '2024': { year: 2025, kind: 'actual' },
+      '2023': { year: 2023, kind: 'actual' },
+      '2024': { year: 2024, kind: 'actual' },
       today: { year: 2026, kind: 'ytd' },
       'Forecast 2025': { year: 2026, kind: 'forecast' },
     });
@@ -127,6 +125,43 @@ describe('the headline averages', () => {
       annualRevenue: 100,
       annualProfit: 80,
     });
+  });
+
+  it('counts only the years the buyer is shown, which do not move on 1 January', () => {
+    // Made in 2026: 2024, 2025, 2026 open to 30 June. On 1 January 2027 the
+    // listing page still shows those three, so the averages stay as they were.
+    const newYear = new Date('2027-01-01T12:00:00Z');
+    const stored = {
+      ...table,
+      columns: [
+        ...table.columns,
+        // The form, saved in January, has added 2027 — with no figures yet.
+        { key: '2027', label: '2027', year: 2027, kind: 'ytd', dataThrough: '01.01.2027' },
+      ] as StoredColumn[],
+      data: { Revenue: { '2024': '1', '2025': '1', '2026': '1' } },
+    };
+    const read = (row: string, key: string) => data[row]?.[key] ?? 0;
+    expect(annualFigures(stored, read, newYear)).toEqual(annualFigures(table, read, NOW));
+  });
+
+  it('moves on to the new year once it has figures, dropping the oldest', () => {
+    const february = new Date('2027-02-01T12:00:00Z');
+    const moved = {
+      ...table,
+      columns: [
+        ...table.columns,
+        { key: '2027', label: '2027', year: 2027, kind: 'ytd', dataThrough: '31.01.2027' },
+      ] as StoredColumn[],
+      data: { Revenue: { '2024': '1', '2025': '1', '2026': '1', '2027': '1' } },
+    };
+    const cells: Record<string, Record<string, number>> = {
+      Revenue: { ...data.Revenue, '2027': 10_000 },
+      'Overall Costs': { ...data['Overall Costs'], '2027': 0 },
+    };
+    // 2025, 2026 still projected from June, 2027 from one month; 2024 is out.
+    expect(annualFigures(moved, (row, key) => cells[row]?.[key] ?? 0, february)?.annualRevenue).toBeCloseTo(
+      (120_000 + 140_000 + 120_000) / 3,
+    );
   });
 
   it('has nothing to say about a table with no figures', () => {

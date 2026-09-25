@@ -1,9 +1,9 @@
 import group125 from "@/assets/Group 125.png";
 
 const stats = [
-  { value: "8+", label: "New Listings Daily" },
-  { value: "10K", label: "Total User Base" },
-  { value: "500M", label: "Requested Deal Volume" },
+  { value: "$3B+", label: "Total Deal Interest" },
+  { value: "8 Weeks", label: "Average Time to Close" },
+  { value: "190+", label: "Countries Supported" },
 ];
 
 const formatLabel = (label: string) => {
@@ -23,80 +23,85 @@ const AboutEx = () => {
       <div className="container mx-auto px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
           {/* Navigation Tabs */}
-          <div className="flex flex-wrap gap-2 sm:gap-4 mb-6 sm:mb-8 md:mb-10">
-            <button 
-              className="font-lufga w-full sm:w-auto min-w-[200px] sm:min-w-[280px] lg:w-[324px] h-14 sm:h-[68px] rounded-[60px] py-3 px-6 sm:py-4 sm:px-10 flex items-center justify-center sm:justify-start"
-              style={{
-                borderWidth: '1px',
-                border: '1px solid rgba(255, 255, 255, 0.3)',
-                backgroundColor: 'transparent',
-                opacity: 1
-              }}
-            >
-              <span
-                className="font-lufga text-base sm:text-lg md:text-xl lg:text-2xl"
-                style={{
-                  fontWeight: 400,
-                  lineHeight: '150%',
-                  letterSpacing: '0%',
-                  verticalAlign: 'middle',
-                  color: '#FFFFFF'
-                }}
-              >
-                EXIT OPPORTUNITIES
-              </span>
-            </button>
-            <button 
-              className="font-lufga w-full sm:w-auto min-w-[200px] sm:min-w-[280px] lg:w-[324px] h-14 sm:h-[68px] rounded-[60px] py-3 px-6 sm:py-4 sm:px-10 flex items-center justify-center sm:justify-start"
-              style={{
-                borderWidth: '1px',
-                border: '1px solid rgba(255, 255, 255, 0.3)',
-                backgroundColor: 'transparent',
-                opacity: 1
-              }}
-            >
-              <span
-                className="font-lufga text-base sm:text-lg md:text-xl lg:text-2xl"
-                style={{
-                  fontWeight: 400,
-                  lineHeight: '150%',
-                  letterSpacing: '0%',
-                  verticalAlign: 'middle',
-                  color: '#FFFFFF'
-                }}
-              >
-                Company Exchange
-              </span>
-            </button>
-          </div>
+
 
           {/* Top Section - About EX Text & Customer Review */}
           <div className="mb-8 sm:mb-12 md:mb-16">
-            <div className="grid md:grid-cols-2 gap-6 sm:gap-8 md:gap-12 items-start">
+            <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 md:gap-12 items-start">
               {/* Left - Platform Description */}
-              <div className="pt-2">
-                <p 
-                  className="font-lufga text-[24px] sm:text-[30px] md:text-[36px] lg:text-[44px]"
-                  style={{
-                    fontWeight: 500,
-                    lineHeight: '150%',
-                    letterSpacing: '0%',
-                    verticalAlign: 'middle',
-                    color: 'rgba(255, 255, 255, 0.9)',
-                    margin: 0,
-                    maxWidth: '1060px',
-                    width: '100%'
-                  }}
-                >
-                  EX provides you an intuitive dashboard, realtime analytics, and a secure marketplace for BUYING & SELLING Companies.
-                </p>
+              <div className="flex flex-col gap-4 ">
+
+                <div className="flex flex-wrap gap-2 sm:gap-4 mb-6 sm:mb-8 md:mb-10">
+                  <button
+                    className="font-lufga  h-14 sm:h-[68px] rounded-[60px] py-3 px-6 sm:py-4 sm:px-10 flex items-center justify-center sm:justify-start"
+                    style={{
+                      borderWidth: '1px',
+                      border: '1px solid rgba(255, 255, 255, 0.3)',
+                      backgroundColor: 'transparent',
+                      opacity: 1
+                    }}
+                  >
+                    <span
+                      className="font-lufga text-base sm:text-lg md:text-xl lg:text-2xl"
+                      style={{
+                        fontWeight: 400,
+                        lineHeight: '150%',
+                        letterSpacing: '0%',
+                        verticalAlign: 'middle',
+                        color: '#FFFFFF'
+                      }}
+                    >
+                      EXIT OPPORTUNITIES
+                    </span>
+                  </button>
+                  <button
+                    className="font-lufga h-14 sm:h-[68px] rounded-[60px] py-3 px-6 sm:py-4 sm:px-10 flex items-center justify-center sm:justify-start"
+                    style={{
+                      borderWidth: '1px',
+                      border: '1px solid rgba(255, 255, 255, 0.3)',
+                      backgroundColor: 'transparent',
+                      opacity: 1
+                    }}
+                  >
+                    <span
+                      className="font-lufga text-base sm:text-lg md:text-xl lg:text-2xl"
+                      style={{
+                        fontWeight: 400,
+                        lineHeight: '150%',
+                        letterSpacing: '0%',
+                        verticalAlign: 'middle',
+                        color: '#FFFFFF'
+                      }}
+                    >
+                      Company Exchange
+                    </span>
+                  </button>
+                </div>
+                <div className="pt-2">
+                  <p
+                    className="font-lufga text-[18px] sm:text-[34px] md:text-[30px] lg:text-[36px]"
+                    style={{
+                      fontWeight: 500,
+                      lineHeight: '150%',
+                      letterSpacing: '0%',
+                      verticalAlign: 'middle',
+                      color: 'rgba(255, 255, 255, 0.9)',
+                      margin: 0,
+                      // // maxWidth: '1060px',
+                      // width: '100%'
+                    }}
+                  >
+                    EX provides you an intuitive dashboard, realtime analytics, and a secure marketplace for BUYING & SELLING Companies.
+                  </p>
+                </div>
               </div>
+
 
               {/* Right - Customer Review Box */}
               <div className="flex justify-end md:justify-end items-start">
-                <img 
-                  src={group125} 
-                  alt="Customer Reviews" 
+                <img
+                  src={group125}
+                  alt="Customer Reviews"
                   className="w-auto h-auto max-w-[200px] sm:max-w-[240px] md:max-w-[260px]"
                 />
               </div>
@@ -105,14 +110,14 @@ const AboutEx = () => {
 
           {/* Bottom Section - Statistics */}
           <div className="border-t border-dashed border-white/10 pt-6 sm:pt-8 md:pt-12">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 md:gap-12">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8  md:gap-12 text-left">
               {stats.map((stat, index) => (
                 <div
                   key={index}
                   className="text-center"
                 >
-                  <div 
-                    className="font-lufga mb-2 uppercase text-sm sm:text-base md:text-lg lg:text-[22px]"
+                  <div
+                    className="font-lufga text-left mb-2 uppercase text-sm sm:text-base md:text-lg lg:text-[32px]"
                     style={{
                       fontWeight: 400,
                       lineHeight: '150%',
@@ -124,8 +129,8 @@ const AboutEx = () => {
                   >
                     {formatLabel(stat.label)}
                   </div>
-                  <div 
-                    className="font-lufga text-[48px] sm:text-[64px] md:text-[80px] lg:text-[102px]"
+                  <div
+                    className="font-lufga text-left text-[48px] sm:text-[64px] md:text-[80px] xxl:text-[102px]"
                     style={{
                       fontWeight: 400,
                       lineHeight: '150%',

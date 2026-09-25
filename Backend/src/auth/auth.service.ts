@@ -10,6 +10,9 @@ import { InboxCodeService } from 'src/user/inbox-code.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ActivityLogService } from 'src/activity-log/activity-log.service';
 import type { RequestOrigin } from 'src/activity-log/request-origin';
+import { ListingService } from 'src/listing/listing.service';
+import { Prisma } from '@prisma/client';
+import { listingSchema } from 'src/listing/dto/create-listing.dto';
 /**
  * What sign-in answers someone who signed up but never entered the emailed
  * code. The browser watches for it and takes them back to the code page.
@@ -30,6 +33,8 @@ export class AuthService {
     private readonly db: PrismaService,
     /** Sign-ins, sign-outs and password changes go into the member's log. */
     @Optional() private readonly activityLog?: ActivityLogService,
+    /** Turns a guest's waiting listing into a draft in the new account. */
+    @Optional() private readonly listings?: ListingService,
   ) {}
 
   // SignUp Service
@@ -56,11 +61,15 @@ export class AuthService {
     await this.db.pendingSignup.deleteMany({
       where: { created_at: { lt: new Date(Date.now() - PENDING_SIGNUP_TTL_MS) } },
     });
+    const listingDraft = this.checkedListingDraft(body.listing_draft);
     const details = {
       first_name: body.first_name,
       last_name: body.last_name,
       password_hash: hash,
       business_name: body.business_name?.trim() || null,
+      // Sent again without one (the form re-submitted), the draft already
+      // waiting is kept rather than wiped.
+      ...(listingDraft ? { listing_draft: listingDraft } : {}),
     };
     const pending = await this.db.pendingSignup.upsert({
       where: { email: address },
@@ -113,6 +122,7 @@ export class AuthService {
       ...(pending.business_name ? { business_name: pending.business_name } : {}),
       is_email_verified: true,
     });
+    const draftListingId = await this.createWaitingDraft(user.id, (pending as any).listing_draft);
     await this.db.pendingSignup.delete({ where: { id: pending.id } }).catch(() => undefined);
 
     const { accessToken, refreshToken } = await this.getTokens(user);
@@ -133,7 +143,43 @@ export class AuthService {
     return {
       user: this.formatResponse(loggedInUser),
       tokens: { accessToken, refreshToken },
+      // The listing waiting from the guest form, now a draft in this account.
+      ...(draftListingId ? { draftListingId } : {}),
     };
+  }
+
+  /**
+   * The listing a guest sent with their sign-up, if it is one "create listing"
+   * would accept — always as a DRAFT, whatever it asked to be. Anything else
+   * is dropped: a bad draft never stands in the way of registering.
+   */
+  private checkedListingDraft(raw: unknown): Prisma.InputJsonObject | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const parsed = listingSchema.safeParse({ ...(raw as Record<string, unknown>), status: 'DRAFT' });
+    if (!parsed.success) {
+      console.warn('Sign-up listing draft did not pass the listing rules; not kept:', parsed.error.issues[0]);
+      return null;
+    }
+    return parsed.data as unknown as Prisma.InputJsonObject;
+  }
+
+  /**
+   * The waiting listing, made a DRAFT in the new account. The browser the
+   * guest typed it in no longer matters: confirming a day later, or on another
+   * device, finds it here. Failing leaves the account as it is.
+   */
+  private async createWaitingDraft(userId: string, draft: unknown): Promise<string | null> {
+    if (!draft || !this.listings) return null;
+    try {
+      const listing: any = await this.listings.create(userId, {
+        ...(draft as any),
+        status: 'DRAFT',
+      });
+      return listing?.id ? String(listing.id) : null;
+    } catch (error) {
+      console.error('Could not turn the sign-up listing draft into a listing:', error);
+      return null;
+    }
   }
 
   // SignIn Service

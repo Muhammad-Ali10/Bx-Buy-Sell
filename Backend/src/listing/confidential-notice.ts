@@ -144,6 +144,35 @@ export async function postAccessNotice(
 }
 
 /**
+ * "The listing … was deleted" — written into each conversation that outlives
+ * its listing.
+ *
+ * Deleting a listing keeps its conversations now (see ListingService.delete),
+ * but the listing's name no longer heads them, so each says in its own history
+ * which listing it was about. The wording lives in the browser, keyed on
+ * `kind`, like the other notices.
+ */
+export async function postListingDeletedNotice(db: Db, chatId: string, listingTitle: string | null) {
+  try {
+    const message = await db.message.create({
+      data: {
+        chatId,
+        senderId: null,
+        type: 'SYSTEM',
+        content: null,
+        read: false,
+        metadata: { kind: 'LISTING_DELETED', listingTitle: listingTitle || null },
+      },
+    });
+    broadcastChatMessage(message);
+    return message;
+  } catch (error) {
+    console.error('Failed to post the listing-deleted notice:', error);
+    return null;
+  }
+}
+
+/**
  * Whether this listing's seller is vetting buyers by hand right now.
  *
  * The client's rule is "a seller with Starter or Premium who has switched it

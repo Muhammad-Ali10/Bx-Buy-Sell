@@ -289,8 +289,10 @@ const ListingCard = ({
             {/* Telling someone who has already registered to register reads as
                 a broken page; what they are missing is the agreement. */}
             <span className="text-white text-sm font-medium underline">
+              {/* The client's wording on a blurred photo, back after it was
+                  briefly "Confidential": it says what to do to see it. */}
               {imageLockType === 'CONFIDENTIAL_AGREEMENT'
-                ? 'Confidential'
+                ? 'Accept Agreement To Unlock'
                 : 'Register To Unlock'}
             </span>
           </button>

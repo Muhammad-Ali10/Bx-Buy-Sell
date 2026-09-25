@@ -126,7 +126,11 @@ export function columnCutoff(col: StoredColumn): string | null {
 type Normalized = StoredColumn & { kind: ColumnKind };
 export type ColumnReading = { year: number; kind: ColumnKind };
 
-/** The frontend's normalizeFinancialColumns: year, kind and date for columns saved without them. */
+/**
+ * The frontend's normalizeFinancialColumns: year, kind and date for columns
+ * saved without them. What the seller saw above a column is what its figures
+ * are about, so the heading decides the year, not the key.
+ */
 function normalizeColumns(columns: StoredColumn[], now: Date): Normalized[] {
   return columns.map((col) => {
     const label = String(col?.label || '').trim();
@@ -134,29 +138,29 @@ function normalizeColumns(columns: StoredColumn[], now: Date): Normalized[] {
     if (col?.year && col?.kind) return col as Normalized;
 
     const stated = parseDmy(col?.dataThrough) ? String(col.dataThrough) : null;
+    const digitsOf = (pattern: RegExp) => Number((label.match(pattern) || key.match(pattern) || [])[1]) || undefined;
+
+    // A kind without a year: the year is in the heading, the key or the date.
+    if (col?.kind) {
+      const year = digitsOf(/(\d{4})/) ?? (stated ? parseDmy(stated)!.year : undefined);
+      return { ...col, ...(year ? { year } : {}) } as Normalized;
+    }
+
     const isForecast = /forecast/i.test(label) || /forecast/i.test(key);
     const asDate = parseDmy(label);
     const isYtd = Boolean(col?.isToday) || key === 'today' || (!isForecast && Boolean(asDate));
 
     if (isForecast) {
-      const digits = (label.match(/\d{4}/) || key.match(/\d{4}/) || [])[0];
-      const year = Number(digits) || now.getUTCFullYear();
-      return { ...col, year, kind: 'forecast', dataThrough: stated ?? lastDayOf(year) };
+      const year = digitsOf(/(\d{4})/) ?? now.getUTCFullYear();
+      return { ...col, year, kind: 'forecast', dataThrough: undefined };
     }
 
     if (isYtd) {
-      const year = asDate ? asDate.year : now.getUTCFullYear();
-      return {
-        ...col,
-        year,
-        kind: 'ytd',
-        dataThrough: stated ?? (asDate ? label : formatDmy(now)),
-        dateCustomized: col?.dateCustomized ?? false,
-      };
+      const year = stated ? parseDmy(stated)!.year : asDate ? asDate.year : now.getUTCFullYear();
+      return { ...col, year, kind: 'ytd', dataThrough: stated ?? (asDate ? label : formatDmy(now)) };
     }
 
-    const yearDigits = (label.match(/^(\d{4})$/) || key.match(/^(\d{4})$/) || [])[1];
-    const year = Number(yearDigits) || undefined;
+    const year = digitsOf(/^(\d{4})$/);
     return {
       ...col,
       ...(year ? { year } : {}),
@@ -166,76 +170,111 @@ function normalizeColumns(columns: StoredColumn[], now: Date): Normalized[] {
   });
 }
 
-const columnHasFigures = (data: PnlTable['data'], key: string) =>
-  Object.values(data).some((row) => String(row?.[key] ?? '').trim() !== '');
+/** A year's column filed by year — the frontend's canonicalFinancialTable — and where its figures are stored. */
+type YearColumn = {
+  key: string;
+  /** The stored key its figures are under. Null for a year the table has no column for. */
+  from: string | null;
+  year: number;
+  kind: ColumnKind;
+  dataThrough?: string;
+};
 
-/** The four columns the page draws for a running year — the frontend's buildFinancialColumns. */
-const framedColumns = (ytdYear: number): Array<ColumnReading & { key: string }> => [
-  { key: String(ytdYear - 2), year: ytdYear - 2, kind: 'actual' },
-  { key: String(ytdYear - 1), year: ytdYear - 1, kind: 'actual' },
-  { key: String(ytdYear), year: ytdYear, kind: 'ytd' },
-  { key: `forecast-${ytdYear}`, year: ytdYear, kind: 'forecast' },
-];
+const yearKey = (year: number, kind: ColumnKind) => (kind === 'forecast' ? `forecast-${year}` : String(year));
 
-/** The frontend's resolveFinancialColumns, as far as the years go. */
-function resolvedColumns(normalized: Normalized[], data: PnlTable['data'], now: Date) {
-  const ytd = normalized.find((col) => col.kind === 'ytd');
-  if (!ytd?.year) return framedColumns(now.getUTCFullYear());
-  const complete = coversFullYear(ytd.dataThrough) && columnHasFigures(data, String(ytd.key ?? ''));
-  return framedColumns(Math.min(complete ? ytd.year + 1 : ytd.year, now.getUTCFullYear()));
+function yearColumns(stored: StoredColumn[], hasFigures: (key: string) => boolean, now: Date): YearColumn[] {
+  const byKey = new Map<string, YearColumn>();
+  for (const col of normalizeColumns(stored, now)) {
+    if (!col.year) continue;
+    const from = String(col.key ?? '');
+    let dataThrough: string | undefined;
+    if (col.kind === 'actual') dataThrough = lastDayOf(col.year);
+    else if (col.kind === 'ytd') {
+      dataThrough = parseDmy(col.dataThrough)
+        ? String(col.dataThrough)
+        : now.getUTCFullYear() === col.year
+          ? formatDmy(now)
+          : lastDayOf(col.year);
+    }
+    const entry: YearColumn = { key: yearKey(col.year, col.kind), from, year: col.year, kind: col.kind, dataThrough };
+    const already = byKey.get(entry.key);
+    // Two stored columns for one year: the one with figures in it wins.
+    if (!already || (!hasFigures(already.from ?? '') && hasFigures(from))) byKey.set(entry.key, entry);
+  }
+  return [...byKey.values()];
 }
 
-function yearsAreConsistent(columns: Normalized[]): boolean {
-  const ytdYear = columns.find((col) => col.kind === 'ytd')?.year;
-  if (!ytdYear) return true;
-  return columns.every((col) => {
-    if (!col.year) return true;
-    if (col.kind === 'actual') return col.year === ytdYear - 1 || col.year === ytdYear - 2;
-    return col.year === ytdYear;
-  });
+/** The frontend's columnOf: a year's column as the table has it, or a fresh one. */
+function columnOf(columns: YearColumn[], year: number, kind: ColumnKind, now: Date): YearColumn {
+  const key = yearKey(year, kind);
+  const stored = columns.find((col) => col.key === key);
+  const current = year === now.getUTCFullYear();
+  if (kind === 'forecast') return stored ?? { key, from: null, year, kind };
+  if (stored) {
+    // Never a whole year before 31 December, and never a day still to come.
+    const future = (() => {
+      const parts = parseDmy(stored.dataThrough);
+      return Boolean(parts && Date.UTC(parts.year, parts.month - 1, parts.day) > now.getTime());
+    })();
+    return current && (stored.kind === 'actual' || future)
+      ? { ...stored, kind: 'ytd', dataThrough: formatDmy(now) }
+      : stored;
+  }
+  if (kind === 'ytd' && current) return { key, from: null, year, kind: 'ytd', dataThrough: formatDmy(now) };
+  return { key, from: null, year, kind: 'actual', dataThrough: lastDayOf(year) };
 }
 
 /**
- * Which year, and what kind of year, each stored column is shown as.
+ * The listing page's four columns — the frontend's buyerFinancialColumns.
  *
- * The frontend's realignFinancialTable. Most stored tables predate years on
- * their columns and carry headings that never described one business — "2023",
- * "2024", a 2026 date, "Forecast 2025" — and the listing page reads those by
- * position: the two years before the running one, the running year, and its
- * forecast. A figure has to be converted with the rate of the year the buyer
- * sees above it.
+ * Built around the year that was running, which stays put on 1 January and
+ * moves on once the new year has figures or the old one is closed at
+ * 31 December.
+ */
+function buyerColumns(columns: YearColumn[], hasFigures: (key: string) => boolean, now: Date): YearColumn[] {
+  const thisYear = now.getUTCFullYear();
+  const years = columns.filter((col) => col.kind !== 'forecast' && col.year <= thisYear);
+  const started = years.filter((col) => col.kind === 'ytd').map((col) => col.year);
+  let year = started.length ? Math.min(...started) : thisYear;
+  for (const col of years) {
+    if (!col.from || !hasFigures(col.from)) continue;
+    year = Math.max(year, col.year);
+    if (coversFullYear(col.dataThrough)) year = Math.max(year, col.year + 1);
+  }
+  year = Math.min(year, thisYear);
+  return [
+    columnOf(columns, year - 2, 'actual', now),
+    columnOf(columns, year - 1, 'actual', now),
+    columnOf(columns, year, 'ytd', now),
+    columnOf(columns, year, 'forecast', now),
+  ];
+}
+
+const figuresIn = (data: PnlTable['data']) => (key: string) =>
+  Object.values(data).some((row) => String(row?.[key] ?? '').trim() !== '');
+
+/**
+ * Which year, and what kind of year, each stored column is about.
+ *
+ * Read from its heading, the way the listing page reads it, so a figure is
+ * converted with the rate of the year the buyer sees above it. A year to date
+ * closed at 31 December is a whole year.
  */
 export function columnYears(
   stored: StoredColumn[],
   data: PnlTable['data'],
   now = new Date(),
 ): Map<string, ColumnReading> {
-  const previous = normalizeColumns(stored, now);
-  const columns = resolvedColumns(previous, data, now);
   const readings = new Map<string, ColumnReading>();
-
-  if (yearsAreConsistent(previous)) {
-    const claimed = new Set<string>();
-    for (const col of columns) {
-      const match =
-        previous.find(
-          (old) => old.year === col.year && old.kind === col.kind && !claimed.has(String(old.key)),
-        ) ?? previous.find((old) => old.year === col.year && !claimed.has(String(old.key)));
-      if (!match?.key) continue;
-      claimed.add(String(match.key));
-      readings.set(String(match.key), { year: col.year, kind: col.kind });
-    }
-  } else {
-    for (let i = 0; i < Math.min(previous.length, columns.length); i++) {
-      const key = previous[i]?.key;
-      if (key) readings.set(String(key), { year: columns[i].year, kind: columns[i].kind });
-    }
+  for (const col of yearColumns(stored, figuresIn(data), now)) {
+    if (!col.from) continue;
+    const kind = col.kind === 'ytd' && coversFullYear(col.dataThrough) ? 'actual' : col.kind;
+    readings.set(col.from, { year: col.year, kind });
   }
-
-  // A column the page does not draw keeps its own year, where it has one.
-  for (const old of previous) {
-    const key = String(old.key ?? '');
-    if (key && !readings.has(key) && old.year) readings.set(key, { year: old.year, kind: old.kind });
+  // A column that lost to another for the same year keeps its own reading.
+  for (const col of normalizeColumns(stored, now)) {
+    const key = String(col.key ?? '');
+    if (key && !readings.has(key) && col.year) readings.set(key, { year: col.year, kind: col.kind });
   }
   return readings;
 }
@@ -244,38 +283,25 @@ export function columnYears(
 
 export type AnnualFigures = { annualRevenue: number; annualProfit: number; yearsUsed: number };
 
-/**
- * How many months of its year a column covers, from its own date — the
- * frontend's monthsCovered, read off the column exactly as stored.
- */
-const monthsCovered = (col: StoredColumn, now: Date): number => {
-  const match = String(col.dataThrough || col.label || '').match(DMY);
-  const month = match ? parseInt(match[2], 10) : now.getUTCMonth() + 1;
+/** How many months of its year a column covers, from its own date — the frontend's monthsCovered. */
+const monthsCovered = (dataThrough: string | undefined, now: Date): number => {
+  const parts = parseDmy(dataThrough);
+  const month = parts ? parts.month : now.getUTCMonth() + 1;
   return Math.min(Math.max(month, 1), 12);
 };
-
-const isForecastColumn = (col: StoredColumn) =>
-  col.kind === 'forecast' || /forecast/i.test(col.label || '') || /forecast/i.test(col.key || '');
-
-const isFullYearColumn = (col: StoredColumn) =>
-  col.kind === 'actual' ||
-  /^\d{4}$/.test(String(col.key || '')) ||
-  /^\d{4}$/.test(String(col.label || '').trim());
-
-const isYtdColumn = (col: StoredColumn) =>
-  col.kind === 'ytd' || Boolean(col.isToday) || col.key === 'today';
 
 /**
  * ⌀ annual revenue and profit — the frontend's computeListingFinancialMetrics.
  *
- * Every year counts equally; a year still running is scaled to twelve months
- * first; a year with nothing in it is left out; forecasts are ignored. `amount`
- * reads one figure in whichever currency the caller wants, so each year is
- * converted with its own rate before the years are averaged. Null when no
+ * Only the years the buyer is shown count, and never their forecast. Every
+ * year counts equally; a year still open is scaled to twelve months from its
+ * own date first; a year with nothing in it is left out. `amount` reads one
+ * figure, by stored key, in whichever currency the caller wants, so each year
+ * is converted with its own rate before the years are averaged. Null when no
  * year has figures.
  */
 export function annualFigures(
-  table: Pick<PnlTable, 'columns' | 'rowLabels' | 'financialType'>,
+  table: Pick<PnlTable, 'columns' | 'rowLabels' | 'financialType'> & { data?: PnlTable['data'] },
   amount: (row: string, key: string) => number,
   now = new Date(),
 ): AnnualFigures | null {
@@ -292,20 +318,28 @@ export function annualFigures(
     }, 0);
   };
 
+  // Whether a stored column has figures: from the table when there is one,
+  // else from the amounts themselves.
+  const hasFigures = table.data
+    ? figuresIn(table.data)
+    : (key: string) =>
+        [REVENUE_ROW, GROSS_REVENUE_ROW, OVERALL_COSTS_ROW, ...table.rowLabels].some(
+          (row) => amount(row, key) !== 0,
+        );
+
+  const columns = buyerColumns(yearColumns(table.columns, hasFigures, now), hasFigures, now);
+
   const revenues: number[] = [];
   const profits: number[] = [];
-  for (const col of table.columns) {
-    if (isForecastColumn(col)) continue;
-    const ytd = isYtdColumn(col);
-    if (!ytd && !isFullYearColumn(col)) continue;
+  for (const col of columns) {
+    if (col.kind === 'forecast' || !col.from) continue;
 
-    const key = String(col.key ?? '');
-    const revenue = revenueFor(key);
-    const profit = profitFor(key);
+    const revenue = revenueFor(col.from);
+    const profit = profitFor(col.from);
     if (revenue === 0 && profit === 0) continue;
 
-    if (ytd) {
-      const months = monthsCovered(col, now);
+    if (!coversFullYear(col.dataThrough)) {
+      const months = monthsCovered(col.dataThrough, now);
       revenues.push((revenue / months) * 12);
       profits.push((profit / months) * 12);
     } else {

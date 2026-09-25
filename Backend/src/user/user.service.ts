@@ -2,7 +2,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { trimListingFeedRecord } from 'common/util/trim-listing-feed.util';
-import { canViewBlockedListing, maskListingFor } from '../listing/listing-visibility';
+import { canViewBlockedListing, grantsConfidentialAccess, maskListingFor } from '../listing/listing-visibility';
 import type { UpdateUserType, UserType } from './dto/user.dto';
 import type {
   UpdateAdminUserType,
@@ -350,10 +350,15 @@ export class UserService {
     const accessRows = listingIds.length
       ? await this.db.listingConfidentialAccess.findMany({
           where: { buyerId: id, listingId: { in: listingIds } },
-          select: { listingId: true },
+          select: { listingId: true, status: true },
         })
       : [];
-    const accessible = new Set(accessRows.map((row) => row.listingId));
+    // Unlocked only once the seller has approved — the rule the listing page
+    // uses. Any row used to count, so a request still waiting showed the
+    // photos here that the listing itself kept blurred.
+    const accessible = new Set(
+      accessRows.filter((row) => grantsConfidentialAccess(row.status)).map((row) => row.listingId),
+    );
 
     const who = { userId: viewer?.userId ?? id, role: viewer?.role };
     return rows

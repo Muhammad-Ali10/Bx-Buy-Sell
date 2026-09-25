@@ -1,7 +1,8 @@
 import {
   calculateNetProfitForColumn,
   columnHasFigures,
-  realignFinancialTable,
+  buyerFinancialColumns,
+  canonicalFinancialTable,
 } from "./financialTableUtils";
 
 /**
@@ -50,7 +51,8 @@ describe("Net Profit on the listing page", () => {
   };
 
   const listingTable = () => {
-    const { columns, financialData } = realignFinancialTable(storedColumns, storedData, TODAY);
+    const { columns: stored, financialData } = canonicalFinancialTable(storedColumns, storedData);
+    const columns = buyerFinancialColumns(stored, financialData, TODAY);
     return { columns, table: { financialData, rowLabels, financialType: "detailed" } };
   };
 
