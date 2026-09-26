@@ -23,6 +23,7 @@ import chatSearchIcon from "@/assets/chatsearch.svg";
 import { ChatMessageBody } from "@/components/chat/ChatMessageBody";
 import { callLogLabel } from "@/lib/callLog";
 import { startCall } from "@/lib/calls";
+import { ATTACHMENT_ACCEPT, asAllowedAttachment, formatMaxSize, getFileExtension, maxBytesFor, refusedAttachmentsMessage } from "@/lib/fileTypes";
 
 interface Message {
   id: string;
@@ -480,10 +481,22 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
    * the members' side of the same conversation.
    */
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const picked = event.target.files?.[0];
     // Clear immediately, so picking the same file twice still fires onChange.
     event.target.value = '';
-    if (!file) return;
+    if (!picked) return;
+
+    // The same fifteen formats as the members' side, refused out loud.
+    const file = asAllowedAttachment(picked);
+    if (!file) {
+      toast.error(refusedAttachmentsMessage([picked]));
+      return;
+    }
+    const limit = maxBytesFor(file.name);
+    if (file.size > limit) {
+      toast.error(`File must be less than ${formatMaxSize(limit)}`);
+      return;
+    }
 
     if (!user?.id || !socket || !isConnected) {
       toast.error('Connection not ready. Please wait...');
@@ -492,14 +505,16 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
 
     setIsUploading(true);
     try {
-      const isImage = file.type.startsWith('image/');
-      const uploadResponse = await apiClient.uploadFile(file, isImage ? 'photo' : 'attachment');
+      // Shown inline only where a browser can draw it; HEIC goes as a file.
+      const isImage = ['png', 'jpg', 'jpeg'].includes(getFileExtension(file.name));
+      // Private to this conversation, served only through the protected route.
+      const uploadResponse = await apiClient.uploadChatAttachment(conversationId, file);
       if (!uploadResponse.success || !uploadResponse.data) {
         throw new Error(uploadResponse.error || 'Upload failed');
       }
 
       const data = uploadResponse.data as any;
-      const fileUrl = data.url || data.path || '';
+      const fileUrl = data.url || '';
       if (!fileUrl) throw new Error('No file URL returned');
 
       const content = isImage ? '📷 Image' : `📎 ${file.name}`;
@@ -1111,7 +1126,7 @@ export const AdminChatWindow = ({ conversationId }: AdminChatWindowProps) => {
             type="file"
             className="hidden"
             onChange={handleFileSelect}
-            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
+            accept={ATTACHMENT_ACCEPT}
           />
           <button
             type="button"

@@ -5,7 +5,9 @@ export const useCategories = (options?: { nocache?: boolean }) => {
   return useQuery({
     queryKey: ["categories", options?.nocache ? "nocache" : "cached"],
     queryFn: async () => {
-      const response = await apiClient.getCategories(options?.nocache ? "true" : undefined);
+      // The endpoint takes no cache flag; `nocache` only keeps a separate
+      // entry in React Query's cache (see the query key above).
+      const response = await apiClient.getCategories();
       if (!response.success) {
         throw new Error(response.error || "Failed to fetch categories");
       }

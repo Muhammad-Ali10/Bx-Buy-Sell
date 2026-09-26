@@ -25,6 +25,7 @@ import {
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { pickHomeSections } from "@/lib/homeSections";
+import { showsPremiumBadge } from "@/lib/packageContent";
 
 /**
  * The listings on the home page: three rows, Popular, Featured and Newest,
@@ -424,9 +425,7 @@ const Listings = () => {
             listing.managed_by_ex === "true" ||
             listing.managed_by_ex === "1"
           }
-          isPremium={
-            String(listing.selectedPackage || "").toUpperCase() === "PREMIUM"
-          }
+          isPremium={showsPremiumBadge(listing)}
           listingId={listing.id}
           sellerId={listing.userId || listing.user_id}
         />

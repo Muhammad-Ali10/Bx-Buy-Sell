@@ -282,6 +282,15 @@ export class ListingController {
     );
   }
 
+  @Post(':id/confidential/manual-approval/disable')
+  @ApiOperation({
+    summary: 'Switch manual buyer approval off; buyers already waiting are let in',
+  })
+  async disableManualApproval(@Req() req: Request, @Param('id') listingId: string) {
+    const { id: sellerId } = (req as any).user;
+    return this.listingService.disableManualApproval(listingId, sellerId);
+  }
+
   @Post(':id/confidential/grant')
   async grantConfidentialAccess(
     @Req() req: Request,

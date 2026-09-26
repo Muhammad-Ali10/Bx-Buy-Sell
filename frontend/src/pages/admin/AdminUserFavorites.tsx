@@ -31,6 +31,7 @@ import {
   listingMultiplesOf,
   listingPriceIn,
 } from "@/lib/listingMoney";
+import { showsPremiumBadge } from "@/lib/packageContent";
 export default function AdminUserFavorites() {
   const viewerCurrency = useDisplayCurrency();
   const navigate = useNavigate();
@@ -324,7 +325,7 @@ export default function AdminUserFavorites() {
                             : avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined
                         }
                         managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
-                        isPremium={String(listing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
+                        isPremium={showsPremiumBadge(listing)}
                         listingId={listingId}
                         sellerId={listing.userId || listing.user_id}
                       />

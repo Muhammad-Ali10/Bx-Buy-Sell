@@ -31,6 +31,10 @@ import fileIcon from "@/assets/file.svg";
 import sendIcon from "@/assets/send.svg";
 import { callLogLabel } from "@/lib/callLog";
 import { startCall } from "@/lib/calls";
+import { ManualApprovalLockedDialog, PACKAGE_REQUIRED } from "./ManualApprovalLockedDialog";
+import { ATTACHMENT_ACCEPT, asAllowedAttachment, formatMaxSize, getFileExtension, maxBytesFor, refusedAttachmentsMessage } from "@/lib/fileTypes";
+import { ProtectedImg } from "@/components/ProtectedImg";
+import { openProtected } from "@/hooks/useProtectedUrl";
 
 interface Message {
   id: string;
@@ -119,6 +123,8 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   const [isChatPinned, setIsChatPinned] = useState(false);
   const [hasConfidentialAccess, setHasConfidentialAccess] = useState<boolean | null>(null);
   const [isUpdatingConfidentialAccess, setIsUpdatingConfidentialAccess] = useState(false);
+  // The listing's paid package lapsed: Approve / Decline open the upgrade dialog.
+  const [packageLockOpen, setPackageLockOpen] = useState(false);
   // This buyer has asked and is waiting on the seller's decision.
   const [accessRequestPending, setAccessRequestPending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1621,8 +1627,23 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
 
   // Handle file/image upload
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = e.target.files?.[0];
+    // Cleared at once, so choosing the same file again still fires onChange.
+    e.target.value = '';
+    if (!picked) return;
+
+    // One of the fifteen formats, said out loud when it is not — the picker's
+    // `accept` is passed by with "All files" or a drag-and-drop.
+    const file = asAllowedAttachment(picked);
+    if (!file) {
+      toast.error(refusedAttachmentsMessage([picked]));
+      return;
+    }
+    const limit = maxBytesFor(file.name);
+    if (file.size > limit) {
+      toast.error(`File must be less than ${formatMaxSize(limit)}`);
+      return;
+    }
 
     const chatIdToUse = chatRoom?.id || conversationId;
     if (!chatIdToUse || !currentUserId) {
@@ -1632,18 +1653,19 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
 
     setIsUploading(true);
     try {
-      // Determine file type
-      const isImage = file.type.startsWith('image/');
+      // Shown inline only where a browser can draw it; HEIC goes as a file.
+      const isImage = ['png', 'jpg', 'jpeg'].includes(getFileExtension(file.name));
       const uploadType = isImage ? 'photo' : 'attachment';
 
-      // Upload file
-      const uploadResponse = await apiClient.uploadFile(file, uploadType);
+      // Through the server, which keeps it private to this conversation and
+      // serves it only through the protected download route.
+      const uploadResponse = await apiClient.uploadChatAttachment(chatIdToUse, file);
       
       if (!uploadResponse.success || !uploadResponse.data) {
         throw new Error(uploadResponse.error || 'Upload failed');
       }
 
-      const fileUrl = uploadResponse.data.url || uploadResponse.data.path || '';
+      const fileUrl = uploadResponse.data.url || '';
       if (!fileUrl) {
         throw new Error('No file URL returned');
       }
@@ -2577,6 +2599,8 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         setAccessRequestPending(false);
         // And the request card at the top of the list goes with it.
         queryClient.invalidateQueries({ queryKey: ["confidential-requests"] });
+      } else if ((response as any).code === PACKAGE_REQUIRED) {
+        setPackageLockOpen(true);
       } else {
         toast.error(response.error || "Failed to grant confidential access");
       }
@@ -2596,6 +2620,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         buyerIdForAccess,
       );
       if (response?.success === false) {
+        if (response?.code === PACKAGE_REQUIRED) {
+          setPackageLockOpen(true);
+          return;
+        }
         toast.error(response?.error || 'Could not decline the request.');
         return;
       }
@@ -2995,6 +3023,17 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                 ✓ Approve Access
               </button>
             </div>
+            <ManualApprovalLockedDialog
+              open={packageLockOpen}
+              onOpenChange={setPackageLockOpen}
+              listingId={listingIdForAccess ?? null}
+              onSwitchedOff={() => {
+                // Switching off let this buyer in with everyone else waiting.
+                setAccessRequestPending(false);
+                setHasConfidentialAccess(true);
+                queryClient.invalidateQueries({ queryKey: ["confidential-requests"] });
+              }}
+            />
           </div>
         )}
 
@@ -3283,14 +3322,14 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                       <>
                         {message.type === 'IMAGE' && message.fileUrl ? (
                           <div className="space-y-2">
-                            <img 
+                            <ProtectedImg
                               src={message.fileUrl} 
                               alt={message.content || 'Image'} 
                               className="max-w-full max-h-64 rounded-lg object-contain cursor-pointer"
                               loading="lazy"
                               decoding="async"
                               sizes="(max-width: 640px) 100vw, 256px"
-                              onClick={() => window.open(message.fileUrl, '_blank')}
+                              onClick={() => void openProtected(message.fileUrl)}
                               onError={(e) => {
                                 const target = e.currentTarget;
                                 target.style.display = 'none';
@@ -3437,14 +3476,14 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                       <>
                         {message.type === 'IMAGE' && message.fileUrl ? (
                           <div className="space-y-2">
-                            <img 
+                            <ProtectedImg
                               src={message.fileUrl} 
                               alt={message.content || 'Image'} 
                               className="max-w-full max-h-64 rounded-lg object-contain cursor-pointer"
                               loading="lazy"
                               decoding="async"
                               sizes="(max-width: 640px) 100vw, 256px"
-                              onClick={() => window.open(message.fileUrl, '_blank')}
+                              onClick={() => void openProtected(message.fileUrl)}
                               onError={(e) => {
                                 const target = e.currentTarget;
                                 target.style.display = 'none';
@@ -3653,14 +3692,14 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                       <>
                         {message.type === 'IMAGE' && message.fileUrl ? (
                           <div className="space-y-2">
-                            <img 
+                            <ProtectedImg
                               src={message.fileUrl} 
                               alt={message.content || 'Image'} 
                               className="max-w-full max-h-64 rounded-lg object-contain cursor-pointer"
                               loading="lazy"
                               decoding="async"
                               sizes="(max-width: 640px) 100vw, 256px"
-                              onClick={() => window.open(message.fileUrl, '_blank')}
+                              onClick={() => void openProtected(message.fileUrl)}
                               onError={(e) => {
                                 const target = e.currentTarget;
                                 target.style.display = 'none';
@@ -3859,11 +3898,11 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
                     <>
                       {message.type === 'IMAGE' && message.fileUrl ? (
                         <div className="space-y-2">
-                          <img 
+                          <ProtectedImg
                             src={message.fileUrl} 
                             alt={message.content || 'Image'} 
                             className="max-w-full max-h-64 rounded-lg object-contain cursor-pointer"
-                            onClick={() => window.open(message.fileUrl, '_blank')}
+                            onClick={() => void openProtected(message.fileUrl)}
                             onError={(e) => {
                               const target = e.currentTarget;
                               target.style.display = 'none';
@@ -4004,7 +4043,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,application/pdf,.doc,.docx,.txt"
+          accept={ATTACHMENT_ACCEPT}
           onChange={handleFileSelect}
           className="hidden"
           disabled={!isConnected || !chatRoom?.id || isUploading}

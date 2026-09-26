@@ -183,5 +183,33 @@ export function refusedAttachmentsMessage(files: { name: string }[]): string {
   const first = `"${files[0]?.name || "file"}"`;
   const who = files.length > 1 ? `${first} and ${files.length - 1} more` : first;
   const verb = files.length > 1 ? "weren't" : "wasn't";
-  return `${who} ${verb} uploaded — only these file types are accepted: ${ALLOWED_ATTACHMENT_LABEL}`;
+  // The client's words first: the seller should read that the type is the
+  // problem before reading which types would do.
+  return `File type not supported — ${who} ${verb} uploaded. Allowed: ${ALLOWED_ATTACHMENT_LABEL}`;
+}
+
+/**
+ * For a file input's `accept`, so the picker offers only what will be taken.
+ *
+ * The check above still runs on every file: a drag-and-drop, or "All files"
+ * chosen in the dialog, passes by the attribute entirely.
+ */
+export const ATTACHMENT_ACCEPT = ALLOWED_ATTACHMENT_EXTENSIONS.map((e) => `.${e}`).join(",");
+
+/** The picture formats of the fifteen — what a photo question takes. */
+export const PHOTO_EXTENSIONS = ["png", "jpg", "jpeg", "heic"];
+export const PHOTO_ACCEPT = PHOTO_EXTENSIONS.map((e) => `.${e}`).join(",");
+export const PHOTO_LABEL = PHOTO_EXTENSIONS.map((e) => e.toUpperCase()).join(", ");
+
+/** A photo the platform takes, renamed like `asAllowedAttachment`; null otherwise. */
+export function asAllowedPhoto(file: File): File | null {
+  const allowed = asAllowedAttachment(file);
+  return allowed && PHOTO_EXTENSIONS.includes(getFileExtension(allowed.name)) ? allowed : null;
+}
+
+export function refusedPhotosMessage(files: { name: string }[]): string {
+  const first = `"${files[0]?.name || "file"}"`;
+  const who = files.length > 1 ? `${first} and ${files.length - 1} more` : first;
+  const verb = files.length > 1 ? "weren't" : "wasn't";
+  return `File type not supported — ${who} ${verb} uploaded. Photos can be: ${PHOTO_LABEL}`;
 }

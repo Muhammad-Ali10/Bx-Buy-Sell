@@ -261,11 +261,21 @@ const ManageSubscription = () => {
         {/* Three stacked panels, as the design has them: the subscription
             itself, then the figures, then the pitch. */}
         <div
-          className={`mx-auto max-w-[1000px] px-4 pb-8 sm:px-6 sm:pb-12 ${
-            inAccountArea ? "pt-6 sm:pt-8" : "pt-24 sm:pt-28"
+          className={`mx-auto px-4 pb-8 sm:px-6 sm:pb-12 ${
+            inAccountArea ? "max-w-[1408px] pt-6 sm:pt-8" : "max-w-[1000px] pt-24 sm:pt-28"
           }`}
         >
-          <div className="rounded-2xl bg-[#FAFAFA] px-5 py-8 sm:px-10 sm:py-10">
+          {/* A listing's packages sit in the same white card, at the same
+              width, as the Packages step of Create Listing — the design draws
+              the two alike. The buyer's plans keep their own panel. */}
+          <div
+            className={
+              inAccountArea
+                ? "rounded-[34px] bg-white px-5 py-8 sm:px-10 sm:py-10"
+                : "rounded-2xl bg-[#FAFAFA] px-5 py-8 sm:px-10 sm:py-10"
+            }
+            style={inAccountArea ? { border: "0.8px solid rgba(0,0,0,0.1)" } : undefined}
+          >
           <h1
             className="text-center text-[22px] font-semibold uppercase text-[#0F172A] sm:text-[28px]"
             style={{ fontFamily: "Lufga", letterSpacing: "0.06em" }}

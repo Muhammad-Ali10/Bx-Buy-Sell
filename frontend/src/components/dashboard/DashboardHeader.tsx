@@ -14,10 +14,11 @@ import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { NotificationDropdown } from "@/components/NotificationDropdown";
-import type { User } from "@/hooks/useAuth";
+import type { User as AuthUser } from "@/hooks/useAuth";
 
 interface DashboardHeaderProps {
-  user: User;
+  // Renamed on import: `User` is also the lucide icon this header draws.
+  user: AuthUser;
 }
 
 export const DashboardHeader = ({ user }: DashboardHeaderProps) => {

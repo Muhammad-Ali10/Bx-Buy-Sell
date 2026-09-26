@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { apiClient } from "@/lib/api";
+import { useProtectedUrl } from "@/hooks/useProtectedUrl";
 import {
   DOC_STATUS_DOT,
   DOC_STATUS_LABEL,
@@ -258,36 +259,49 @@ export const AcquisitionDocumentsTable = ({
             <DialogTitle className="truncate">{preview?.name}</DialogTitle>
           </DialogHeader>
 
-          {preview && (
-            <div className="flex flex-col gap-3">
-              {looksLikeImage(preview.url) ? (
-                <img
-                  src={preview.url}
-                  alt={preview.name}
-                  className="max-h-[70vh] w-full rounded-lg object-contain"
-                />
-              ) : (
-                // Anything that is not an image — a PDF, a spreadsheet — is
-                // shown in a frame, with a link out for formats the browser
-                // will not render inline.
-                <iframe
-                  src={preview.url}
-                  title={preview.name}
-                  className="h-[70vh] w-full rounded-lg border border-border"
-                />
-              )}
-              <a
-                href={preview.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm text-accent underline underline-offset-2"
-              >
-                Open in a new tab
-              </a>
-            </div>
-          )}
+          {preview && <DocumentPreview url={preview.url} name={preview.name} />}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+};
+
+/**
+ * A buyer's document, shown in the review dialog.
+ *
+ * Proofs of funds are private now, readable only through the protected route
+ * with the reviewer's token — which an `<img>` or `<iframe>` cannot send — so
+ * the file is fetched first and shown from memory.
+ */
+const DocumentPreview = ({ url, name }: { url: string; name: string }) => {
+  const { src, loading, failed } = useProtectedUrl(url);
+  if (loading) {
+    return (
+      <div className="flex h-[40vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (failed || !src) {
+    return <p className="text-sm text-muted-foreground">This document could not be loaded.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {looksLikeImage(url) ? (
+        <img src={src} alt={name} className="max-h-[70vh] w-full rounded-lg object-contain" />
+      ) : (
+        // Anything that is not an image — a PDF, a spreadsheet — is shown in a
+        // frame, with a link out for formats the browser will not render inline.
+        <iframe src={src} title={name} className="h-[70vh] w-full rounded-lg border border-border" />
+      )}
+      <a
+        href={src}
+        target="_blank"
+        rel="noreferrer"
+        className="text-sm text-accent underline underline-offset-2"
+      >
+        Open in a new tab
+      </a>
     </div>
   );
 };

@@ -399,6 +399,20 @@ const BILLING_FIELDS = [
 
 function stripBilling<T extends Record<string, any>>(listing: T): T {
   const out: any = { ...listing };
+  /*
+   * A lapsed paid package is no package to the public.
+   *
+   * `packageActive` is billing and does not leave the server, so without this
+   * the Premium badge — read off `selectedPackage` — stayed on a listing whose
+   * package had ended. The client's rule is that every paid feature ends with
+   * it. The seller and the team still get the real value, with packageActive.
+   */
+  if (
+    listing?.packageActive === false &&
+    (listing?.selectedPackage === 'PREMIUM' || listing?.selectedPackage === 'STARTER')
+  ) {
+    out.selectedPackage = 'MINIMUM';
+  }
   for (const field of BILLING_FIELDS) delete out[field];
   return out;
 }

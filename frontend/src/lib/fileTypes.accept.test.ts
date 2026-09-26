@@ -1,4 +1,6 @@
 import {
+  ATTACHMENT_ACCEPT,
+  PHOTO_ACCEPT,
   ALLOWED_ATTACHMENT_EXTENSIONS,
   ALLOWED_ATTACHMENT_LABEL,
   ATTACHMENT_ACCEPT_LABEL,
@@ -36,6 +38,12 @@ describe("the allowed attachment formats", () => {
     expect(isAllowedAttachment("REPORT.PDF")).toBe(true);
     expect(isAllowedAttachment("https://res.cloudinary.com/x/raw/upload/v1/a.xlsx")).toBe(true);
     expect(isAllowedAttachment("no-extension")).toBe(false);
+  });
+
+  it("lets the file picker offer only those — no .zip, no .svg", () => {
+    expect(ATTACHMENT_ACCEPT.split(",")).toHaveLength(15);
+    expect(ATTACHMENT_ACCEPT).not.toMatch(/zip|svg|image\/\*/);
+    expect(PHOTO_ACCEPT).toBe(".png,.jpg,.jpeg,.heic");
   });
 
   it("has something to tell the seller with", () => {

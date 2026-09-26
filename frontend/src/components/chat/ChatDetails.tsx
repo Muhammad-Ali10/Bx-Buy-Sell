@@ -32,6 +32,9 @@ import {
   listingPriceIn,
 } from "@/lib/listingMoney";
 import { teamParticipants, uniqueParticipants, type TeamParticipant } from "@/lib/chatParticipants";
+import { showsPremiumBadge } from "@/lib/packageContent";
+import { ProtectedImg } from "@/components/ProtectedImg";
+import { openProtected } from "@/hooks/useProtectedUrl";
 interface ChatDetailsProps {
   conversationId: string;
   userId?: string;
@@ -1019,7 +1022,7 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
                 : avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined
             }
             managedByEx={listing?.managed_by_ex === true || listing?.managed_by_ex === 1 || listing?.managed_by_ex === 'true' || listing?.managed_by_ex === '1'}
-            isPremium={String(listing?.selectedPackage || '').toUpperCase() === 'PREMIUM'}
+            isPremium={showsPremiumBadge(listing)}
             listingId={listing?.id}
             sellerId={listing?.userId || listing?.user_id}
             // This is already the conversation with the seller.
@@ -1046,11 +1049,11 @@ export const ChatDetails = ({ conversationId, userId, sellerId, onLabelUpdated }
               mediaFiles.map((file) => (
                 <div key={file.id} className="border rounded-lg overflow-hidden">
                   {file.type === 'IMAGE' ? (
-                    <img
+                    <ProtectedImg
                       src={file.url || file.content}
                       alt="Media"
                       className="w-full h-48 object-cover cursor-pointer"
-                      onClick={() => window.open(file.url || file.content, '_blank')}
+                      onClick={() => void openProtected(file.url || file.content)}
                     />
                   ) : (
                     <div className="w-full h-48 bg-muted flex items-center justify-center">

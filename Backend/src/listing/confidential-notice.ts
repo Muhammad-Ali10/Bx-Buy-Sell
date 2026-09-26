@@ -173,19 +173,18 @@ export async function postListingDeletedNotice(db: Db, chatId: string, listingTi
 }
 
 /**
- * Whether this listing's seller is vetting buyers by hand right now.
+ * Whether this listing's seller is vetting buyers by hand.
  *
  * The client's rule is "a seller with Starter or Premium who has switched it
- * on". The switch can only be turned on with one of those packages — but it was
- * never turned off again when the package ended, was cancelled, or dropped to
- * Minimum, and the request was decided on the switch alone. A seller who no
- * longer had the feature went on collecting requests; one whose package had
- * expired could not even approve them, because approving is refused for an
- * expired package. So the package is checked when a request arrives, not only
- * when the switch was set.
+ * on". The package is checked when a request arrives, not only when the switch
+ * was set, because the switch outlives a package dropped to Minimum.
  *
- * Listings from before packages existed (`packageActive` null) count as active,
- * the same rule approving already follows.
+ * A paid package that has *lapsed* still counts. The client wants the feature
+ * restricted then, not gone: requests keep arriving and waiting, the seller can
+ * see them but cannot answer them until they buy a package again — or switch
+ * the feature off, which lets the waiting buyers in. Treating a lapse as "off"
+ * quietly handed every new buyer the confidential details the seller had asked
+ * to vet.
  */
 export function manualApprovalApplies(listing: {
   approveBuyersManually?: boolean | null;
@@ -193,7 +192,20 @@ export function manualApprovalApplies(listing: {
   packageActive?: boolean | null;
 }): boolean {
   if (listing.approveBuyersManually !== true) return false;
-  const paid =
-    listing.selectedPackage === 'STARTER' || listing.selectedPackage === 'PREMIUM';
-  return paid && listing.packageActive !== false;
+  return listing.selectedPackage === 'STARTER' || listing.selectedPackage === 'PREMIUM';
+}
+
+/**
+ * Whether the seller may answer requests right now.
+ *
+ * Not once a paid package has lapsed: they have to buy one again first.
+ * Listings from before packages were tracked (`packageActive` null) count as
+ * active.
+ */
+export function approvalLocked(listing: {
+  selectedPackage?: string | null;
+  packageActive?: boolean | null;
+}): boolean {
+  const paid = listing.selectedPackage === 'STARTER' || listing.selectedPackage === 'PREMIUM';
+  return paid && listing.packageActive === false;
 }

@@ -44,6 +44,31 @@ jest.mock("@/hooks/useAdInformationQuestions", () => ({
   }),
 }));
 const PRICED = { "q-price": "250000" };
+/*
+ * A listing with everything publishing asks for: its category, and a revenue
+ * and a cost in the P&L. Without them "Next Step" stops at the list of empty
+ * fields, which is right, but is not what these tests are about.
+ */
+const READY = {
+  ...PRICED,
+  category: "E-Commerce",
+  financialType: "detailed",
+  rowLabels: ["Revenue", "Cost of Goods"],
+  columnLabels: [{ key: "2026", label: "2026", year: 2026, kind: "ytd", dataThrough: "01.06.2026" }],
+  financialData: { Revenue: { "2026": "1000" }, "Cost of Goods": { "2026": "100" } },
+};
+
+/**
+ * Publishing, the way a seller does it now: choose a package, Next Step,
+ * tick the agreement, Accept. Minimum is free, so it goes straight to the
+ * Seller Agreement and its button publishes rather than checking out.
+ */
+const publishThroughAgreement = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByText("Everything you need to get started — with no upfront costs."));
+  await user.click(screen.getByRole("button", { name: /^next step$/i }));
+  await user.click(screen.getByRole("checkbox", { name: /i agree to the confidentiality terms/i }));
+  await user.click(screen.getByRole("button", { name: /accept & publish listing/i }));
+};
 jest.mock("@/hooks/useHandoverQuestions", () => ({
   useHandoverQuestions: () => ({ data: [], isFetched: mockQuestionsLoaded }),
 }));
@@ -137,7 +162,7 @@ describe("PackagesStep guest listing flow", () => {
     const onAuthOpen = jest.fn();
     render(
       <PackagesStep
-        formData={PRICED}
+        formData={READY}
         onBack={() => {}}
         isGuest
         onGuestPersistDraft={onPersist}
@@ -145,8 +170,7 @@ describe("PackagesStep guest listing flow", () => {
       />
     );
 
-    await user.click(screen.getAllByText("Publish Now")[0]);
-    await user.click(screen.getByRole("button", { name: /publish listing/i }));
+    await publishThroughAgreement(user);
 
     expect(onPersist).toHaveBeenCalledWith({ pendingPublish: true });
     expect(sessionStorage.getItem(LISTING_PUBLISH_PENDING_SESSION_KEY)).toBe("1");
@@ -160,11 +184,12 @@ describe("PackagesStep guest listing flow", () => {
     apiClient.getTools.mockResolvedValue({ success: true, data: [] });
     apiClient.createListing.mockResolvedValue({ success: true, data: {} });
 
-    render(<PackagesStep formData={PRICED} onBack={() => {}} />);
+    render(<PackagesStep formData={READY} onBack={() => {}} />);
 
-    await user.click(screen.getAllByText("Publish Now")[0]);
-    await user.click(screen.getByRole("button", { name: /publish listing/i }));
+    await publishThroughAgreement(user);
 
+    // Signed in, it publishes for real instead of waiting for an account.
+    await waitFor(() => expect(apiClient.createListing).toHaveBeenCalledTimes(1));
     expect(sessionStorage.getItem(LISTING_PUBLISH_PENDING_SESSION_KEY)).toBeNull();
   });
 

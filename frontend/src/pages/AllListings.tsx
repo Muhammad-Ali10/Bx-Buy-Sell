@@ -44,6 +44,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import { showsPremiumBadge } from "@/lib/packageContent";
 
 // Custom Notification Button Component with real data
 const NotificationButtonWithCount = ({ userId }: { userId: string }) => {
@@ -1610,7 +1611,7 @@ const AllListings = () => {
                               : avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined
                           }
                           managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
-                          isPremium={String(listing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
+                          isPremium={showsPremiumBadge(listing)}
                           listingId={listing.id}
                           sellerId={listing.userId || listing.user_id}
                           lockRedirectTo={listing?.lockAction?.redirectTo || '/pricing'}

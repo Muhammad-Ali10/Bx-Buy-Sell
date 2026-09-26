@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
 import { normalizeDomainAnswer } from "@/lib/domainUtils";
@@ -9,30 +7,14 @@ import { serializeMediaUrls } from "@/lib/mediaUtils";
 import { isQuestionHidden, isQuestionRequired } from "@/lib/questionRequired";
 import { financialsComplete, REQUIRED_FIELDS_MESSAGE } from "@/lib/listingPublishCheck";
 import { usePlans } from "@/hooks/usePlans";
-import { LockNew, UserLock } from "@/assets/svg";
-import {
-  Ban,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  CircleCheck,
-  Crown,
-  Dot,
-  Rocket,
-  Info,
-  Lock,
-  UserRoundCheck,
-} from "lucide-react";
+import { Check } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
-  ADDON_LABELS,
-  PACKAGE_LABELS,
   getAddonPrice,
   SUCCESS_FEE_INFO_TEXT,
   buildPricingOverview,
@@ -63,11 +45,92 @@ import {
   saveGuestListingPayload,
 } from "@/lib/listingGuestSession";
 import { ADDON_CARDS, PACKAGE_CARDS } from "@/lib/packageContent";
-import { BillingCycleChooser } from "@/components/listings/BillingCycleChooser";
 import { TrustBand, WhyPanel } from "@/components/marketing/TrustAndWhy";
+import {
+  AddonPlanCard,
+  AddonTray,
+  BlackBadge,
+  CardButton,
+  CyclePanel,
+  LIME,
+  PackagePlanCard,
+  PageButton,
+  RenewNote,
+  SuccessFeePill,
+  SummaryTable,
+  addonDisplayName,
+  addonSurfaceColor,
+  DesignToggle,
+  UserLockDisc,
+} from "@/components/packages/PlanCards";
+import chevronDown from "@/assets/packages/chevron-down.svg";
+import whenDisabled from "@/assets/packages/when-disabled.svg";
+import whenEnabled from "@/assets/packages/when-enabled.svg";
+import agreementLock from "@/assets/packages/agreement-lock.svg";
+import agreementArrow from "@/assets/packages/agreement-arrow.svg";
+import checkboxEmpty from "@/assets/packages/checkbox-empty.svg";
 
-/** The brand lime, the same value the Manage Subscription page uses. */
-const LIME = "rgba(197, 253, 31, 1)";
+/* ------------------------------------------------ confidentiality, agreement */
+
+/** The white card the Confidentiality and Seller Agreement screens sit in. */
+const StepCard = ({ children }: { children: ReactNode }) => (
+  <div
+    className="mx-auto w-full max-w-[860px] rounded-[34px] bg-white px-[20px] py-[40px] md:px-[40px]"
+    style={{ border: "0.8px solid rgba(0,0,0,0.1)" }}
+  >
+    {children}
+  </div>
+);
+
+const StepButton = ({
+  children,
+  onClick,
+  disabled = false,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    className="mt-[36px] flex h-[60px] w-full items-center justify-center rounded-full p-[10px] text-[16px] font-medium leading-[1.2] text-black disabled:opacity-60"
+    style={{ fontFamily: "Lufga", background: LIME }}
+  >
+    {children}
+  </button>
+);
+
+/** The design's square box; ticked, it fills black. */
+const DesignCheckbox = ({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) => (
+  <button
+    type="button"
+    role="checkbox"
+    aria-checked={checked}
+    aria-label="I agree to the confidentiality terms"
+    onClick={(event) => {
+      // Inside a <label>: stop the label from sending a second click.
+      event.preventDefault();
+      onChange(!checked);
+    }}
+    className="relative block h-[21px] w-[21px] shrink-0"
+  >
+    {checked ? (
+      <span className="flex h-full w-full items-center justify-center rounded-[4px] bg-black">
+        <Check className="h-[14px] w-[14px] text-white" strokeWidth={3} />
+      </span>
+    ) : (
+      <img alt="" src={checkboxEmpty} className="block h-full w-full" aria-hidden />
+    )}
+  </button>
+);
 
 interface PackagesStepProps {
   formData: any;
@@ -722,143 +785,175 @@ export const PackagesStep = ({
   /* ---------------------------------------------------------------- screen 2 */
   if (screen === "confidentiality") {
     return (
-      <div className="w-full max-w-3xl mx-auto rounded-3xl border border-border bg-card p-6 md:p-10">
-        <div className="flex flex-col items-center text-center gap-4">
-          <div className="h-20 w-20 rounded-full bg-accent flex items-center justify-center">
-            <UserLock className="h-9 w-9 text-accent-foreground" />
-          </div>
-          <h1 className="text-2xl md:text-3xl font-bold">Confidentiality Options</h1>
-          <p className="text-sm text-muted-foreground max-w-lg">
-            All buyers must accept our platform confidentiality agreement before they can access
-            confidential listing information. Otherwise, only public listing details will be
-            visible.
-          </p>
-        </div>
-
-        {/* The design names the two packages this offer belongs to rather than
-            the one in hand — this screen is only reached on Starter or
-            Premium, so it reads as the rule it is. */}
-        <div className="mt-8 rounded-2xl bg-muted/40 p-4 text-sm">
-          Because you have selected a{" "}
-          <span className="font-semibold">Starter or Premium package</span>, you can
-          additionally choose to manually approve buyers.
-        </div>
-
-        <div className="mt-6 rounded-2xl border border-border p-5">
-          <div className="flex items-center justify-between gap-4">
-            {/* The chevron in the design does something: it folds the two
-                explanations away once they have been read. */}
-            <button
-              type="button"
-              onClick={() => setApproveOpen((shown) => !shown)}
-              aria-expanded={approveOpen}
-              className="flex items-center gap-2 text-base font-semibold"
+      <StepCard>
+        <div className="flex flex-col items-center gap-[34px]">
+          <UserLockDisc size={124} />
+          <div className="flex flex-col items-center gap-[10px] text-center">
+            <h1 className="m-0 text-[28px] font-medium leading-[1.2] text-black" style={{ fontFamily: "Lufga" }}>
+              Confidentiality Options
+            </h1>
+            <p
+              className="m-0 max-w-[590px] text-[17px] leading-[1.5]"
+              style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.5)" }}
             >
-              Approve Buyers Manually
-              {approveOpen ? (
-                <ChevronUp className="h-4 w-4" />
-              ) : (
-                <ChevronDown className="h-4 w-4" />
-              )}
-            </button>
-            <Switch
-              id="approve-buyers"
-              checked={approveBuyersManually}
-              onCheckedChange={setApproveBuyersManually}
-            />
+              All buyers must accept our platform confidentiality agreement before they can access
+              confidential listing information. Otherwise, only public listing details will be
+              visible.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-[36px] flex flex-col gap-[17px]">
+          {/* The design names the two packages this offer belongs to rather than
+              the one in hand — this screen is only reached on Starter or
+              Premium, so it reads as the rule it is. */}
+          <div className="rounded-[24px] bg-[#FAFAFA] p-[20px]">
+            <p className="m-0 text-[17px] leading-[1.5]" style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.5)" }}>
+              Because you have selected a{" "}
+              <span className="font-medium" style={{ color: "rgba(0,0,0,0.8)" }}>
+                Starter or Premium package,
+              </span>{" "}
+              you can additionally choose to manually approve buyers.
+            </p>
           </div>
 
-          {approveOpen && (
-            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-xl bg-muted/40 p-4">
-                <div className="flex items-center gap-2 font-semibold text-sm mb-2">
-                  <Ban className="h-4 w-4" />
-                  When Disabled
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Buyers can access confidential listing details immediately after accepting the
-                  official confidentiality agreement provided by the Company Exchange Marketplace.
-                </p>
-              </div>
-              <div className="rounded-xl bg-muted/40 p-4">
-                <div className="flex items-center gap-2 font-semibold text-sm mb-2">
-                  <CircleCheck className="h-4 w-4" />
-                  When Enabled
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Buyers must first accept our confidentiality agreement and then be approved by you
-                  before they can access confidential listing details. This option may significantly
-                  slow down the sales process and is generally not recommended unless you wish to
-                  personally review buyers or require an additional NDA.
-                </p>
-              </div>
+          <div className="flex flex-col gap-[17px] rounded-[24px] bg-[#FAFAFA] p-[20px]">
+            <div className="flex items-center justify-between gap-4">
+              {/* The chevron folds the two explanations away once read. */}
+              <button
+                type="button"
+                onClick={() => setApproveOpen((shown) => !shown)}
+                aria-expanded={approveOpen}
+                className="flex items-center gap-[9px] text-left"
+              >
+                <span className="text-[17px] font-medium leading-[1.5] text-black" style={{ fontFamily: "Lufga" }}>
+                  Approve Buyers Manually
+                </span>
+                <img
+                  alt=""
+                  src={chevronDown}
+                  className="block h-[20px] w-[20px] transition-transform"
+                  style={{ transform: approveOpen ? "rotate(180deg)" : undefined }}
+                  aria-hidden
+                />
+              </button>
+              <DesignToggle
+                id="approve-buyers"
+                checked={approveBuyersManually}
+                onChange={setApproveBuyersManually}
+                label="Approve Buyers Manually"
+              />
             </div>
-          )}
+
+            {approveOpen && (
+              <div className="grid grid-cols-1 gap-[10px] rounded-[24px] bg-white p-[14px] md:grid-cols-2">
+                <div className="flex flex-col gap-[5px] rounded-[20px] bg-[#FAFAFA] p-[14px]">
+                  <div className="flex items-center gap-[7px]">
+                    <img alt="" src={whenDisabled} className="block h-[17px] w-[17px]" aria-hidden />
+                    <span className="text-[15.5px] font-medium leading-[1.5] text-black" style={{ fontFamily: "Lufga" }}>
+                      When Disabled
+                    </span>
+                  </div>
+                  <p className="m-0 text-[14px] leading-[1.5]" style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.5)" }}>
+                    Buyers can access confidential listing details immediately after accepting the
+                    official confidentiality agreement provided by the Company Exchange Marketplace.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-[5px] rounded-[20px] bg-[#FAFAFA] p-[14px]">
+                  <div className="flex items-center gap-[7px]">
+                    <img alt="" src={whenEnabled} className="block h-[20px] w-[20px]" aria-hidden />
+                    <span className="text-[15.5px] font-medium leading-[1.5] text-black" style={{ fontFamily: "Lufga" }}>
+                      When Enabled
+                    </span>
+                  </div>
+                  <p className="m-0 text-[14px] leading-[1.5]" style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.5)" }}>
+                    Buyers must first accept our confidentiality agreement and then be approved by you
+                    before they can access confidential listing details. This option may significantly
+                    slow down the sales process and is generally not recommended unless you wish to
+                    personally review buyers or require an additional NDA.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* One button, as the design has it. Going back is the sidebar's job —
             its step list is clickable, and picking Packages there brings this
             component back to its first screen. */}
-        <div className="mt-8">
-          <Button
-            onClick={() => setScreen("agreement")}
-            className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 w-full font-semibold"
-          >
-            Next Step
-          </Button>
-        </div>
-      </div>
+        <StepButton onClick={() => setScreen("agreement")}>Next Step</StepButton>
+      </StepCard>
     );
   }
 
   /* ---------------------------------------------------------------- screen 3 */
   if (screen === "agreement") {
     return (
-      <div className="w-full max-w-3xl mx-auto rounded-3xl border border-border bg-card p-6 md:p-10">
-        <div className="flex flex-col items-center text-center gap-4">
-          <div className="h-20 w-20 rounded-full bg-accent flex items-center justify-center">
-            <LockNew className="h-9 w-9" />
+      <StepCard>
+        <div className="flex flex-col items-center gap-[60px]">
+          <img alt="" src={agreementLock} className="block h-[124px] w-[124px]" aria-hidden />
+          <div className="flex flex-col items-center gap-[10px] text-center">
+            <h1 className="m-0 text-[28px] font-medium leading-[1.2] text-black" style={{ fontFamily: "Lufga" }}>
+              Seller Agreement
+            </h1>
+            <p
+              className="m-0 max-w-[600px] text-[17px] leading-[1.5]"
+              style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.5)" }}
+            >
+              You are about to publish your listing. Before your listing can go live, you must accept
+              our seller agreement.
+            </p>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold">Seller Agreement</h1>
-          <p className="text-sm text-muted-foreground max-w-lg">
-            You are about to publish your listing. Before your listing can go live, you must accept
-            our seller agreement.
-          </p>
         </div>
 
-        <div className="mt-8 rounded-2xl bg-muted/40 p-5">
-          <p className="text-sm font-semibold mb-3">By continuing, you agree to:</p>
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li>→ Keep all communication confidential</li>
-            <li>→ Not contact buyers outside the platform</li>
-            <li>→ Conduct all communication through the EX Platform</li>
-          </ul>
+        <div className="mt-[36px] flex flex-col gap-[27px]">
+          <div className="flex flex-col gap-[17px] rounded-[24px] bg-[#FAFAFA] p-[20px]">
+            <div className="flex flex-col gap-[18px]">
+              <p className="m-0 text-[17px] font-medium leading-[1.5] text-black" style={{ fontFamily: "Lufga" }}>
+                By continuing, you agree to:
+              </p>
+              <ul className="m-0 flex list-none flex-col gap-[14px] p-0">
+                {[
+                  "Keep all communication confidential",
+                  "Not contact buyers outside the platform",
+                  "Conduct all communication through the EX Platform",
+                ].map((line) => (
+                  <li key={line} className="flex items-center gap-[14px]">
+                    <img alt="" src={agreementArrow} className="block h-[7.5px] w-[14px] shrink-0" aria-hidden />
+                    <span className="text-[15.5px] leading-[1.5]" style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.8)" }}>
+                      {line}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
-          {/* In the design and missing here. There is no terms page on the
-              platform to link to — the footer's own "Terms Conditions" points
-              at "#" — so it opens what the seller is agreeing to rather than
-              pointing at a page that does not exist. */}
-          <button
-            type="button"
-            onClick={() => setTermsOpen(true)}
-            className="mt-4 text-sm font-medium underline underline-offset-2"
-          >
-            View Full Terms
-          </button>
+            {/* There is no terms page on the platform to link to — the footer's
+                own "Terms Conditions" points at "#" — so it opens what the
+                seller is agreeing to rather than a page that does not exist. */}
+            <button
+              type="button"
+              onClick={() => setTermsOpen(true)}
+              className="w-fit text-left text-[15.5px] font-semibold leading-[1.5] underline underline-offset-2"
+              style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.8)" }}
+            >
+              View Full Terms
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-[17px]">
+            <label className="flex w-fit cursor-pointer items-center gap-[10px]">
+              <DesignCheckbox checked={agreementAccepted} onChange={setAgreementAccepted} />
+              <span className="text-[17px] font-medium leading-[1.5] text-black" style={{ fontFamily: "Lufga" }}>
+                I agree to the confidentiality terms
+              </span>
+            </label>
+            <p className="m-0 text-[15.5px] leading-[1.5]" style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.5)" }}>
+              Breaching these terms may result in listing removal, account suspension, legal action, and
+              other remedies available under our Terms and Conditions.
+            </p>
+          </div>
         </div>
-
-        <label className="mt-6 flex items-start gap-3 cursor-pointer">
-          <Checkbox
-            checked={agreementAccepted}
-            onCheckedChange={(checked) => setAgreementAccepted(checked === true)}
-            className="mt-0.5 data-[state=checked]:bg-accent data-[state=checked]:border-accent"
-          />
-          <span className="text-sm">I agree to the confidentiality terms</span>
-        </label>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Breaching these terms may result in listing removal, account suspension, legal action, and
-          other remedies available under our Terms and Conditions.
-        </p>
 
         <Dialog open={termsOpen} onOpenChange={setTermsOpen}>
           <DialogContent className="max-w-[520px]">
@@ -880,302 +975,176 @@ export const PackagesStep = ({
           </DialogContent>
         </Dialog>
 
-        <div className="mt-8">
-          <Button
-            onClick={handleAcceptAndCheckout}
-            disabled={!agreementAccepted || isSubmitting}
-            className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 w-full font-semibold"
-          >
-            {/*
-              * Minimum costs nothing, so there is no checkout to go to — the
-              * listing is activated the moment it is chosen. Promising a
-              * checkout and then publishing is a small lie the seller notices.
-              */}
-            {isSubmitting
-              ? "Please wait..."
-              : isPaidPackage
-                ? "Accept & Go to Checkout"
-                : "Accept & Publish Listing"}
-          </Button>
-        </div>
-      </div>
+        <StepButton onClick={handleAcceptAndCheckout} disabled={!agreementAccepted || isSubmitting}>
+          {/*
+            * Minimum costs nothing, so there is no checkout to go to — the
+            * listing is activated the moment it is chosen. Promising a
+            * checkout and then publishing is a small lie the seller notices.
+            */}
+          {isSubmitting
+            ? "Please wait..."
+            : isPaidPackage
+              ? "Accept & Go to Checkout"
+              : "Accept & Publish Listing"}
+        </StepButton>
+      </StepCard>
     );
   }
 
   /* ---------------------------------------------------------------- screen 1 */
   return (
-    <div className="w-full max-w-5xl mx-auto rounded-3xl border border-border bg-card p-6 md:p-10">
-      <div className="text-center">
-        <h1 className="text-2xl md:text-3xl font-bold">Packages and Options</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Prices are calculated automatically from your listing price of{" "}
-          <span className="font-semibold text-foreground">{formatUsd(listingPrice)}</span>.
-        </p>
+    <div className="mx-auto flex w-full max-w-[1408px] flex-col gap-[24px]">
+      <div
+        className="flex w-full flex-col items-center gap-[34px] rounded-[34px] bg-white px-[20px] py-[32px] md:px-[40px]"
+        style={{ border: "0.8px solid rgba(0,0,0,0.1)" }}
+      >
+        <div className="flex flex-col items-center gap-[7px] text-center">
+          <h1 className="m-0 text-[28px] font-medium leading-[1.4] text-black" style={{ fontFamily: "Lufga" }}>
+            Packages and Options
+          </h1>
+          <p className="m-0 text-[15.5px] leading-[1.4]" style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.5)" }}>
+            Select your billing option and optional add-ons
+            <br />
+            Note: Selling a business typically takes 3–6 months
+          </p>
+        </div>
 
-        <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-muted/50 px-4 py-2 text-sm">
-          <span className="font-semibold">{overview.successFeePercent}% Success Fee</span>
-          <span className="relative group inline-flex">
-            <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-            <span
-              role="tooltip"
-              className="pointer-events-none absolute left-1/2 top-6 z-20 w-72 -translate-x-1/2 rounded-xl bg-foreground px-3 py-2 text-left text-xs text-background opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
+        <div className="flex w-full flex-col items-center gap-[13px]">
+          <SuccessFeePill percent={overview.successFeePercent} info={SUCCESS_FEE_INFO_TEXT} />
+
+          {/*
+            * Minimum, Premium, Starter — Premium in the middle, and lime whatever
+            * is chosen, because it is the one being sold.
+            *
+            * The whole card is the click target. A package that bills shows its
+            * billing cycles in place of the button once chosen, as the design
+            * has it; Minimum is free and has nothing to bill.
+            */}
+          <div className="grid w-full grid-cols-1 items-start gap-[14px] md:grid-cols-3">
+            {(["MINIMUM", "PREMIUM", "STARTER"] as PackageId[])
+              .map((id) => packageCards.find((entry) => entry.id === id))
+              .filter((card): card is (typeof packageCards)[number] => Boolean(card))
+              .map((card) => {
+                const isSelected = selection.packageId === card.id;
+                const isPremium = card.id === "PREMIUM";
+                const showCycles = isSelected && card.id !== "MINIMUM";
+                return (
+                  <PackagePlanCard
+                    key={card.id}
+                    id={card.id}
+                    blurb={card.blurb}
+                    features={card.features}
+                    price={`${Math.round(getPackageMonthlyPrice(tier, card.id))}$`}
+                    highlighted={isPremium}
+                    onClick={() =>
+                      setSelection((prev) => ({
+                        ...prev,
+                        packageId: prev.packageId === card.id ? null : card.id,
+                      }))
+                    }
+                    footer={
+                      showCycles ? (
+                        <CyclePanel
+                          title="Select Billing Cycle"
+                          value={selection.billingCycle}
+                          onChange={(cycle) =>
+                            setSelection((prev) => ({ ...prev, billingCycle: cycle }))
+                          }
+                          surface={isPremium ? LIME : "#FFFFFF"}
+                        />
+                      ) : (
+                        <CardButton
+                          asDiv
+                          label={isSelected ? "Selected" : "Select"}
+                          tone={isSelected || isPremium ? "dark" : "accent"}
+                        />
+                      )
+                    }
+                  />
+                );
+              })}
+          </div>
+        </div>
+
+        <div className="flex w-full flex-col gap-[30px]">
+          {/* Add-ons — a single choice; picking one replaces the other. Each has
+              its own billing cycle, the same control the packages use. */}
+          <AddonTray>
+            {addonCards.map((addon) => {
+              const isSelected = selection.addon === addon.id;
+              const isBundle = addon.id === "BUNDLE";
+              const surface = isBundle ? "lime" : addon.id === "START_PAGE" ? "grey" : "plain";
+              return (
+                <AddonPlanCard
+                  key={addon.id}
+                  price={formatUsd(getAddonPrice(tier, addon.id))}
+                  name={addonDisplayName(addon.id)}
+                  description={addon.description}
+                  radioOn={isSelected}
+                  surface={surface}
+                  badge={isBundle ? <BlackBadge>Best Option</BlackBadge> : undefined}
+                  onClick={() =>
+                    setSelection((prev) => ({
+                      ...prev,
+                      addon: prev.addon === addon.id ? "NONE" : addon.id,
+                    }))
+                  }
+                  footer={
+                    isSelected ? (
+                      <CyclePanel
+                        title="Select Billing Cycle"
+                        value={selection.addonBillingCycle}
+                        onChange={(cycle) =>
+                          setSelection((prev) => ({ ...prev, addonBillingCycle: cycle }))
+                        }
+                        surface={addonSurfaceColor(surface)}
+                      />
+                    ) : (
+                      <CardButton asDiv size="addon" label="Select" tone={isBundle ? "dark" : "accent"} />
+                    )
+                  }
+                />
+              );
+            })}
+          </AddonTray>
+
+          <SummaryTable
+            rows={overview.lines.map((line) => ({
+              key: line.key,
+              item: line.item,
+              cycle: line.billingCycleLabel,
+              discount: line.discount > 0 ? `-${formatUsd(line.discount)} Discount` : "$0",
+              total: formatUsd(line.total),
+            }))}
+            totalLabel="Amount Due Today"
+            total={formatUsd(overview.amountDueToday)}
+          />
+
+          <div className="flex flex-col gap-[16px] sm:flex-row">
+            <PageButton
+              primary={false}
+              onClick={() => handleSubmit("DRAFT")}
+              disabled={isSubmitting}
+              className="sm:flex-1"
             >
-              {SUCCESS_FEE_INFO_TEXT}
-            </span>
-          </span>
+              {isSubmitting ? "Saving..." : "Save as Draft"}
+            </PageButton>
+            {/* Always pressable. It used to be held closed until a package was
+                picked, and a press on a closed button does nothing — no message
+                about empty fields or about the package, only silence. */}
+            <PageButton
+              primary
+              onClick={handleNextStep}
+              disabled={isSubmitting}
+              title={selection.packageId ? undefined : "Choose a package to continue"}
+              className="sm:flex-1"
+            >
+              Next Step
+            </PageButton>
+          </div>
         </div>
-      </div>
 
-      {/*
-        * Minimum, Premium, Starter — Premium in the middle.
-        *
-        * Display order only; the shared list keeps its own order because the
-        * Manage Subscription page reads the same data.
-        */}
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-start">
-        {(["MINIMUM", "PREMIUM", "STARTER"] as PackageId[])
-          .map((id) => packageCards.find((entry) => entry.id === id))
-          .filter((card): card is (typeof packageCards)[number] => Boolean(card))
-          .map((card) => {
-            const isSelected = selection.packageId === card.id;
-            const price = getPackageMonthlyPrice(tier, card.id);
-            const isPremium = card.id === "PREMIUM";
-            return (
-              <div
-                key={card.id}
-                onClick={() =>
-                  setSelection((prev) => ({
-                    ...prev,
-                    packageId: prev.packageId === card.id ? null : card.id,
-                  }))
-                }
-                className="relative cursor-pointer rounded-2xl p-6 transition-colors"
-                style={{
-                  // Premium is the card being sold, so it is lime whatever is
-                  // selected — the selection shows as a dark outline instead.
-                  background: isPremium ? LIME : "#FFFFFF",
-                  border: isSelected ? "2px solid #000000" : "1px solid #E9EBF2",
-                }}
-              >
-                {/* The name in a dark pill, top left, as the design has it. */}
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full bg-black px-3 py-1 text-xs font-semibold text-white"
-                  style={{ fontFamily: "Lufga" }}
-                >
-                  {card.id === "MINIMUM" ? (
-                    <Dot className="h-4 w-4" />
-                  ) : card.id === "STARTER" ? (
-                    <Rocket className="h-3 w-3" />
-                  ) : (
-                    <Crown className="h-3 w-3" />
-                  )}
-                  {PACKAGE_LABELS[card.id]}
-                </span>
-                <p className="mt-3 text-sm text-black/60">{card.blurb}</p>
-                <div className="mt-4">
-                  <span className="text-3xl font-bold">{formatUsd(price)}</span>
-                  <span className="ml-1 text-sm text-black/50">/monthly</span>
-                </div>
-                <div className="mt-4 space-y-2">
-                  {card.features.map((f) => (
-                    <div key={f} className="flex items-start gap-2 text-sm">
-                      <CircleCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                      <span>{f}</span>
-                    </div>
-                  ))}
-                </div>
-                {/*
-                * Still a div, not a button.
-                *
-                * The whole card is the click target and always has been; a
-                * real button inside it would fire the selection twice.
-                */}
-                <div
-                  className="mt-5 rounded-full py-2.5 text-center text-sm font-semibold"
-                  style={{
-                    background: isSelected ? "#000000" : LIME,
-                    color: isSelected ? "#FFFFFF" : "#000000",
-                  }}
-                >
-                  {isSelected ? "Selected" : "Select"}
-                </div>
-
-                {/*
-                * The billing cycle lives inside the card it belongs to.
-                *
-                * It was a full-width panel under all three, which is not what
-                * the design shows — and it read as a separate question rather
-                * than part of the package being bought. Minimum is free, so it
-                * has nothing to bill and shows none of this.
-                *
-                * The condition and the handler are the ones that were here
-                * before; only where it renders has changed.
-                */}
-                {isSelected && card.id !== "MINIMUM" && (
-                  <BillingCycleChooser
-                    value={selection.billingCycle}
-                    onChange={(cycle) =>
-                      setSelection((prev) => ({ ...prev, billingCycle: cycle }))
-                    }
-                  />
-                )}
-              </div>
-            );
-          })}
-      </div>
-
-      {/* Add-ons — a single choice; picking one replaces the other. */}
-      <div className="mt-8">
-        <h2 className="text-base font-semibold mb-3">Add-ons</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {addonCards.map((addon) => {
-            const isSelected = selection.addon === addon.id;
-            const isBundle = addon.id === "BUNDLE";
-            return (
-              <div
-                key={addon.id}
-                onClick={() =>
-                  setSelection((prev) => ({
-                    ...prev,
-                    addon: prev.addon === addon.id ? "NONE" : addon.id,
-                  }))
-                }
-                className="relative cursor-pointer rounded-2xl p-5 transition-colors"
-                style={{
-                  // The bundle is the one being recommended, so it carries the
-                  // lime whatever is selected — as on the packages above.
-                  background: isBundle ? LIME : "#FFFFFF",
-                  border: isSelected ? "2px solid #000000" : "1px solid #E9EBF2",
-                }}
-              >
-                {isBundle && (
-                  <div className="mb-2 inline-flex rounded-full bg-black px-2.5 py-0.5 text-[10px] font-semibold text-white">
-                    Best Option
-                  </div>
-                )}
-                <div className="text-2xl font-bold">
-                  {formatUsd(getAddonPrice(tier, addon.id))}
-                  <span className="ml-1 text-xs font-normal text-black/50">/monthly</span>
-                </div>
-                {/* A radio beside the name: the add-ons are one choice, not
-                    three switches, and the design shows them that way. */}
-                <h3 className="mt-2 flex items-center gap-2 text-sm font-semibold">
-                  <span
-                    className="inline-flex h-3.5 w-3.5 shrink-0 rounded-full border"
-                    style={{ borderColor: "#000000", borderWidth: isSelected ? "4px" : "1px" }}
-                    aria-hidden
-                  />
-                  {ADDON_LABELS[addon.id as Exclude<AddonId, "NONE">]}
-                </h3>
-                <p className="mt-1 text-xs text-black/55">{addon.description}</p>
-                <div
-                  className="mt-4 rounded-full py-2 text-center text-sm font-semibold"
-                  style={{
-                    background: isSelected ? "#000000" : LIME,
-                    color: isSelected ? "#FFFFFF" : "#000000",
-                  }}
-                >
-                  {isSelected ? "Selected" : "Select"}
-                </div>
-
-                {/*
-                  * The add-on's own billing cycle.
-                  *
-                  * The client asked for it explicitly, and it is the same
-                  * control the package above uses — the add-on had no cycle
-                  * at all before, only a fixed monthly charge.
-                  */}
-                {isSelected && (
-                  <BillingCycleChooser
-                    value={selection.addonBillingCycle}
-                    onChange={(cycle) =>
-                      setSelection((prev) => ({ ...prev, addonBillingCycle: cycle }))
-                    }
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          The bundle costs {formatUsd(tier.addonBundle)} instead of{" "}
-          {formatUsd(tier.addonCategoryPage + tier.addonStartPage)} when booked separately.
-        </p>
-      </div>
-
-      {/* Overview */}
-      <div className="mt-8 rounded-2xl border border-border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left">
-                <th className="px-5 py-3 font-semibold">Item</th>
-                <th className="px-5 py-3 font-semibold">Billing Cycle</th>
-                <th className="px-5 py-3 font-semibold">Discount</th>
-                <th className="px-5 py-3 font-semibold text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {overview.lines.length === 0 ? (
-                <tr className="border-t border-border">
-                  <td className="px-5 py-4 text-muted-foreground" colSpan={4}>
-                    No package or add-on selected yet.
-                  </td>
-                </tr>
-              ) : (
-                overview.lines.map((line) => (
-                  <tr key={line.key} className="border-t border-border">
-                    <td className="px-5 py-4 text-muted-foreground">{line.item}</td>
-                    <td className="px-5 py-4 text-muted-foreground">{line.billingCycleLabel}</td>
-                    <td className="px-5 py-4 text-muted-foreground">
-                      {line.discount > 0 ? `-${formatUsd(line.discount)} Discount` : "$0"}
-                    </td>
-                    <td className="px-5 py-4 text-right font-semibold">{formatUsd(line.total)}</td>
-                  </tr>
-                ))
-              )}
-              <tr className="border-t border-border bg-muted/30">
-                <td className="px-5 py-4 font-bold" colSpan={3}>
-                  Amount Due Today
-                </td>
-                <td className="px-5 py-4 text-right font-bold">
-                  {formatUsd(overview.amountDueToday)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="mt-6 flex flex-col sm:flex-row items-center gap-4">
-        <Button
-          variant="outline"
-          onClick={() => handleSubmit("DRAFT")}
-          disabled={isSubmitting}
-          className="rounded-full h-12 px-10 w-full sm:w-auto"
-        >
-          {isSubmitting ? "Saving..." : "Save as Draft"}
-        </Button>
-        {/* Always pressable. It used to be held closed until a package was
-            picked, and a press on a closed button does nothing — no message
-            about empty fields or about the package, only silence. */}
-        <Button
-          onClick={handleNextStep}
-          disabled={isSubmitting}
-          title={selection.packageId ? undefined : "Choose a package to continue"}
-          className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-12 flex-1 w-full font-semibold"
-        >
-          Next Step
-        </Button>
-      </div>
-      <p className="mt-3 text-center text-xs text-muted-foreground">
-        Plans renew automatically according to the selected billing cycle unless cancelled.
-      </p>
-
-      <div className="mt-6">
-        <Button variant="ghost" onClick={onBack} disabled={isSubmitting}>
-          Back
-        </Button>
+        <RenewNote />
       </div>
 
       {/* The two panels the design shows under this step. Shared with the

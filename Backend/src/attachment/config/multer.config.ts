@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 
@@ -50,9 +51,11 @@ export const attachmentMulterConfig = {
   }),
   fileFilter: (_req, file, cb: (error: Error | null, accept: boolean) => void) => {
     if (!ALLOWED_ATTACHMENT_EXTENSIONS.includes(extensionOf(file.originalname))) {
+      // A 400 with the client's words, not a plain Error — which the exception
+      // filter turns into a 500 that reads as the server having failed.
       return cb(
-        new Error(
-          `Unsupported file type. Allowed: ${ALLOWED_ATTACHMENT_EXTENSIONS.join(', ')}`,
+        new BadRequestException(
+          `File type not supported. Allowed: ${ALLOWED_ATTACHMENT_EXTENSIONS.join(', ')}`,
         ),
         false,
       );

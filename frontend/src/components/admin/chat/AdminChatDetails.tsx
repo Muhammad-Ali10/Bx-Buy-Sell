@@ -5,7 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { asAttachmentUrl } from "@/lib/downloadFile";
+import { asAttachmentUrl, downloadAttachment } from "@/lib/downloadFile";
 import docIcon from "@/assets/doc.svg";
 
 import { formatNumber } from "@/lib/formatNumber";
@@ -17,6 +17,8 @@ import FlagIcon from "@/components/FlagIcon";
 import { resolveListingTitle } from "@/lib/listingTitle";
 import { getListingCurrencySymbol } from "@/lib/listingCurrency";
 import { teamParticipants, uniqueParticipants, type TeamParticipant } from "@/lib/chatParticipants";
+import { ProtectedImg } from "@/components/ProtectedImg";
+import { openProtected } from "@/hooks/useProtectedUrl";
 
 /**
  * A person's name, opening their record.
@@ -675,11 +677,11 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
               mediaFiles.map((file) => (
                 <div key={file.id} className="border rounded-lg overflow-hidden">
                   {file.type === 'IMAGE' ? (
-                    <img
+                    <ProtectedImg
                       src={file.url || file.content}
                       alt="Media"
                       className="w-full h-48 object-cover cursor-pointer"
-                      onClick={() => window.open(file.url || file.content, '_blank')}
+                      onClick={() => void openProtected(file.url || file.content)}
                     />
                   ) : (
                     <div className="w-full h-48 bg-muted flex items-center justify-center">
@@ -688,7 +690,15 @@ export const AdminChatDetails = ({ conversationId }: AdminChatDetailsProps) => {
                           previews whichever formats it can read. */}
                       <a
                         href={asAttachmentUrl(file.url || file.content)}
-                        target="_blank" 
+                        onClick={(event) => {
+                          // A private file needs the reader's token, which a
+                          // plain link cannot send.
+                          event.preventDefault();
+                          const source = file.url || file.content;
+                          const name = String(file.content || '').replace(/^📎\s*/, '').trim();
+                          void downloadAttachment(source, name || undefined);
+                        }}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-500 hover:underline"
                       >

@@ -113,3 +113,18 @@ export const packageRank = (id?: PackageId | string | null): number =>
  * differently depending on the page. `BILLING_CYCLES` in `packagePricing.ts`
  * is the only set now, because that is the one the price is calculated from.
  */
+
+/**
+ * Whether a listing card shows the Premium badge.
+ *
+ * Only while the Premium package runs. The badge is part of what the seller
+ * pays for, and every paid feature ends with the package — the listing itself
+ * stays online. Visitors are sent a lapsed package as Minimum already; the
+ * seller and the team get the real package with `packageActive`, which is what
+ * this reads for them.
+ */
+export const showsPremiumBadge = (
+  listing: { selectedPackage?: unknown; packageActive?: boolean | null } | null | undefined,
+): boolean =>
+  String(listing?.selectedPackage || "").toUpperCase() === "PREMIUM" &&
+  listing?.packageActive !== false;

@@ -26,6 +26,11 @@ interface ApiResponse<T = any> {
   data?: T;
   message?: string;
   error?: string;
+  /**
+   * A refusal's reason in a form a screen can act on, when the server gives
+   * one — "PACKAGE_REQUIRED" opens the upgrade dialog instead of a toast.
+   */
+  code?: string;
 }
 
 class ApiClient {
@@ -61,7 +66,13 @@ class ApiClient {
     this.bearerToken = bearerToken;
   }
 
-  private async request<T>(
+  /**
+   * Public, not private: the subscription and pricing screens call it directly
+   * for endpoints that have no helper of their own. `T` defaults to `any` so a
+   * helper that does not name its response type reads as it always has at
+   * runtime, rather than as `unknown`.
+   */
+  async request<T = any>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
@@ -344,9 +355,18 @@ class ApiClient {
           errorMessage = `Method not allowed: ${options.method || 'GET'} is not allowed for ${path}.`;
         }
         
+        // The exception filter nests a thrown object under `message`.
+        const errorCode =
+          data && typeof data === 'object'
+            ? (typeof (data as any).code === 'string' && (data as any).code) ||
+              (typeof (data as any).message?.code === 'string' && (data as any).message.code) ||
+              undefined
+            : undefined;
+
         return {
           success: false,
           error: errorMessage,
+          ...(errorCode ? { code: errorCode } : {}),
         };
       }
 
@@ -938,6 +958,17 @@ class ApiClient {
     });
   }
 
+  /**
+   * Switch "Approve Buyers Manually" off for a listing. Buyers already waiting
+   * have accepted the agreement, so the server lets them in.
+   */
+  async disableManualApproval(listingId: string) {
+    return this.request<{ approveBuyersManually: false; approved: number }>(
+      `/listing/${listingId}/confidential/manual-approval/disable`,
+      { method: 'POST' },
+    );
+  }
+
   /** Approve a buyer's request from the requests list. */
   async approveConfidentialAccess(listingId: string, buyerId: string, chatId?: string) {
     return this.request(`/listing/${listingId}/confidential/grant`, {
@@ -1419,6 +1450,8 @@ class ApiClient {
     role?: string;
     active?: boolean;
     availability_status?: string;
+    /** Sent by the team availability switch. */
+    is_online?: boolean;
     verified?: boolean;
     is_email_verified?: boolean;
     is_phone_verified?: boolean;
@@ -1646,18 +1679,66 @@ class ApiClient {
    * only readable through the server now, by someone allowed to read it.
    */
   async uploadListingAttachment(listingId: string, file: File) {
+    return this.postAttachment(`/attachments/${encodeURIComponent(listingId)}`, file, 'listings/ad-attachments');
+  }
+
+  /**
+   * A document for a listing still being written — before its first save, and
+   * for a guest before they have an account. The server files it under the
+   * listing when the listing is saved with it; until then only its uploader
+   * and the team can read it.
+   */
+  async uploadDraftAttachment(file: File) {
+    return this.postAttachment('/attachments', file, 'listings/ad-attachments');
+  }
+
+  /** A file sent in a conversation, readable by its members and the team. */
+  async uploadChatAttachment(chatId: string, file: File) {
+    return this.postAttachment(`/attachments/chat/${encodeURIComponent(chatId)}`, file, 'uploads/files');
+  }
+
+  /** A buyer's proof of funds, readable by them and the team only. */
+  async uploadAcquisitionDocument(file: File) {
+    return this.postAttachment('/attachments/acquisition', file, 'acquisition-capacity');
+  }
+
+  /**
+   * Send one file to the server, which stores it privately.
+   *
+   * Answers with an API path (`/attachments/<id>/download/<name>`), never a
+   * CDN address: the file can only be read through the server, by someone
+   * allowed to.
+   */
+  private async postAttachment(
+    path: string,
+    file: File,
+    /**
+     * Where the file went before, for a server that has no private storage
+     * configured yet (it answers 503). Uploads keep working the old, public way
+     * until the storage keys are in; with them, this is never used.
+     */
+    fallbackFolder: string,
+  ): Promise<ApiResponse<{ id?: string; fileName?: string; bytes?: number | null; url: string }>> {
     const formData = new FormData();
     formData.append('file', file);
 
+    // Read now rather than trusting the copy taken at start-up: a guest who
+    // signed in mid-wizard must upload as themselves.
+    const token = localStorage.getItem('auth_token') || this.token;
     const headers: HeadersInit = {};
-    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     try {
-      const response = await fetch(
-        `${this.baseUrl}/attachments/${encodeURIComponent(listingId)}`,
-        { method: 'POST', headers, body: formData },
-      );
+      const response = await fetch(`${this.baseUrl}${path}`, { method: 'POST', headers, body: formData });
       const data = await response.json().catch(() => ({}));
+
+      if (response.status === 503) {
+        const { uploadToCloudinary } = await import('./cloudinary');
+        const result = await uploadToCloudinary(file, fallbackFolder);
+        return result.success && result.url
+          ? { success: true, data: { url: result.url, fileName: file.name } }
+          : { success: false, error: result.error || 'Upload failed' };
+      }
 
       if (!response.ok) {
         return {
@@ -1665,7 +1746,11 @@ class ApiClient {
           error: uploadErrorMessage(data, `Upload failed (${response.status})`),
         };
       }
-      return { success: true, data: data?.data ?? data };
+      // The server's response envelope wraps the controller's own, so the
+      // file can be one level deeper than it looks.
+      let body: any = data?.data ?? data;
+      if (body && !body.url && body.data?.url) body = body.data;
+      return { success: true, data: body };
     } catch (error) {
       return {
         success: false,

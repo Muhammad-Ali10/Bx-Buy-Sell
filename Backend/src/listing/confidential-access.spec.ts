@@ -157,12 +157,58 @@ describe('ListingService confidential access requests', () => {
       expect(db.chat.create).not.toHaveBeenCalled();
     });
 
-    it('is approved straight away when the paid package has lapsed', async () => {
-      // Otherwise the request waits on a seller who is refused permission to
-      // approve it.
+    it('waits when the paid package has lapsed — restricted, not opened up', async () => {
+      // The client: the feature stays, restricted. The seller still sees the
+      // request but has to renew, or switch manual approval off, to answer it.
       const { service, store } = build({ selectedPackage: 'PREMIUM', packageActive: false });
-      await service.acceptConfidentialityAgreement(LISTING, BUYER);
+      const result: any = await service.acceptConfidentialityAgreement(LISTING, BUYER);
+      expect(result).toMatchObject({ granted: false, pendingApproval: true });
+      expect(store.access.status).toBe('PENDING');
+    });
+  });
+
+  describe('once the paid package has lapsed', () => {
+    const lapsed = { selectedPackage: 'PREMIUM', packageActive: false };
+    const refusal = (error: any) => error?.getResponse?.();
+
+    it('refuses an approval with a code the browser can act on', async () => {
+      const { service, store } = build(lapsed, { status: 'PENDING', chatId: null });
+      const error = await service.grantConfidentialAccess(LISTING, SELLER, BUYER).catch((e) => e);
+      expect(refusal(error)).toMatchObject({ code: 'PACKAGE_REQUIRED' });
+      expect(store.access.status).toBe('PENDING');
+    });
+
+    it('refuses a decline too — answering is part of the package', async () => {
+      const { service, store } = build(lapsed, { status: 'PENDING', chatId: null });
+      const error = await service.declineConfidentialAccess(LISTING, SELLER, BUYER).catch((e) => e);
+      expect(refusal(error)).toMatchObject({ code: 'PACKAGE_REQUIRED' });
+      expect(store.access.status).toBe('PENDING');
+    });
+
+    it('lets everyone waiting in when the seller switches manual approval off', async () => {
+      const { service, store, db } = build(lapsed, { status: 'PENDING', chatId: null });
+      (db.listing as any).update = jest.fn(async () => ({}));
+      (db.listingConfidentialAccess as any).findMany = jest.fn(async () => [
+        { buyerId: BUYER, chatId: null },
+      ]);
+
+      const result = await service.disableManualApproval(LISTING, SELLER);
+
+      expect((db.listing as any).update).toHaveBeenCalledWith({
+        where: { id: LISTING },
+        data: { approveBuyersManually: false },
+      });
+      expect(result).toEqual({ approveBuyersManually: false, approved: 1 });
       expect(store.access.status).toBe('APPROVED');
+      // Told in their conversation, as an approval would.
+      expect(kinds(store)).toEqual(['CONFIDENTIAL_ACCESS_APPROVED']);
+    });
+
+    it('lets only the seller switch it off', async () => {
+      const { service } = build(lapsed);
+      await expect(service.disableManualApproval(LISTING, 'someone-else')).rejects.toThrow(
+        /Only the listing seller/,
+      );
     });
   });
 

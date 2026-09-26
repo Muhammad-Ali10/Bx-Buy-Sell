@@ -14,10 +14,16 @@ import { isQuestionRequired } from "@/lib/questionRequired";
 import { sanitizeNumberInput } from "@/lib/numberInput";
 import { getFormCurrencySymbol } from "@/lib/listingCurrency";
 import {
+  ATTACHMENT_ACCEPT,
+  PHOTO_ACCEPT,
   asAllowedAttachment,
+  asAllowedPhoto,
   maxBytesFor,
   refusedAttachmentsMessage,
+  refusedPhotosMessage,
 } from "@/lib/fileTypes";
+import { uploadListingDocuments } from "@/lib/privateUpload";
+import { openProtected } from "@/hooks/useProtectedUrl";
 
 interface AdInformationsStepProps {
   formData?: any;
@@ -121,25 +127,31 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Photos and documents, each the way it has to go.
+   *
+   * Photos stay public — the listing cards and the listing page are drawn from
+   * them, and a locked viewer is sent a blurred copy. Documents go through the
+   * server, which keeps them private and serves them only through the
+   * protected download route.
+   */
   const handleMultiUpload = async (
     questionId: string,
     fileList: FileList | null,
-    folder: string,
-    /**
-     * Attachments accept only the client's format list; photos stay open.
-     * Returns the file ready to upload (renamed if need be), or null to refuse it.
-     */
-    prepare?: (file: File) => File | null,
+    kind: "photo" | "file",
   ) => {
     if (!fileList || fileList.length === 0) return;
     const all = Array.from(fileList);
+    const prepare = kind === "photo" ? asAllowedPhoto : asAllowedAttachment;
 
-    // `accept` is only a browser hint, so re-check the type here.
-    const checked = all.map((file) => ({ file, ready: prepare ? prepare(file) : file }));
+    // `accept` keeps the picker to the right types, but a drag-and-drop or
+    // "All files" in the dialog passes it by — so the type is checked here too,
+    // and a refusal is said out loud.
+    const checked = all.map((file) => ({ file, ready: prepare(file) }));
     const rightType = checked.flatMap(({ ready }) => (ready ? [ready] : []));
     const refused = checked.filter(({ ready }) => !ready).map(({ file }) => file);
     if (refused.length > 0) {
-      toast.error(refusedAttachmentsMessage(refused));
+      toast.error(kind === "photo" ? refusedPhotosMessage(refused) : refusedAttachmentsMessage(refused));
     }
 
     // Video is allowed up to 100 MB; everything else stays at 10 MB.
@@ -152,7 +164,10 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
 
     setUploadingFiles((prev) => ({ ...prev, [questionId]: true }));
     try {
-      const results = await uploadMultipleToCloudinary(valid, folder);
+      const results =
+        kind === "photo"
+          ? await uploadMultipleToCloudinary(valid, "listings/ad-photos")
+          : await uploadListingDocuments(valid);
       const urls = results.filter((r) => r.success && r.url).map((r) => r.url as string);
       const failed = results.length - urls.length;
       if (urls.length > 0) {
@@ -285,18 +300,17 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                       </div>
                     )}
                     <div className="w-[220px] max-w-full">
-                      {/* No `accept`. The dialog filtering a file out is what made a
-                          refusal silent — the seller picked nothing and nothing was
-                          said. The check in the handler refuses instead, out loud. */}
+                      {/* The picker offers only the photo formats; the handler still
+                          checks, and says so, for a file that comes past it. */}
                       <input
                         type="file"
-                        accept="image/*"
+                        accept={PHOTO_ACCEPT}
                         multiple
                         className="hidden"
                         id={`photo-${question.id}`}
                         disabled={isUploading}
                         onChange={(e) => {
-                          handleMultiUpload(question.id, e.target.files, "listings/ad-photos");
+                          handleMultiUpload(question.id, e.target.files, "photo");
                           e.target.value = "";
                         }}
                       />
@@ -319,17 +333,13 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                   <div className="space-y-3">
                     <input
                       type="file"
+                      accept={ATTACHMENT_ACCEPT}
                       multiple
                       className="hidden"
                       id={`file-${question.id}`}
                       disabled={isUploading}
                       onChange={(e) => {
-                        handleMultiUpload(
-                          question.id,
-                          e.target.files,
-                          "listings/ad-attachments",
-                          asAllowedAttachment,
-                        );
+                        handleMultiUpload(question.id, e.target.files, "file");
                         e.target.value = "";
                       }}
                     />
@@ -375,6 +385,12 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
                                 href={url}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                // A private document needs the seller's token,
+                                // which a plain link cannot send.
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  void openProtected(url);
+                                }}
                                 className="truncate text-sm text-foreground hover:underline"
                                 title={fileNameFromUrl(url)}
                               >
@@ -452,7 +468,9 @@ export const AdInformationsStep = ({ formData: parentFormData, onNext, onBack, o
             onClick={handleSubmit}
             className="bg-accent hover:bg-accent/90 text-accent-foreground ml-auto px-16"
           >
-            Save
+            {/* Continue, like every other step: it moves on and keeps the answers
+                in the draft. Saving to the listing is the Packages step's job. */}
+            Continue
           </Button>
         </div>
       </div>

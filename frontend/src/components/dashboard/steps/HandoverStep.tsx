@@ -314,7 +314,9 @@ const isYes = (value: unknown) => String(value ?? '').trim().toLowerCase() === '
             onClick={handleSubmit}
             className="bg-accent hover:bg-accent/90 text-accent-foreground rounded-full h-14 px-14 font-semibold"
           >
-            Save
+            {/* Continue, like every other step: it moves on and keeps the answers
+                in the draft. Saving to the listing is the Packages step's job. */}
+            Continue
           </Button>
         </div>
       </div>

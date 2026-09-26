@@ -14,7 +14,22 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiParam, ApiTags } from '@nestjs/swagger';
 import { attachmentMulterConfig } from './config/multer.config';
 import type { Request, Response } from 'express';
-import { AttachmentService } from './attachment.service';
+import { AttachmentService, attachmentPath } from './attachment.service';
+import { Public } from 'common/decorator/public.decorator';
+
+/** What every upload answers with: where to fetch the file, never a CDN address. */
+const asUploaded = (attachment: { id: string; fileName: string; bytes: number | null }) => ({
+  success: true,
+  data: {
+    id: attachment.id,
+    fileName: attachment.fileName,
+    bytes: attachment.bytes,
+    // The name rides in the path so every screen that reads a file's name out
+    // of its URL keeps working. The server ignores it and takes the name from
+    // the row — the path is a label, not the source.
+    url: attachmentPath(attachment),
+  },
+});
 
 /**
  * Downloading a listing's documents.
@@ -38,6 +53,50 @@ export class AttachmentController {
    * anyone at all upload to the account. Going through here means the file
    * lands private and the request is one we have checked.
    */
+  /**
+   * A document for a listing still being written — before its first save, and
+   * for a guest before they have an account. It joins the listing when the
+   * listing is saved with it; until then only its uploader and the team can
+   * read it.
+   */
+  @Public()
+  @Post()
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', attachmentMulterConfig))
+  async uploadDraft(@Req() req: Request, @UploadedFile() file: Express.Multer.File) {
+    const user = (req as any).user;
+    return asUploaded(
+      await this.attachments.uploadDraft(file, { userId: user?.id, role: user?.role }),
+    );
+  }
+
+  /** A file sent in a conversation: its members and the team may read it. */
+  @Post('chat/:chatId')
+  @ApiConsumes('multipart/form-data')
+  @ApiParam({ name: 'chatId', type: String })
+  @UseInterceptors(FileInterceptor('file', attachmentMulterConfig))
+  async uploadForChat(
+    @Req() req: Request,
+    @Param('chatId') chatId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const user = (req as any).user;
+    return asUploaded(
+      await this.attachments.uploadForChat(chatId, file, { userId: user?.id, role: user?.role }),
+    );
+  }
+
+  /** A buyer's proof of funds: readable by them and the team only. */
+  @Post('acquisition')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', attachmentMulterConfig))
+  async uploadAcquisition(@Req() req: Request, @UploadedFile() file: Express.Multer.File) {
+    const user = (req as any).user;
+    return asUploaded(
+      await this.attachments.uploadAcquisition(file, { userId: user?.id, role: user?.role }),
+    );
+  }
+
   @Post(':listingId')
   @ApiConsumes('multipart/form-data')
   @ApiParam({ name: 'listingId', type: String })
@@ -52,21 +111,7 @@ export class AttachmentController {
       userId: user?.id,
       role: user?.role,
     });
-
-    return {
-      success: true,
-      data: {
-        id: attachment.id,
-        fileName: attachment.fileName,
-        bytes: attachment.bytes,
-        // Where to fetch it. Not a CDN address — the file is only readable
-        // through this API now, by someone allowed to read it.
-        // The name rides in the path so every screen that reads a file's
-        // name out of its URL keeps working. The server ignores it and takes
-        // the name from the row — the path is a label, not the source.
-        url: `/attachments/${attachment.id}/download/${encodeURIComponent(attachment.fileName)}`,
-      },
-    };
+    return asUploaded(attachment);
   }
 
   @Get([':id/download', ':id/download/:name'])

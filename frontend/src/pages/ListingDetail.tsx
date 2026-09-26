@@ -160,6 +160,7 @@ import RequestIcon from "@/assets/request.svg";
 import DateIcon from "@/assets/date.svg";
 
 import { formatNumber } from "@/lib/formatNumber";
+import { showsPremiumBadge } from "@/lib/packageContent";
 // Helper function to extract answer from question array by question text
 const getAnswerByQuestion = (questions: any[], searchText: string | string[]): string | null => {
   if (!questions || !Array.isArray(questions)) return null;
@@ -2091,11 +2092,66 @@ const ProgressMetricCard = ({
   }
 
   // Extract percentage from value (e.g., "45%" -> 45, or just use the number)
-  const percentage = typeof value === 'string'
-    ? parseFloat(String(value).replace('%', '')) || 0
-    : typeof value === 'number'
-      ? value
-      : 0;
+  const parsedPercentage = typeof value === 'number'
+    ? value
+    : parseFloat(String(value ?? '').replace('%', '').trim());
+
+  /*
+   * Nothing filled in reads "Unknown", like every other card.
+   *
+   * The card used to take anything that was not a number for 0, so a field
+   * the seller left blank showed an empty bar and "0%" — a refund rate of zero
+   * is a claim about the business, and the seller never made it. A real 0 is
+   * still drawn as 0%.
+   */
+  if (!Number.isFinite(parsedPercentage)) {
+    return (
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '389.67px',
+          minHeight: '118px',
+          borderRadius: '20px',
+          border: '1px solid rgba(0, 0, 0, 0.1)',
+          padding: '24px',
+          background: 'rgba(255, 255, 255, 1)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+          position: 'relative',
+        }}
+      >
+        {info && <InfoBadge text={info} />}
+        <div
+          style={{
+            fontFamily: 'Lufga',
+            fontWeight: 500,
+            fontStyle: 'normal',
+            fontSize: '20px',
+            lineHeight: '120%',
+            letterSpacing: '0%',
+            color: '#000000',
+          }}
+        >
+          {label}
+        </div>
+        <div
+          style={{
+            fontFamily: 'Lufga',
+            fontWeight: 500,
+            fontStyle: 'normal',
+            fontSize: '28px',
+            lineHeight: '120%',
+            letterSpacing: '0%',
+            color: 'rgba(0, 0, 0, 1)',
+          }}
+        >
+          {UNKNOWN_LABEL}
+        </div>
+      </div>
+    );
+  }
+  const percentage = parsedPercentage;
 
   // Clamp percentage between 0 and 100
   const clampedPercentage = Math.min(Math.max(percentage, 0), 100);
@@ -5845,7 +5901,7 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
                               : undefined
                           }
                           managedByEx={similarListing.managed_by_ex === true || similarListing.managed_by_ex === 1 || similarListing.managed_by_ex === 'true' || similarListing.managed_by_ex === '1'}
-                          isPremium={String(similarListing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
+                          isPremium={showsPremiumBadge(similarListing)}
                           listingId={similarListing.id}
                           sellerId={similarListing.userId || similarListing.user_id}
                           imageLocked={Boolean(photoQuestion?.locked)}

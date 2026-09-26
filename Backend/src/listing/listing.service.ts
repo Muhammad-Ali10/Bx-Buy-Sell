@@ -1,3 +1,4 @@
+import { linkDraftAttachments } from 'src/attachment/attachment.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -56,6 +57,7 @@ import { ListingAddonService } from './listing-addon.service';
 import { ListingFxService } from '../fx/listing-fx.service';
 import {
   ensureRequestChat,
+  approvalLocked,
   manualApprovalApplies,
   postAccessNotice,
   postListingDeletedNotice,
@@ -1505,7 +1507,68 @@ export class ListingService {
       label:
         row.chat?.chatLabels?.find((entry) => entry.userId === sellerId)?.label ?? null,
       lastMessage: row.chat?.messages?.[0]?.content ?? null,
+      // The package lapsed: the seller sees the request but has to renew, or
+      // switch manual approval off, before answering it.
+      approvalLocked: approvalLocked(row.listing as any),
     }));
+  }
+
+  /**
+   * Refuse a decision on a request while the listing's paid package has lapsed.
+   *
+   * Carries a code, not only a sentence, so the browser can offer the way out —
+   * upgrade, or switch manual approval off — instead of printing the error.
+   */
+  private assertMayDecide(listing: { selectedPackage?: string | null; packageActive?: boolean | null }) {
+    if (approvalLocked(listing)) {
+      throw new ForbiddenException({
+        message: 'Your package has expired. Please renew it to approve buyers.',
+        code: 'PACKAGE_REQUIRED',
+      });
+    }
+  }
+
+  /**
+   * The seller switches "Approve Buyers Manually" off.
+   *
+   * With it off, a buyer sees the confidential details as soon as they accept
+   * the agreement — and everybody still waiting has already accepted it, so
+   * they are let in now, each told so in their conversation as an approval
+   * would. Allowed whatever the package: switching off is exactly what the
+   * client offers a seller whose package has lapsed.
+   */
+  async disableManualApproval(listingId: string, sellerId: string) {
+    const listing = await this.db.listing.findUnique({
+      where: { id: listingId },
+      select: { id: true, userId: true },
+    });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.userId !== sellerId) {
+      throw new ForbiddenException('Only the listing seller can change this.');
+    }
+
+    await this.db.listing.update({
+      where: { id: listingId },
+      data: { approveBuyersManually: false },
+    });
+
+    const waiting = await this.db.listingConfidentialAccess.findMany({
+      where: { listingId, status: 'PENDING', buyerId: { not: sellerId } },
+      select: { buyerId: true, chatId: true },
+    });
+    let approved = 0;
+    for (const row of waiting) {
+      try {
+        await this.grantConfidentialAccess(listingId, sellerId, row.buyerId, row.chatId ?? undefined, {
+          packageLapseAllowed: true,
+        });
+        approved += 1;
+      } catch (error) {
+        this.logger.warn(`Listing ${listingId}: could not let buyer ${row.buyerId} in: ${error}`);
+      }
+    }
+    this.logger.log(`Listing ${listingId}: manual approval off, ${approved} waiting buyer(s) let in`);
+    return { approveBuyersManually: false, approved };
   }
 
   /** Turn a request down. The buyer keeps the public view and nothing more. */
@@ -1516,7 +1579,7 @@ export class ListingService {
   ) {
     const listing = await this.db.listing.findUnique({
       where: { id: listingId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, selectedPackage: true, packageActive: true },
     });
     if (!listing) throw new NotFoundException('Listing not found');
     if (listing.userId !== sellerId) {
@@ -1524,6 +1587,8 @@ export class ListingService {
         'Only the listing seller can decide on access requests.',
       );
     }
+    // Declining is answering too, and the client puts both behind the package.
+    this.assertMayDecide(listing);
 
     const request = await this.db.listingConfidentialAccess.findUnique({
       where: { listingId_buyerId: { listingId, buyerId } },
@@ -1558,6 +1623,8 @@ export class ListingService {
     sellerId: string,
     buyerId: string,
     chatId?: string,
+    /** Only for the seller switching manual approval off, which lets everyone waiting in. */
+    opts: { packageLapseAllowed?: boolean } = {},
   ) {
     const listing = await this.db.listing.findUnique({
       where: { id: listingId },
@@ -1585,16 +1652,8 @@ export class ListingService {
     // a buyer more access, which the owner is entitled to do.
 
     // An expired package still lets the seller see requests, but not approve
-    // them — they have to buy a package again first. Listings from before
-    // packages existed (packageActive null) are left alone.
-    const paidPackage =
-      listing.selectedPackage === 'STARTER' ||
-      listing.selectedPackage === 'PREMIUM';
-    if (paidPackage && listing.packageActive === false) {
-      throw new ForbiddenException(
-        'Your package has expired. Please renew it to approve buyers.',
-      );
-    }
+    // them — they have to buy a package again first.
+    if (!opts.packageLapseAllowed) this.assertMayDecide(listing);
 
     if (chatId) {
       const chat = await this.db.chat.findUnique({
@@ -2053,9 +2112,22 @@ export class ListingService {
       },
     });
 
+    // Documents uploaded in the wizard before this first save were nobody's
+    // listing yet; now they are this one's, and read by its rules.
+    await this.linkUploadedDocuments(created.id, userId, body);
+
     // Its price and figures in every currency, for filters and sorting.
     await this.listingFx?.refreshQuietly(created.id);
     return created;
+  }
+
+  /** A failure here must not fail the save; the documents can be linked on the next one. */
+  private async linkUploadedDocuments(listingId: string, ownerId: string, body: unknown) {
+    try {
+      await linkDraftAttachments(this.db as any, listingId, ownerId, body);
+    } catch (error) {
+      this.logger.warn(`Listing ${listingId}: could not link uploaded documents: ${error}`);
+    }
   }
 
   async update(
@@ -2473,6 +2545,9 @@ export class ListingService {
       
       const managedByEx = (result as any).managed_by_ex;
       console.log(`✅ Listing ${id} updated successfully. managed_by_ex = ${managedByEx}`);
+
+      // Documents added in this edit join the listing.
+      await this.linkUploadedDocuments(id, existing.userId, body);
 
       // A new price or new figures change what it comes to in other currencies.
       await this.listingFx?.refreshQuietly(id);

@@ -5,6 +5,9 @@ export interface SocialAccount {
   id: string;
   social_account_option: string; // Backend field name
   platform?: string; // Legacy field for compatibility
+  /** Legacy fields the edit dialog passes back unchanged when present. */
+  url?: string;
+  followers?: number;
   created_at: string;
   updated_at: string;
 }

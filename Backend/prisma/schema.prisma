@@ -1129,8 +1129,18 @@ model Payment {
 /// Listing photos are deliberately not here. They are meant to be public, and
 /// putting them behind a login would empty every card on the marketplace.
 model Attachment {
-  id        String @id @default(uuid()) @map("_id")
-  listingId String
+  id        String  @id @default(uuid()) @map("_id")
+  /// The listing it belongs to. Empty while that listing is still being
+  /// written — a document uploaded in the wizard before its first save — and
+  /// for files that belong to a conversation or to their uploader alone.
+  listingId String?
+  /// Who uploaded it; empty for a guest writing a listing before signing up.
+  /// A file not on a listing yet can be read by this person and the team only.
+  ownerId   String?
+  /// The conversation a chat attachment was sent in: its members may read it.
+  chatId    String?
+  /// "listing", "chat" or "acquisition" — which rule decides who may read it.
+  purpose   String  @default("listing")
 
   /// What the seller called the file, kept as they typed it.
   ///
@@ -1157,10 +1167,12 @@ model Attachment {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  listing Listing? @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
   @@index([listingId])
   @@index([publicId])
+  @@index([ownerId])
+  @@index([chatId])
 }
 
 /// One placement the seller is paying for, on a subscription of its own.

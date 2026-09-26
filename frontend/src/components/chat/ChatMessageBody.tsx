@@ -1,5 +1,7 @@
 import { Paperclip } from "lucide-react";
 import { downloadAttachment } from "@/lib/downloadFile";
+import { ProtectedImg } from "@/components/ProtectedImg";
+import { openProtected } from "@/hooks/useProtectedUrl";
 
 /**
  * What one message says: a picture, a file, or words.
@@ -40,13 +42,13 @@ export const ChatMessageBody = ({
     const caption = text.trim();
     return (
       <div className="space-y-2">
-        <img
+        <ProtectedImg
           src={message.fileUrl}
           alt={caption || "Image"}
           className="max-h-64 max-w-full cursor-pointer rounded-lg object-contain"
           loading="lazy"
           decoding="async"
-          onClick={() => window.open(message.fileUrl as string, "_blank")}
+          onClick={() => void openProtected(message.fileUrl)}
           onError={(event) => {
             // A picture that will not load says so, rather than leaving a gap
             // where nobody can tell whether anything was sent.

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Check, FileText, Loader2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api";
-import { uploadMultipleToCloudinary } from "@/lib/cloudinary";
+import { openProtected } from "@/hooks/useProtectedUrl";
 import AcquisitionCapacityCard from "@/components/AcquisitionCapacityCard";
 
 type CapacityStatus = "UNASSIGNED" | "IN_REVIEW" | "COMPLETED";
@@ -111,7 +111,13 @@ export const AcquisitionCapacityUpload = () => {
 
     setIsUploading(true);
     try {
-      const results = await uploadMultipleToCloudinary(pending, "acquisition-capacity");
+      // Through the server, one at a time: a proof of funds is readable by the
+      // buyer and the team only, never on a public link.
+      const results: Array<{ success: boolean; url?: string }> = [];
+      for (const file of pending) {
+        const response = await apiClient.uploadAcquisitionDocument(file);
+        results.push({ success: response.success, url: response.data?.url });
+      }
       // Pair each url back with the file the buyer chose, so the review table
       // can list it by the name they recognise rather than a Cloudinary id.
       const uploaded = results
@@ -354,6 +360,12 @@ const VerifiedDocuments = ({ uploads }: { uploads: CapacityUpload[] }) => (
                       href={upload.url}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={(event) => {
+                        // A private file needs the viewer's token, which a
+                        // plain link cannot send.
+                        event.preventDefault();
+                        void openProtected(upload.url);
+                      }}
                       className="inline-flex items-center gap-2 text-[13px] font-medium text-[#0F172A] hover:underline"
                     >
                       <FileText className="h-3.5 w-3.5 flex-shrink-0 text-[#94A3B8]" />

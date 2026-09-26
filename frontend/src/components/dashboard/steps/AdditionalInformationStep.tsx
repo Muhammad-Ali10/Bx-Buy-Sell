@@ -14,12 +14,18 @@ import { useProductQuestions } from "@/hooks/useProductQuestions";
 import { useManagementQuestions } from "@/hooks/useManagementQuestions";
 import { toast } from "sonner";
 import { uploadToCloudinary, uploadMultipleToCloudinary } from "@/lib/cloudinary";
+import { uploadListingDocuments } from "@/lib/privateUpload";
 import { isQuestionHidden } from "@/lib/questionRequired";
 import {
   asAllowedAttachment,
   formatMaxSize,
   maxBytesFor,
   refusedAttachmentsMessage,
+  ATTACHMENT_ACCEPT,
+  PHOTO_ACCEPT,
+  PHOTO_LABEL,
+  asAllowedPhoto,
+  refusedPhotosMessage,
 } from "@/lib/fileTypes";
 import { isValidListingDateAnswer } from "@/lib/dateUtils";
 // Shared with the rest of the wizard rather than kept as a private copy.
@@ -27,6 +33,7 @@ import { clampPercent, sanitizeNumberInput } from "@/lib/numberInput";
 import { getFormCurrencySymbol } from "@/lib/listingCurrency";
 import { fileNameFromUrl } from "@/lib/mediaUtils";
 import { usePersistOnUnmount } from "@/hooks/usePersistOnUnmount";
+import { openProtected } from "@/hooks/useProtectedUrl";
 
 
 interface AdditionalInformationStepProps {
@@ -303,7 +310,14 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     onNext(formData);
   };
 
-  const handlePhotoUpload = async (questionId: string, file: File) => {
+  const handlePhotoUpload = async (questionId: string, picked: File) => {
+    // The photo formats of the fifteen, checked here as well as by the picker:
+    // a drag-and-drop or "All files" passes the picker by.
+    const file = asAllowedPhoto(picked);
+    if (!file) {
+      toast.error(refusedPhotosMessage([picked]));
+      return;
+    }
     setUploadingFiles(prev => ({ ...prev, [questionId]: true }));
     
     try {
@@ -340,7 +354,9 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
     setUploadingFiles(prev => ({ ...prev, [questionId]: true }));
 
     try {
-      const result = await uploadToCloudinary(file, 'listings/attachments');
+      // Through the server, which keeps documents private and serves them
+      // only through the protected download route.
+      const [result] = await uploadListingDocuments([file]);
       
       if (result.success && result.url) {
         const currentFiles = formData[questionId] || [];
@@ -737,12 +753,11 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
               </div>
             ) : (
               <div className="border-2 border-dashed border-border rounded-xl p-8 flex flex-col items-center justify-center hover:border-accent/50 transition-colors bg-muted/30">
-                {/* No `accept`. The dialog filtering a file out is what made a
-                    refusal silent — the seller picked nothing and nothing was
-                    said. The check in the handler refuses instead, out loud. */}
+                {/* The picker offers only the photo formats; the handler still
+                    checks, and says so, for a file that comes past it. */}
                 <input
                   type="file"
-                  accept="image/*"
+                  accept={PHOTO_ACCEPT}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
@@ -767,7 +782,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                     <>
                       <ImageIcon className="w-12 h-12 text-muted-foreground mb-3 mx-auto" />
                       <p className="text-sm text-muted-foreground">Click to upload photo</p>
-                      <p className="text-xs text-muted-foreground mt-1">PNG, JPG up to 10MB</p>
+                      <p className="text-xs text-muted-foreground mt-1">{PHOTO_LABEL} up to 10MB</p>
                     </>
                   )}
                 </label>
@@ -785,6 +800,7 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
             <div className="border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center hover:border-accent/50 transition-colors bg-muted/30">
               <input
                 type="file"
+                accept={ATTACHMENT_ACCEPT}
                 onChange={(e) => {
                   const picked = e.target.files?.[0];
                   if (picked) {
@@ -831,6 +847,12 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
                       href={url}
                       target="_blank"
                       rel="noopener noreferrer"
+                      // A private document needs the seller's token, which a
+                      // plain link cannot send.
+                      onClick={(event) => {
+                        event.preventDefault();
+                        void openProtected(url);
+                      }}
                       className="flex-1 truncate text-sm text-foreground hover:underline"
                       title={fileNameFromUrl(url)}
                     >
@@ -973,7 +995,9 @@ export const AdditionalInformationStep = ({ formData: parentFormData, onNext, on
           onClick={handleContinue}
           className="bg-accent hover:bg-accent/90 text-accent-foreground w-full sm:w-auto sm:ml-auto px-12 sm:px-16 h-11 sm:h-12 font-semibold rounded-full shadow-md"
         >
-          Save
+          {/* Continue, like every other step: it moves on and keeps the answers
+              in the draft. Saving to the listing is the Packages step's job. */}
+          Continue
         </Button>
       </div>
     </div>

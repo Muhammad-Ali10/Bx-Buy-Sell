@@ -26,6 +26,7 @@ import {
   listingMultiplesOf,
   listingPriceIn,
 } from "@/lib/listingMoney";
+import { showsPremiumBadge } from "@/lib/packageContent";
 const Favourites = () => {
   const viewerCurrency = useDisplayCurrency();
   const navigate = useNavigate();
@@ -246,6 +247,13 @@ const Favourites = () => {
                   if (photoQuestion?.answer) {
                     imageUrl = parseMediaUrls(photoQuestion.answer)[0] || '';
                   }
+                  // The server blurs the photo for anyone who has not unlocked
+                  // the listing and says so on the answer — as on All Listings.
+                  // Without reading that here the card showed a blurred picture
+                  // with nothing on it saying why or how to unlock it.
+                  const imageIsLocked = Boolean(
+                    photoQuestion?.locked || photoQuestion?.blurredPreview,
+                  );
                   if (!imageUrl) {
                     const brandInfo = brandQuestions[0];
                     imageUrl = brandInfo?.businessPhoto?.[0] || 
@@ -395,9 +403,12 @@ const Favourites = () => {
                             : avgRevenue > 0 ? `${getListingCurrencySymbol(listing)}${formatNumber(Math.round(avgRevenue))}` : undefined
                         }
                         managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
-                        isPremium={String(listing.selectedPackage || '').toUpperCase() === 'PREMIUM'}
+                        isPremium={showsPremiumBadge(listing)}
                         listingId={listingId}
                         sellerId={listing.userId || listing.user_id}
+                        imageLocked={imageIsLocked}
+                        imageLockType={photoQuestion?.lockType ?? null}
+                        lockRedirectTo={listing?.lockAction?.redirectTo || '/pricing'}
                       />
                     </div>
                   );

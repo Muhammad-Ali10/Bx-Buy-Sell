@@ -45,13 +45,15 @@ describe("recognising an allowed file by what it is", () => {
 describe("telling the seller which files were refused", () => {
   it("names the file", () => {
     const message = refusedAttachmentsMessage([{ name: "archive.zip" }]);
+    // The client's words first.
+    expect(message).toMatch(/^File type not supported/);
     expect(message).toContain('"archive.zip" wasn\'t uploaded');
     expect(message).toContain("PDF");
   });
 
   it("names the first and counts the rest", () => {
     expect(refusedAttachmentsMessage([{ name: "a.zip" }, { name: "b.svg" }, { name: "c.rar" }])).toMatch(
-      /^"a\.zip" and 2 more weren't uploaded/,
+      /^File type not supported — "a\.zip" and 2 more weren't uploaded/,
     );
   });
 });

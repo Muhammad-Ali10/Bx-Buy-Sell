@@ -1,9 +1,15 @@
+jest.mock("@/lib/apiBase", () => ({ apiBaseUrl: "http://api.test" }));
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatMessageBody } from "./ChatMessageBody";
 import { downloadAttachment } from "@/lib/downloadFile";
 
-jest.mock("@/lib/downloadFile", () => ({ downloadAttachment: jest.fn() }));
+jest.mock("@/lib/downloadFile", () => ({
+  // The real URL helpers: the picture is drawn by ProtectedImg, which asks them
+  // whether a file is private.
+  ...jest.requireActual("@/lib/downloadFile"),
+  downloadAttachment: jest.fn(),
+}));
 
 /**
  * "In the admin dashboard it only shows (image) but it does not show the

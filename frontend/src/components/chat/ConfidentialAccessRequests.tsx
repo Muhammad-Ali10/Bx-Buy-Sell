@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ChatLabelChip } from "./ChatLabelChip";
+import { ManualApprovalLockedDialog, PACKAGE_REQUIRED } from "./ManualApprovalLockedDialog";
 
 /**
  * Buyers waiting on a seller who vets by hand.
@@ -27,6 +28,11 @@ interface AccessRequest {
   label?: "GOOD" | "MEDIUM" | "BAD" | null;
   /** The last thing said in the conversation, as the design previews it. */
   lastMessage?: string | null;
+  /**
+   * The listing's paid package has lapsed: the request can be seen but not
+   * answered until the seller renews, or switches manual approval off.
+   */
+  approvalLocked?: boolean;
   buyer: {
     id: string;
     first_name?: string | null;
@@ -69,12 +75,20 @@ export const ConfidentialAccessRequests = ({
 }) => {
   const queryClient = useQueryClient();
   const [deciding, setDeciding] = useState<string | null>(null);
+  // The listing whose lapsed package stopped an Accept or Decline.
+  const [lockedListing, setLockedListing] = useState<string | null>(null);
 
   const { data: requests = [] } = useQuery<AccessRequest[]>(confidentialRequestsQuery);
 
   if (!requests.length) return null;
 
   const decide = async (request: AccessRequest, approve: boolean) => {
+    // Known to be locked: offer the way out rather than sending a request the
+    // server will refuse.
+    if (request.approvalLocked) {
+      setLockedListing(request.listingId);
+      return;
+    }
     setDeciding(request.id);
     try {
       const response: any = approve
@@ -86,6 +100,11 @@ export const ConfidentialAccessRequests = ({
         : await apiClient.declineConfidentialAccess(request.listingId, request.buyer.id);
 
       if (response?.success === false) {
+        // The package lapsed since the list was loaded.
+        if (response?.code === PACKAGE_REQUIRED) {
+          setLockedListing(request.listingId);
+          return;
+        }
         toast.error(response?.error || "Could not save that decision.");
         return;
       }
@@ -105,6 +124,15 @@ export const ConfidentialAccessRequests = ({
 
   return (
     <div className="px-3 pb-3">
+      <ManualApprovalLockedDialog
+        open={lockedListing !== null}
+        onOpenChange={(open) => !open && setLockedListing(null)}
+        listingId={lockedListing}
+        onSwitchedOff={() => {
+          queryClient.invalidateQueries({ queryKey: ["confidential-requests"] });
+          queryClient.invalidateQueries({ queryKey: ["chats"] });
+        }}
+      />
       <div className="rounded-xl bg-[rgba(250,250,250,1)] p-2.5">
         <div className="flex items-center gap-2 px-1 pb-2">
           <span

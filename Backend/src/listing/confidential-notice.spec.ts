@@ -2,6 +2,7 @@ import { broadcastChatMessage, registerChatBroadcaster } from '../chat/chat-broa
 import {
   accessNoticeMeta,
   ensureRequestChat,
+  approvalLocked,
   manualApprovalApplies,
   postAccessNotice,
 } from './confidential-notice';
@@ -92,16 +93,23 @@ describe('confidential access building blocks', () => {
       ).toBe(false);
     });
 
-    it('not once a paid package has lapsed', () => {
-      // Approving is refused for an expired package, so requests would be
-      // collected that the seller could never answer.
+    it('still once a paid package has lapsed — restricted, not gone', () => {
+      // The client: the seller still sees requests but cannot approve them
+      // until they buy a package again. New buyers wait; they are not let in.
       expect(
         manualApprovalApplies({
           approveBuyersManually: true,
           selectedPackage: 'PREMIUM',
           packageActive: false,
         }),
-      ).toBe(false);
+      ).toBe(true);
+      expect(approvalLocked({ selectedPackage: 'PREMIUM', packageActive: false })).toBe(true);
+    });
+
+    it('lets the seller answer while the package runs', () => {
+      expect(approvalLocked({ selectedPackage: 'PREMIUM', packageActive: true })).toBe(false);
+      expect(approvalLocked({ selectedPackage: 'STARTER', packageActive: null })).toBe(false);
+      expect(approvalLocked({ selectedPackage: 'MINIMUM', packageActive: false })).toBe(false);
     });
 
     it('for a paid listing from before packages were tracked', () => {

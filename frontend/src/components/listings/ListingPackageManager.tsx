@@ -1,31 +1,40 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { CircleCheck, Crown, Dot, Loader2, Rocket } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
 import { ADDON_CARDS, PACKAGE_CARDS } from "@/lib/packageContent";
 import {
-  ADDON_LABELS,
-  PACKAGE_LABELS,
   formatUsd,
   getBillingCycle,
   priceOverCycle,
-  type AddonId,
   type BillingCycleId,
   type PackageId,
 } from "@/lib/packagePricing";
 import {
   addonCardViews,
   packageCardViews,
-  packageRank,
   type ButtonTone,
   type CardAction,
-  type CardPanel,
   type HeldAddon,
   type PaidAddonId,
 } from "@/lib/packageCardState";
-import { BillingCycleChooser } from "@/components/listings/BillingCycleChooser";
+import {
+  AddonPlanCard,
+  AddonTray,
+  BlackBadge,
+  CardButton,
+  CyclePanel,
+  LIME,
+  PackagePlanCard,
+  PageButton,
+  RenewNote,
+  SummaryTable,
+  addonDisplayName,
+  addonSurfaceColor,
+  type CardButtonTone,
+} from "@/components/packages/PlanCards";
 
 /**
  * Managing what a listing already runs on.
@@ -44,10 +53,6 @@ import { BillingCycleChooser } from "@/components/listings/BillingCycleChooser";
  * listing's own asking price — which is why the client's mockup showing $49 and
  * $99 is one listing's tier rather than a price list.
  */
-
-const LIME = "rgba(197, 253, 31, 1)";
-const RED = "#F04438";
-const GREY = "#9AA0A6";
 
 interface PackageOption {
   id: PackageId;
@@ -95,30 +100,11 @@ const addonPrice = (value: number) => formatUsd(value);
  * Premium and Bundle are lime cards, so their primary button is black; the
  * white cards get a lime one. Red and grey are the same everywhere.
  */
-function buttonStyle(tone: ButtonTone, onLimeCard: boolean) {
-  if (tone === "danger") return { background: RED, color: "#FFFFFF" };
-  if (tone === "muted") return { background: GREY, color: "#FFFFFF" };
-  if (tone === "secondary") return { background: LIME, color: "#000000" };
-  return onLimeCard
-    ? { background: "#000000", color: "#FFFFFF" }
-    : { background: LIME, color: "#000000" };
-}
-
-const PACKAGE_ICON: Record<PackageId, JSX.Element> = {
-  MINIMUM: <Dot className="h-4 w-4" />,
-  STARTER: <Rocket className="h-3 w-3" />,
-  PREMIUM: <Crown className="h-3 w-3" />,
+const cardTone = (tone: ButtonTone, onLimeCard: boolean): CardButtonTone => {
+  if (tone === "danger") return "danger";
+  if (tone === "muted") return "muted";
+  return onLimeCard ? "dark" : "accent";
 };
-
-/** The strip above the radios: black for something starting, red for ending. */
-const PanelHeader = ({ panel }: { panel: CardPanel }) => (
-  <h2
-    className="m-0 rounded-t-2xl px-3 py-2.5 text-[12px] font-semibold text-white"
-    style={{ background: panel.tone === "danger" ? RED : "#18181A", fontFamily: "Lufga" }}
-  >
-    {panel.title}
-  </h2>
-);
 
 export const ListingPackageManager = ({
   listingId,
@@ -473,235 +459,128 @@ export const ListingPackageManager = ({
   }
 
   return (
-    <div className="mt-8">
-      {/* Packages */}
-      <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-3">
+    <div className="mt-8 flex flex-col gap-[30px]">
+      {/* Packages — drawn by the same cards as the Packages step. Premium is
+          lime because it is the card being sold, not because of what the
+          seller is on, which is why it sits in the middle. */}
+      <div className="grid grid-cols-1 items-start gap-[14px] md:grid-cols-3">
         {packageViews.map((view) => {
           const card = PACKAGE_CARDS.find((entry) => entry.id === view.id);
           const option = packageOptions.find((entry) => entry.id === view.id);
           const isPremium = view.id === "PREMIUM";
           if (!card) return null;
+          /*
+           * An upgrade being chosen has no button of its own under its cycles,
+           * as the design has it: "Save Changes" below is the press that buys
+           * it. Every other panel keeps its button — Cancel Subscription,
+           * Cancel Downgrade and keep …, Reactivate.
+           */
+          const showButton = !(view.panel && view.action.intent === "upgrade");
 
           return (
-            <div
+            <PackagePlanCard
               key={view.id}
-              /*
-               * Premium is lime because it is the card being sold, not because
-               * of what the seller is on — that is how the design has it, and
-               * it is why Premium sits in the middle.
-               */
-              className="flex flex-col rounded-2xl p-5"
-              style={{
-                background: isPremium ? LIME : "#FAFAFA",
-                border: view.panel ? "2px solid #000000" : "1px solid #E9EBF2",
-                ...(isPremium
-                  ? { marginTop: "-14px", paddingTop: "26px", paddingBottom: "26px" }
-                  : {}),
-              }}
-            >
-              <span
-                className="inline-flex w-fit items-center gap-1.5 rounded-full bg-black px-3 py-1 text-[11px] font-medium text-white"
-                style={{ fontFamily: "Lufga" }}
-              >
-                {PACKAGE_ICON[view.id]}
-                {PACKAGE_LABELS[view.id].replace(" Package", "")}
-              </span>
-
-              <p
-                className="m-0 mt-3 text-[12px] leading-relaxed text-black/60"
-                style={{ fontFamily: "Lufga" }}
-              >
-                {card.blurb}
-              </p>
-
-              <p className="m-0 mt-3 text-[26px] font-bold" style={{ fontFamily: "Lufga" }}>
-                {packagePrice(option?.monthlyPrice ?? 0)}
-                <span className="text-[12px] font-normal text-black/50">/monthly</span>
-              </p>
-
-              <ul className="mt-4 mb-0 flex list-none flex-col gap-2 p-0">
-                {card.features.map((feature) => (
-                  <li
-                    key={feature}
-                    className="flex items-start gap-2 text-[12px] leading-snug"
-                    style={{ fontFamily: "Lufga" }}
-                  >
-                    <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              {view.panel && (
-                <div className="mt-4 overflow-hidden rounded-2xl">
-                  <PanelHeader panel={view.panel} />
-                  {view.panel.showCycles && (
-                    <BillingCycleChooser
+              id={view.id}
+              blurb={card.blurb}
+              features={card.features}
+              price={packagePrice(option?.monthlyPrice ?? 0)}
+              highlighted={isPremium}
+              footer={
+                <>
+                  {view.panel && (
+                    <CyclePanel
+                      title={view.panel.title}
+                      tone={view.panel.tone}
+                      showCycles={view.panel.showCycles}
                       value={cycleForPackage}
                       onChange={setPackageCycle}
                       disabled={busy}
-                      flush
+                      surface={isPremium ? LIME : "#FFFFFF"}
                     />
                   )}
-                </div>
-              )}
-
-              <button
-                type="button"
-                disabled={view.action.disabled || busy}
-                onClick={() => onPackageAction(view.id, view.action)}
-                className="mt-4 w-full rounded-full py-2.5 text-[13px] font-semibold disabled:cursor-default"
-                style={{ fontFamily: "Lufga", ...buttonStyle(view.action.tone, isPremium) }}
-              >
-                {view.action.label}
-              </button>
-            </div>
+                  {showButton && (
+                    <CardButton
+                      label={view.action.label}
+                      tone={cardTone(view.action.tone, isPremium)}
+                      disabled={view.action.disabled || busy}
+                      onClick={() => onPackageAction(view.id, view.action)}
+                    />
+                  )}
+                </>
+              }
+            />
           );
         })}
       </div>
 
       {/* Add-ons */}
-      <div className="mt-6 rounded-2xl bg-[#FAFAFA] p-5">
-        <h2 className="m-0 mb-4 text-[15px] font-semibold" style={{ fontFamily: "Lufga" }}>
-          Add-ons
-        </h2>
-        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-3">
-          {addonViews.map((view) => {
-            const card = ADDON_CARDS.find((entry) => entry.id === view.id);
-            const option = addonOptions.find((entry) => entry.id === view.id);
-            const isBundle = view.id === "BUNDLE";
-            if (!card) return null;
+      <AddonTray>
+        {addonViews.map((view) => {
+          const card = ADDON_CARDS.find((entry) => entry.id === view.id);
+          const option = addonOptions.find((entry) => entry.id === view.id);
+          const isBundle = view.id === "BUNDLE";
+          const surface = isBundle ? "lime" : view.id === "START_PAGE" ? "grey" : "plain";
+          if (!card) return null;
 
-            return (
-              <div
-                key={view.id}
-                className="flex flex-col rounded-2xl p-4"
-                style={{
-                  background: isBundle ? LIME : "#FFFFFF",
-                  border: view.panel ? "2px solid #000000" : "1px solid #E9EBF2",
-                }}
-              >
-                {isBundle && (
-                  <span
-                    className="mb-2 inline-flex w-fit rounded-full bg-black px-2.5 py-0.5 text-[10.5px] font-medium text-white"
-                    style={{ fontFamily: "Lufga" }}
-                  >
-                    Best Option
-                  </span>
-                )}
-                <p className="m-0 text-[22px] font-bold" style={{ fontFamily: "Lufga" }}>
-                  {addonPrice(option?.monthlyPrice ?? 0)}
-                  <span className="text-[11px] font-normal text-black/50">/monthly</span>
-                </p>
-
-                {/* A radio beside the name: filled on the card being worked on,
-                    as the design has it. */}
-                <p
-                  className="m-0 mt-1 flex items-center gap-2 text-[12.5px] font-semibold"
-                  style={{ fontFamily: "Lufga" }}
-                >
-                  <span
-                    className="inline-flex h-3.5 w-3.5 shrink-0 rounded-full border"
-                    style={{ borderColor: "#000000", borderWidth: view.radioOn ? "4px" : "1px" }}
-                    aria-hidden
+          return (
+            <AddonPlanCard
+              key={view.id}
+              price={addonPrice(option?.monthlyPrice ?? 0)}
+              name={addonDisplayName(view.id)}
+              description={card.description}
+              radioOn={view.radioOn}
+              surface={surface}
+              badge={isBundle ? <BlackBadge>Best Option</BlackBadge> : undefined}
+              footer={
+                <>
+                  {view.panel && (
+                    <CyclePanel
+                      title={view.panel.title}
+                      tone={view.panel.tone}
+                      showCycles={view.panel.showCycles}
+                      value={cycleForAddon}
+                      onChange={setAddonCycle}
+                      disabled={busy}
+                      surface={addonSurfaceColor(surface)}
+                    />
+                  )}
+                  <CardButton
+                    size="addon"
+                    label={view.action.label}
+                    tone={cardTone(view.action.tone, isBundle)}
+                    disabled={view.action.disabled || busy}
+                    onClick={() => onAddonAction(view.id, view.action)}
                   />
-                  {/* The design sets the bundle's name in caps; the billing
-                      records keep it in title case, so it is styling, not a
-                      second name. */}
-                  <span className={isBundle ? "uppercase" : undefined}>
-                    {ADDON_LABELS[view.id]}
-                  </span>
-                </p>
+                </>
+              }
+            />
+          );
+        })}
+      </AddonTray>
 
-                <p
-                  className="m-0 mt-1 text-[11.5px] leading-relaxed text-black/55"
-                  style={{ fontFamily: "Lufga" }}
-                >
-                  {card.description}
-                </p>
+      {/*
+        * What the seller is paying, one line per thing they pay for. With
+        * nothing paid for it reads as the design has it — "Select Items" and
+        * "Amount Due Today $0".
+        */}
+      <SummaryTable
+        rows={summary.rows.map((row) => ({
+          key: row.key,
+          item: row.item,
+          cycle: row.cycleLabel,
+          discount: row.discount > 0 ? `-${addonPrice(row.discount)} Discount` : "$0",
+          total: addonPrice(row.total),
+        }))}
+        totalLabel={summary.rows.length > 0 ? "Currently Paying" : "Amount Due Today"}
+        total={addonPrice(summary.total)}
+      />
 
-                {view.panel && (
-                  <div className="mt-3 overflow-hidden rounded-2xl">
-                    <PanelHeader panel={view.panel} />
-                    {view.panel.showCycles && (
-                      <BillingCycleChooser
-                        value={cycleForAddon}
-                        onChange={setAddonCycle}
-                        disabled={busy}
-                        flush
-                      />
-                    )}
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  disabled={view.action.disabled || busy}
-                  onClick={() => onAddonAction(view.id, view.action)}
-                  className="mt-3 w-full rounded-full py-2 text-[12.5px] font-semibold disabled:cursor-default"
-                  style={{ fontFamily: "Lufga", ...buttonStyle(view.action.tone, isBundle) }}
-                >
-                  {view.action.label}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div className="mt-6 overflow-x-auto">
-        <table className="w-full border-collapse text-[13px]" style={{ fontFamily: "Lufga" }}>
-          <thead>
-            <tr className="text-left text-black/70">
-              <th className="py-3 font-semibold">Item</th>
-              <th className="py-3 font-semibold">Billing Cycle</th>
-              <th className="py-3 font-semibold">Discount</th>
-              <th className="py-3 text-right font-semibold">Total</th>
-            </tr>
-          </thead>
-          <tbody className="text-black/60">
-            {summary.rows.length === 0 ? (
-              <tr className="border-t border-[#E9EBF2]">
-                <td className="py-3" colSpan={4}>
-                  This listing is on the free plan with no add-ons.
-                </td>
-              </tr>
-            ) : (
-              summary.rows.map((row) => (
-                <tr key={row.key} className="border-t border-[#E9EBF2]">
-                  <td className="py-3">{row.item}</td>
-                  <td className="py-3">{row.cycleLabel}</td>
-                  <td className="py-3">
-                    {row.discount > 0 ? `-${addonPrice(row.discount)} Discount` : "$0"}
-                  </td>
-                  <td className="py-3 text-right">{addonPrice(row.total)}</td>
-                </tr>
-              ))
-            )}
-            <tr className="border-t border-[#E9EBF2]">
-              <td className="py-3 font-semibold text-black" colSpan={3}>
-                Currently Paying
-              </td>
-              <td className="py-3 text-right font-semibold text-black">
-                {addonPrice(summary.total)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <button
-          type="button"
-          onClick={() => navigate("/my-listings")}
-          className="w-full rounded-full border border-[#E9EBF2] py-3 text-[13.5px] font-semibold sm:w-1/3"
-          style={{ fontFamily: "Lufga" }}
-        >
+      <div className="flex flex-col gap-[16px] sm:flex-row">
+        <PageButton primary={false} onClick={() => navigate("/my-listings")} className="sm:flex-1">
           Go back
-        </button>
-        <button
-          type="button"
+        </PageButton>
+        <PageButton
+          primary
           onClick={() => saveOpenChange?.()}
           disabled={!saveOpenChange || busy}
           title={
@@ -709,30 +588,23 @@ export const ListingPackageManager = ({
               ? undefined
               : "Open a package or a placement and choose what you want first"
           }
-          className="w-full rounded-full py-3 text-[13.5px] font-semibold text-black disabled:opacity-60 sm:flex-1"
-          style={{ fontFamily: "Lufga", background: LIME }}
+          className="sm:flex-1"
         >
           {busy ? "Saving…" : "Save Changes"}
-        </button>
+        </PageButton>
         {isDraft && (
-          <button
-            type="button"
+          <PageButton
+            primary
             onClick={() => navigate(`/dashboard/listing/${listingId}`)}
             disabled={busy}
-            className="w-full rounded-full py-3 text-[13.5px] font-semibold text-black disabled:opacity-60 sm:flex-1"
-            style={{ fontFamily: "Lufga", background: LIME }}
+            className="sm:flex-1"
           >
             Finish and publish this listing
-          </button>
+          </PageButton>
         )}
       </div>
 
-      <p
-        className="m-0 mt-4 text-center text-[11.5px] text-black/45"
-        style={{ fontFamily: "Lufga" }}
-      >
-        Plans renew automatically according to the selected billing cycle unless cancelled.
-      </p>
+      <RenewNote />
     </div>
   );
 };

@@ -261,7 +261,10 @@ const router = createBrowserRouter(
     },
   ],
   {
-    future: { v7_startTransition: true, v7_relativeSplatPath: true },
+    // Each flag where React Router reads it: this one belongs to the router,
+    // startTransition to the provider below. Both were set in both places, and
+    // each place ignored the one that was not its own.
+    future: { v7_relativeSplatPath: true },
   },
 );
 
@@ -279,7 +282,7 @@ const App = () => {
       <Suspense fallback={<PageLoader />}>
         <RouterProvider
           router={router}
-          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+          future={{ v7_startTransition: true }}
         />
       </Suspense>
     </QueryClientProvider>
