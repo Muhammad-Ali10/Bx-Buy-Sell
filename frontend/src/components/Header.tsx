@@ -132,11 +132,14 @@ const Header = ({
   const showExtras = !inColumn && !admin;
   const [favoritesCount, setFavoritesCount] = useState(0);
 
+  // Keyed on the account, not the record: the session check refreshes the
+  // stored record after load, and each new copy fetched the whole favourites
+  // list again only to count it.
   useEffect(() => {
     if (showExtras && isAuthenticated && user) {
       loadFavoritesCount();
     }
-  }, [showExtras, isAuthenticated, user]);
+  }, [showExtras, isAuthenticated, user?.id]);
 
   const loadFavoritesCount = async () => {
     if (!user) return;

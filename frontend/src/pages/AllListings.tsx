@@ -858,11 +858,44 @@ const AllListings = () => {
     });
   }, [listings.length, filteredListings.length, filters]);
 
+  /*
+   * A category page opens with its featured places: up to three listings of
+   * that category whose sellers pay for the Category Page placement (or the
+   * bundle), taken in turn on the server. Always these three at the top, as
+   * the client asked, whatever else is filtered; with fewer than three the
+   * list simply carries on below them. Asked for once each time a category is
+   * opened — each request is a view and moves the rotation on.
+   */
+  const [categoryFeatured, setCategoryFeatured] = useState<any[]>([]);
+  useEffect(() => {
+    const category = filters.niche;
+    setCategoryFeatured([]);
+    if (authLoading || !category || category === "all") return;
+    let cancelled = false;
+    apiClient
+      .getFeaturedListings("category", category)
+      .then((response) => {
+        if (!cancelled) {
+          setCategoryFeatured(response.success && Array.isArray(response.data) ? response.data : []);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.niche, authLoading]);
+
+  const featuredIds = new Set(categoryFeatured.map((listing) => String(listing.id)));
+  // Featured first, then everything else once — never the same listing twice.
+  const orderedListings = categoryFeatured.length
+    ? [...categoryFeatured, ...filteredListings.filter((listing) => !featuredIds.has(String(listing.id)))]
+    : filteredListings;
+
   // Pagination calculations
-  const totalPages = Math.ceil(filteredListings.length / itemsPerPage);
+  const totalPages = Math.ceil(orderedListings.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  const paginatedListings = filteredListings.slice(startIndex, endIndex);
+  const paginatedListings = orderedListings.slice(startIndex, endIndex);
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
@@ -1383,7 +1416,7 @@ const AllListings = () => {
                       marginBottom: "8px",
                     }}
                   >
-                    {filteredListings.length} Results
+                    {orderedListings.length} Results
                   </h2>
                   <p
                     className="font-lufga text-sm md:text-base"
@@ -1406,7 +1439,7 @@ const AllListings = () => {
                   <div className="flex justify-center items-center" style={{ height: "400px" }}>
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
                   </div>
-                ) : filteredListings.length > 0 ? (
+                ) : orderedListings.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {paginatedListings.map((listing, index) => {
                       // Extract data from brand questions
@@ -1612,6 +1645,7 @@ const AllListings = () => {
                           }
                           managedByEx={listing.managed_by_ex === true || listing.managed_by_ex === 1 || listing.managed_by_ex === 'true' || listing.managed_by_ex === '1'}
                           isPremium={showsPremiumBadge(listing)}
+                          featured={featuredIds.has(String(listing.id))}
                           listingId={listing.id}
                           sellerId={listing.userId || listing.user_id}
                           lockRedirectTo={listing?.lockAction?.redirectTo || '/pricing'}

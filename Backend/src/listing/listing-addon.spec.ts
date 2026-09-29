@@ -455,6 +455,9 @@ describe('listing placements', () => {
             packageAddons: ['BUNDLE'],
             featuredOnCategoryPage: true,
             featuredOnStartPage: true,
+            // Dated for the rotation order, from the add-on row.
+            startPageFeaturedSince: expect.any(Date),
+            categoryPageFeaturedSince: expect.any(Date),
           },
         });
       });

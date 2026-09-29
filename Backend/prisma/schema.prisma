@@ -526,6 +526,18 @@ model Listing {
   /// Its money in every currency, worked out ahead of time so filters and
   /// sorting never touch a live rate. See `src/fx/listing-fx.ts`.
   fx                          Json?
+  /// When the listing first went on the market. "Newest" and the Pro
+  /// early-access week count from here, not from `created_at`: a listing that
+  /// sat as a draft for weeks is new on the day it is published. Set once, on
+  /// the first publish; unset on a listing that never was.
+  published_at                DateTime?
+  /// Since when the listing has been featured on the start page / on its
+  /// category page without a break. The rotation keeps featured listings in
+  /// this order, so moving from a single placement to the bundle — which
+  /// replaces the add-on rows — does not send a listing to the back of the
+  /// cycle. Kept in step with the add-on rows; null while not featured.
+  startPageFeaturedSince      DateTime?
+  categoryPageFeaturedSince   DateTime?
   created_at                  DateTime                    @default(now())
   updated_at                  DateTime                    @updatedAt
   deleted_at                  DateTime?
@@ -533,6 +545,29 @@ model Listing {
   // Feed queries filter by status + userId and order by created_at desc.
   @@index([status, created_at])
   @@index([userId])
+}
+
+/// One person looking at a listing's page, counted at most once every 30
+/// days, for the Popular score. `viewerKey` is `user:<id>` for a member and
+/// `visitor:<id>` for a guest's browser. The seller and the team are never
+/// recorded.
+model ListingView {
+  id         String   @id @default(uuid()) @map("_id")
+  listingId  String
+  viewerKey  String
+  userId     String?
+  created_at DateTime @default(now())
+
+  @@index([listingId, created_at])
+  @@index([listingId, viewerKey])
+}
+
+/// How many times a featured placement has been shown: the start page, or
+/// one category page (`category:<name>`). Each view of the page takes the next
+/// number, and that number decides which three featured listings it shows.
+model PlacementCounter {
+  id         String   @id @map("_id")
+  value      Int      @default(0)
 }
 
 /// Where a buyer's request for the confidential details currently stands.

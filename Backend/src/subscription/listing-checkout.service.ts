@@ -1,3 +1,4 @@
+import { publishDateFor } from '../listing/published-at';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { listingPhrase, packageName } from '../activity-log/activity-log.catalog';
@@ -132,7 +133,10 @@ export class ListingCheckoutService {
      * pointing at it, because the listing records only the newer one.
      */
     const before = await this.db.listing
-      .findUnique({ where: { id: listingId }, select: { packageStripeSubscriptionId: true } })
+      .findUnique({
+        where: { id: listingId },
+        select: { packageStripeSubscriptionId: true, status: true, published_at: true },
+      })
       .catch(() => null);
 
     /*
@@ -168,6 +172,11 @@ export class ListingCheckoutService {
         pendingPackageCycle: null,
         pendingPackageChangeAt: null,
         status: 'PUBLISH',
+        // Paying is what puts a new listing on the market, so today is its
+        // publish date — unless it was published before.
+        ...(publishDateFor(before as any, 'PUBLISH')
+          ? { published_at: publishDateFor(before as any, 'PUBLISH') }
+          : {}),
       } as any,
     });
     this.logger.log(`Listing ${listingId}: package activated`);

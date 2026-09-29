@@ -1,4 +1,4 @@
-import { deriveAddonFlags } from './listing-addon.util';
+import { deriveAddonFlags, placementSince } from './listing-addon.util';
 import type { PaidAddonId } from './listing-addon.util';
 import type { BillingCycleId } from './package-pricing';
 
@@ -20,7 +20,11 @@ interface Db {
     deleteMany(args: any): Promise<any>;
     upsert(args: any): Promise<any>;
   };
-  listing: { update(args: any): Promise<any> };
+  listing: {
+    update(args: any): Promise<any>;
+    /** Optional so older test fakes still run; without it the rows alone date the placement. */
+    findUnique?(args: any): Promise<any>;
+  };
 }
 
 interface Stripe {
@@ -71,6 +75,16 @@ export async function activateAddonFromCheckout(
     }
   }
 
+  // Read before anything is replaced: the placement's start date is the oldest
+  // of these rows, and the bundle's own row is about to be brand new.
+  const [rowsBefore, current] = await Promise.all([
+    db.listingAddon.findMany({ where: { listingId } }),
+    db.listing.findUnique?.({
+      where: { id: listingId },
+      select: { startPageFeaturedSince: true, categoryPageFeaturedSince: true },
+    }) ?? null,
+  ]);
+
   const replaced = (params.replacesAddons || []).filter((id) => id && id !== addon);
   if (replaced.length > 0) {
     await db.listingAddon.deleteMany({
@@ -102,9 +116,13 @@ export async function activateAddonFromCheckout(
   // Put the listing's own summary fields back in step: the admin panel and the
   // feed read those, not these rows.
   const rows = await db.listingAddon.findMany({ where: { listingId } });
+  const flags = deriveAddonFlags(rows as any);
   await db.listing.update({
     where: { id: listingId },
-    data: deriveAddonFlags(rows as any) as any,
+    data: {
+      ...flags,
+      ...placementSince(flags, [...(rowsBefore || []), ...rows] as any, current),
+    } as any,
   });
 
   logger.log(`Listing ${listingId}: add-on ${addon} active on ${params.billingCycle}`);

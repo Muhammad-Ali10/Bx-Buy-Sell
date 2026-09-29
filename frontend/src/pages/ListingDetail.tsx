@@ -2,6 +2,7 @@ import { openListingChat } from "@/lib/openListingChat";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
+import { visitorId } from "@/lib/visitorId";
 import { isLockedValue, REGISTER_LOCK_LABEL } from "@/lib/listingLock";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -2620,6 +2621,21 @@ const ListingDetail = ({ embedded = false, adminLayout = false }: ListingDetailP
       cancelled = true;
     };
   }, [user, listing?.id, listing?.userId, listing?.user_id]);
+
+  /*
+   * One view of this listing, for the Popular score. Sent once per visit to
+   * the page; the server counts a person at most once a month, and never the
+   * seller or anyone on the team. A guest is told apart by an anonymous id
+   * kept in this browser.
+   */
+  const viewRecordedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!listing?.id || viewRecordedRef.current === listing.id) return;
+    viewRecordedRef.current = listing.id;
+    void apiClient
+      .recordListingView(listing.id, isAuthenticated ? null : visitorId())
+      .catch(() => undefined);
+  }, [listing?.id, isAuthenticated]);
 
   const { data: similarResult } = useQuery({
     // "v2" because this query used to resolve to a plain array; without it a

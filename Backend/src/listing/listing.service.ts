@@ -54,6 +54,19 @@ import {
   maskListingFor,
 } from './listing-visibility';
 import { ListingAddonService } from './listing-addon.service';
+import { addonIsLive } from './listing-addon.util';
+import {
+  counterKey,
+  cycleOrder,
+  isFeaturedOn,
+  nextTurn,
+  PLACEMENT_ADDONS,
+  rotationWindow,
+  type Placement,
+  type PlacementRow,
+} from './featured-rotation';
+import { POPULARITY_WINDOW_DAYS, popularityScores } from './popularity';
+import { newestPublishedFirst, publishDateFor, publishedAt, publishedWhere } from './published-at';
 import { ListingFxService } from '../fx/listing-fx.service';
 import {
   ensureRequestChat,
@@ -97,6 +110,41 @@ type ListingActivity = {
    */
   unanswered: number;
 };
+
+/**
+ * What a feed card reads. The detail + edit pages use findOne (which still
+ * includes everything), so tools/productQuestion/managementQuestion/
+ * social_account/handover are deliberately skipped — each omitted relation is
+ * one fewer round-trip to the database per feed load and a smaller payload.
+ * Shared by the feed and the featured places, which show the same cards.
+ */
+const FEED_INCLUDE = {
+  // Same shape as findOne, so a seller's identity is never richer on one
+  // endpoint than the other. The email address is deliberately absent —
+  // no screen shows it and contact runs through in-app chat.
+  user: {
+    select: {
+      id: true,
+      created_at: true,
+      first_name: true,
+      last_name: true,
+      profile_pic: true,
+      // Whether the seller has been through the identity check. The
+      // listing page drew an "ID Verified" badge beside every seller
+      // because it had nothing to consult; this is what it consults.
+      verified: true,
+    },
+  },
+  // Who on the team is looking after this listing, for the admin table.
+  responsible: {
+    select: { id: true, first_name: true, last_name: true, profile_pic: true },
+  },
+  brand: true,
+  category: true,
+  financials: true,
+  statistics: true,
+  advertisement: true,
+} as const;
 
 @Injectable()
 export class ListingService {
@@ -197,14 +245,6 @@ export class ListingService {
     return { deleteMany: {}, create: valid };
   }
 
-  private shuffleArray<T>(items: T[]): T[] {
-    const copy = [...items];
-    for (let i = copy.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
-    return copy;
-  }
 
 
   /**
@@ -873,14 +913,21 @@ export class ListingService {
         Date.now() - this.earlyAccessDays * 24 * 60 * 60 * 1000,
       );
 
-      if (resolvedViewer.userId) {
-        where.OR = [
-          { created_at: { lte: earlyAccessCutoff } },
-          { userId: resolvedViewer.userId },
-        ];
-      } else {
-        where.created_at = { lte: earlyAccessCutoff };
-      }
+      // Counted from the day it was published, not created. A featured
+      // listing is exempt: the client wants every featured listing shown
+      // exactly as often as the others, which it could not be while guests
+      // were kept from it for its first week.
+      const featured = await this.featuredListingIds();
+      where.AND = [
+        ...(where.AND ?? []),
+        {
+          OR: [
+            ...publishedWhere('lte', earlyAccessCutoff).OR,
+            ...(featured.length ? [{ id: { in: featured } }] : []),
+            ...(resolvedViewer.userId ? [{ userId: resolvedViewer.userId }] : []),
+          ],
+        },
+      ];
     }
     
     // Calculate pagination
@@ -888,76 +935,52 @@ export class ListingService {
     const limit = filters?.limit || 40; // Default cap — callers can pass a higher limit if needed
     const skip = (page - 1) * limit;
     
-    const isCategoryFeed = Boolean(filters?.category);
-    const featuredFlagKey = isCategoryFeed
-      ? 'featuredOnCategoryPage'
-      : 'featuredOnStartPage';
+    // The public feed is newest on the market first. Other lists — My
+    // Listings, the admin tables, which include drafts — keep creation order.
+    const byPublishDate = filters?.status === 'PUBLISH';
 
+    // Featured listings are no longer pinned to the top of this list: the
+    // start page and the category pages ask for theirs from `findFeatured`,
+    // which takes them in turn. All Listings itself is in plain order.
     const listings = await this.db.listing.findMany({
       where,
-      // Feed/card views only read these relations. The detail + edit pages use
-      // findOne (which still includes everything), so we deliberately skip
-      // tools/productQuestion/managementQuestion/social_account/handover here —
-      // each omitted relation is one fewer round-trip to the database per feed
-      // load and a smaller payload.
-      include: {
-        // Same shape as findOne, so a seller's identity is never richer on one
-        // endpoint than the other. The email address is deliberately absent —
-        // no screen shows it and contact runs through in-app chat.
-        user: {
-          select: {
-            id: true,
-            created_at: true,
-            first_name: true,
-            last_name: true,
-            profile_pic: true,
-            // Whether the seller has been through the identity check. The
-            // listing page drew an "ID Verified" badge beside every seller
-            // because it had nothing to consult; this is what it consults.
-            verified: true,
-          },
-        },
-        // Who on the team is looking after this listing, for the admin table.
-        responsible: {
-          select: { id: true, first_name: true, last_name: true, profile_pic: true },
-        },
-        brand: true,
-        category: true,
-        financials: true,
-        statistics: true,
-        advertisement: true,
-      },
+      include: FEED_INCLUDE,
       skip: skip > 0 ? skip : undefined,
       take: limit,
-      orderBy: {
-        created_at: 'desc', // Order by newest first
-      },
+      orderBy: byPublishDate
+        ? [{ published_at: 'desc' }, { created_at: 'desc' }]
+        : { created_at: 'desc' },
     });
 
-    // Rotate featured listings to balance visibility instead of always pinning
-    // the exact same records to the top.
-    const featuredListings = listings.filter(
-      (listing) => Boolean((listing as any)[featuredFlagKey]),
-    );
-    const nonFeaturedListings = listings.filter(
-      (listing) => !Boolean((listing as any)[featuredFlagKey]),
-    );
-    const rotatedListings = [
-      ...this.shuffleArray(featuredListings),
-      ...nonFeaturedListings,
-    ].map((listing) => trimListingFeedRecord(listing as Record<string, any>));
+    // Sorted again here for the listings from before `published_at`, which
+    // the database puts last and which count from their creation date.
+    const ordered = byPublishDate ? [...listings].sort(newestPublishedFirst) : listings;
+    return this.presentFeed(ordered, resolvedViewer);
+  }
+
+  /**
+   * Feed records as a viewer may see them: trimmed, masked, and with the
+   * figures the cards read — how many buyers have been in touch, and the
+   * Popular score.
+   */
+  private async presentFeed(listings: any[], viewer: ViewerContext) {
+    const trimmed = listings.map((listing) => trimListingFeedRecord(listing as Record<string, any>));
 
     // One query for every listing this viewer already has access to, rather
     // than one lookup per row.
     // trimListingFeedRecord widens the record, so read the id back as a string.
-    const listingIds = rotatedListings.map((listing) => String(listing.id));
-    const [accessibleIds, activity, guestStatistics] = await Promise.all([
-      this.confidentialAccessIds(listingIds, resolvedViewer.userId),
+    const listingIds = trimmed.map((listing) => String(listing.id));
+    const [accessibleIds, activity, guestStatistics, popularity] = await Promise.all([
+      this.confidentialAccessIds(listingIds, viewer.userId),
       this.listingActivityFor(listingIds),
-      this.guestStatisticsFor(resolvedViewer.userId),
+      this.guestStatisticsFor(viewer.userId),
+      popularityScores(
+        this.db as any,
+        trimmed.map((listing) => ({ id: String(listing.id), userId: listing.userId as string })),
+      ),
     ]);
 
-    return rotatedListings.map((listing) =>
+    return trimmed.map((listing) =>
       maskListingFor(
         {
           ...listing,
@@ -965,15 +988,141 @@ export class ListingService {
           // product read fields the API had never sent and fell back to zero.
           requests_count: activity.get(String(listing.id))?.requests ?? 0,
           unread_messages_count: activity.get(String(listing.id))?.unanswered ?? 0,
+          popularity_score: popularity.get(String(listing.id)) ?? 0,
         },
         {
-          userId: resolvedViewer.userId,
-          role: resolvedViewer.role,
+          userId: viewer.userId,
+          role: viewer.role,
           hasConfidentialAccess: accessibleIds.has(String(listing.id)),
           guestStatistics,
         },
       ),
     );
+  }
+
+  /** The placement rows that are live now, for the featured pages. */
+  private async livePlacementRows(): Promise<PlacementRow[]> {
+    const now = new Date();
+    const rows = await this.db.listingAddon.findMany({
+      where: { addon: { in: PLACEMENT_ADDONS } },
+      select: { listingId: true, addon: true, endsAt: true, created_at: true },
+    });
+    return rows.filter((row) => addonIsLive(row, now));
+  }
+
+  private featuredIdsCache: { at: number; ids: string[] } | null = null;
+
+  /**
+   * Every listing featured anywhere right now, for the early-access rule.
+   *
+   * Read at most every fifteen seconds: every feed load for a guest asks, and
+   * placements change only when someone pays or a placement runs out.
+   */
+  private async featuredListingIds(): Promise<string[]> {
+    const cached = this.featuredIdsCache;
+    if (cached && Date.now() - cached.at < 15_000) return cached.ids;
+    const rows = await this.livePlacementRows();
+    const candidates = [...new Set(rows.map((row) => row.listingId))];
+    const listings = candidates.length
+      ? await this.db.listing.findMany({
+          where: { id: { in: candidates } },
+          select: {
+            id: true,
+            featuredOnStartPage: true,
+            featuredOnCategoryPage: true,
+            selectedPackage: true,
+            packageActive: true,
+          },
+        })
+      : [];
+    const ids = listings
+      .filter(
+        (listing) =>
+          isFeaturedOn('start', listing, rows) || isFeaturedOn('category', listing, rows),
+      )
+      .map((listing) => listing.id);
+    this.featuredIdsCache = { at: Date.now(), ids };
+    return ids;
+  }
+
+  /**
+   * The featured listings one view of a page shows: the start page, or one
+   * category page. Each call is a view and takes the next turn of the
+   * rotation — see `featured-rotation.ts` — so it is never cached.
+   *
+   * Only listings on the market, whose seller is not blocked. The Pro
+   * early-access week does not apply here, by the client's rule that every
+   * featured listing is shown equally.
+   */
+  async findFeatured(placement: Placement, category: string | undefined, viewer?: ViewerContext) {
+    const resolvedViewer: ViewerContext = viewer || { viewerType: 'UNREGISTERED' };
+    const categoryName = String(category ?? '').trim();
+    if (placement === 'category' && !categoryName) return [];
+
+    const now = new Date();
+    const rows = await this.livePlacementRows();
+    const candidates = [...new Set(rows.map((row) => row.listingId))];
+    if (candidates.length === 0) return [];
+
+    const where: any = {
+      id: { in: candidates },
+      status: 'PUBLISH',
+      user: { blocked: false },
+    };
+    if (placement === 'category') where.category = { some: { name: categoryName } };
+
+    const [listings, turn] = await Promise.all([
+      this.db.listing.findMany({ where, include: FEED_INCLUDE }),
+      nextTurn(this.db as any, counterKey(placement, categoryName)),
+    ]);
+    const cycle = cycleOrder(
+      placement,
+      listings.filter((listing) => isFeaturedOn(placement, listing, rows, now)),
+      rows,
+      now,
+    );
+    return this.presentFeed(rotationWindow(cycle, turn), resolvedViewer);
+  }
+
+  /**
+   * One person opening a listing's page, for the Popular score.
+   *
+   * Counted at most once per person every 30 days: a member by their account,
+   * a guest by the id their browser keeps. The seller looking at their own
+   * listing, and anyone on the team, are not counted at all.
+   */
+  async recordView(
+    listingId: string,
+    viewer: { userId?: string | null; role?: string | null },
+    visitorId?: string | null,
+  ): Promise<{ counted: boolean }> {
+    if (viewer.userId && this.isStaffRole(viewer.role)) return { counted: false };
+    const visitor = String(visitorId ?? '').trim();
+    const viewerKey = viewer.userId
+      ? `user:${viewer.userId}`
+      : /^[A-Za-z0-9-]{8,64}$/.test(visitor)
+        ? `visitor:${visitor}`
+        : null;
+    if (!viewerKey) return { counted: false };
+
+    const listing = await this.db.listing.findUnique({
+      where: { id: listingId },
+      select: { id: true, userId: true, status: true },
+    });
+    if (!listing || listing.status !== 'PUBLISH') return { counted: false };
+    if (viewer.userId && viewer.userId === listing.userId) return { counted: false };
+
+    const since = new Date(Date.now() - POPULARITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const already = await this.db.listingView.findFirst({
+      where: { listingId, viewerKey, created_at: { gte: since } },
+      select: { id: true },
+    });
+    if (already) return { counted: false };
+
+    await this.db.listingView.create({
+      data: { listingId, viewerKey, userId: viewer.userId ?? null },
+    });
+    return { counted: true };
   }
 
   /**
@@ -1140,8 +1289,15 @@ export class ListingService {
     const resolvedViewer: ViewerContext = viewer || { viewerType: 'UNREGISTERED' };
     const cutoff = new Date(Date.now() - this.earlyAccessDays * 24 * 60 * 60 * 1000);
 
+    // A featured listing is not off the market: the early-access week does
+    // not apply to it (see findAll).
+    const featured = await this.featuredListingIds();
     const listings = await this.db.listing.findMany({
-      where: { status: 'PUBLISH', created_at: { gt: cutoff } },
+      where: {
+        status: 'PUBLISH',
+        ...publishedWhere('gt', cutoff),
+        ...(featured.length ? { id: { notIn: featured } } : {}),
+      },
       include: {
         user: {
           select: {
@@ -1162,14 +1318,14 @@ export class ListingService {
         statistics: true,
         advertisement: true,
       },
-      orderBy: { created_at: 'desc' },
+      orderBy: [{ published_at: 'desc' }, { created_at: 'desc' }],
       take: 12,
     });
 
     /** Whole days until this listing becomes public; never below one. */
-    const daysLeft = (createdAt: Date) => {
+    const daysLeft = (published: Date) => {
       const goesPublic =
-        new Date(createdAt).getTime() + this.earlyAccessDays * 24 * 60 * 60 * 1000;
+        new Date(published).getTime() + this.earlyAccessDays * 24 * 60 * 60 * 1000;
       return Math.max(1, Math.ceil((goesPublic - Date.now()) / (24 * 60 * 60 * 1000)));
     };
 
@@ -1205,7 +1361,7 @@ export class ListingService {
             answer?: unknown;
           }>,
         ),
-        daysRemaining: daysLeft(listing.created_at),
+        daysRemaining: daysLeft(publishedAt(listing) ?? listing.created_at),
         // Locked for anyone without early access — except on their own
         // listing. A seller who has not bought Premium was being sent to the
         // pricing page to open an advertisement they wrote themselves.
@@ -1267,7 +1423,12 @@ export class ListingService {
         Date.now() - this.earlyAccessDays * 24 * 60 * 60 * 1000,
       );
       const isOwner = resolvedViewer.userId === listing.userId;
-      if (!isOwner && listing.created_at > earlyAccessCutoff) {
+      const published = publishedAt(listing) ?? listing.created_at;
+      if (
+        !isOwner &&
+        published > earlyAccessCutoff &&
+        !(await this.featuredListingIds()).includes(listing.id)
+      ) {
         return null;
       }
     }
@@ -1960,6 +2121,8 @@ export class ListingService {
     const createData: any = {
       portfolioLink: body.portfolioLink ? body.portfolioLink : undefined,
       status: body.status,
+      // Published straight away: that is the day it went on the market.
+      published_at: publishDateFor(null, body.status),
       user: {
         connect: { id: userId },
       },
@@ -2145,7 +2308,7 @@ export class ListingService {
      */
     const existing = await this.db.listing.findUnique({
       where: { id },
-      select: { userId: true, status: true },
+      select: { userId: true, status: true, published_at: true },
     });
     if (!existing) {
       throw new NotFoundException('Listing not found');
@@ -2361,6 +2524,9 @@ export class ListingService {
     // Always include status if provided
     if (body.status) {
       updateData.status = body.status;
+
+      const firstPublished = publishDateFor(existing, body.status);
+      if (firstPublished) updateData.published_at = firstPublished;
 
       if (body.status === 'SOLD') {
         // The business is sold, so the seller must stop being billed for it.

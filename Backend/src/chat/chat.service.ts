@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { ChatLabelType, MessageType, Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { listingsById } from 'src/listing/listings-by-id';
 import { RedisAdapterService } from 'src/redis-adapter/redis-adapter.service';
 
 @Injectable()
@@ -541,21 +542,54 @@ export class ChatService {
   };
 
   async getChatRoomsBySellerId(sellerId: string) {
-    const chats = await this.db.chat.findMany({
-      where: { sellerId },
-      include: this.conversationRoomInclude,
-      orderBy: { updatedAt: 'desc' },
-    });
-    return this.attachViewerState(chats, sellerId);
+    return this.conversationRooms({ sellerId }, sellerId);
   }
 
   async getChatRoomsByUserId(userId: string) {
-    const chats = await this.db.chat.findMany({
-      where: { userId },
-      include: this.conversationRoomInclude,
-      orderBy: { updatedAt: 'desc' },
-    });
-    return this.attachViewerState(chats, userId);
+    return this.conversationRooms({ userId }, userId);
+  }
+
+  /**
+   * The rooms of a conversation list, shaped as `conversationRoomInclude`
+   * shapes them, fetched in two waits instead of about ten.
+   *
+   * Through the include, Prisma on MongoDB asked for the people, the labels,
+   * the last message, the listing and each of the listing's relations one
+   * after another, a database trip each. From the server a trip is roughly
+   * 140 ms, so the list took about a second and a half to answer and Chat sat
+   * empty all that while. Once the rooms are known everything else is keyed by
+   * what they hold, so it goes out at once.
+   */
+  private async conversationRooms(where: Prisma.ChatWhereInput, viewerId: string) {
+    const chats = await this.db.chat.findMany({ where, orderBy: { updatedAt: 'desc' } });
+    if (chats.length === 0) return [];
+    const chatIds = chats.map((chat) => chat.id);
+    const peopleIds = [...new Set(chats.flatMap((chat) => [chat.userId, chat.sellerId]))];
+
+    const [withViewerState, people, labels, latest, listings] = await Promise.all([
+      this.attachViewerState(chats, viewerId),
+      this.db.user.findMany({
+        where: { id: { in: peopleIds } },
+        select: this.conversationRoomInclude.user.select,
+      }),
+      this.db.chatLabel.findMany({ where: { chatId: { in: chatIds } } }),
+      this.db.chat.findMany({
+        where: { id: { in: chatIds } },
+        select: { id: true, messages: this.conversationRoomInclude.messages },
+      }),
+      listingsById(this.db, chats.map((chat) => chat.listingId), ['brand', 'advertisement', 'category']),
+    ]);
+
+    const personById = new Map(people.map((person) => [person.id, person] as const));
+    const messagesByChat = new Map(latest.map((row) => [row.id, row.messages] as const));
+    return withViewerState.map((chat) => ({
+      ...chat,
+      user: personById.get(chat.userId) ?? null,
+      seller: personById.get(chat.sellerId) ?? null,
+      chatLabels: labels.filter((label) => label.chatId === chat.id),
+      messages: messagesByChat.get(chat.id) ?? [],
+      listing: (chat.listingId && listings.get(chat.listingId)) || null,
+    }));
   }
 
   /**

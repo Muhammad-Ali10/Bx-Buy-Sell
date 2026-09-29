@@ -22,6 +22,7 @@ import {
   addonPurchaseBlockedReason,
   addonsReplacedBy,
   deriveAddonFlags,
+  placementSince,
   type PaidAddonId,
 } from './listing-addon.util';
 import {
@@ -64,10 +65,17 @@ export class ListingAddonService {
    * of changes that can leave them saying something the rows do not.
    */
   private async sync(listingId: string) {
-    const rows = await this.db.listingAddon.findMany({ where: { listingId } });
+    const [rows, current] = await Promise.all([
+      this.db.listingAddon.findMany({ where: { listingId } }),
+      this.db.listing.findUnique({
+        where: { id: listingId },
+        select: { startPageFeaturedSince: true, categoryPageFeaturedSince: true },
+      }),
+    ]);
+    const flags = deriveAddonFlags(rows as any);
     await this.db.listing.update({
       where: { id: listingId },
-      data: deriveAddonFlags(rows as any) as any,
+      data: { ...flags, ...placementSince(flags, rows as any, current) } as any,
     });
   }
 
@@ -128,6 +136,8 @@ export class ListingAddonService {
         packageAddons: true,
         featuredOnCategoryPage: true,
         featuredOnStartPage: true,
+        startPageFeaturedSince: true,
+        categoryPageFeaturedSince: true,
       },
     });
     if (!listing) return;
@@ -139,7 +149,10 @@ export class ListingAddonService {
       sorted(listing.packageAddons || []) === sorted(want.packageAddons);
     if (agrees) return;
 
-    await this.db.listing.update({ where: { id: listingId }, data: want as any });
+    await this.db.listing.update({
+      where: { id: listingId },
+      data: { ...want, ...placementSince(want, rows as any, listing) } as any,
+    });
     this.logger.log(
       `Listing ${listingId}: placement flags corrected to ${JSON.stringify(want)}`,
     );

@@ -56,6 +56,52 @@ export function deriveAddonFlags(
   };
 }
 
+export interface PlacementSince {
+  startPageFeaturedSince: Date | null;
+  categoryPageFeaturedSince: Date | null;
+}
+
+type DatedAddonRow = AddonRowLike & { created_at?: Date | string | null };
+
+/** The oldest live row that grants a placement: when it began. */
+export function earliestGrant(
+  rows: DatedAddonRow[],
+  grants: (addon: string) => boolean,
+  now: Date = new Date(),
+): Date | null {
+  const times = (rows || [])
+    .filter((row) => grants(row.addon) && addonIsLive(row, now) && row.created_at)
+    .map((row) => new Date(row.created_at as any).getTime())
+    .filter(Number.isFinite);
+  return times.length ? new Date(Math.min(...times)) : null;
+}
+
+/**
+ * Since when each placement has run without a break, for the rotation order.
+ *
+ * Kept from before while the placement carries on, so buying the bundle —
+ * which deletes the single placement's row and writes a new one — leaves the
+ * listing where it was in the cycle. `rows` should include any rows about to
+ * be replaced, for a listing that has no date stored yet.
+ */
+export function placementSince(
+  flags: Pick<DerivedAddonFlags, 'featuredOnStartPage' | 'featuredOnCategoryPage'>,
+  rows: DatedAddonRow[],
+  previous?: Partial<PlacementSince> | null,
+  now: Date = new Date(),
+): PlacementSince {
+  return {
+    startPageFeaturedSince: flags.featuredOnStartPage
+      ? (previous?.startPageFeaturedSince ?? earliestGrant(rows, addonGrantsStartPage, now) ?? now)
+      : null,
+    categoryPageFeaturedSince: flags.featuredOnCategoryPage
+      ? (previous?.categoryPageFeaturedSince ??
+        earliestGrant(rows, addonGrantsCategoryPage, now) ??
+        now)
+      : null,
+  };
+}
+
 /**
  * The placements a new add-on takes the place of.
  *

@@ -135,7 +135,11 @@ describe('a package the seller has paid for', () => {
     await service.applyFromSession(packageSession());
 
     expect(updates).toHaveLength(2);
-    expect(updates[1]).toEqual(updates[0]);
+    // Except the publish date, written only the first time: a listing goes on
+    // the market once, and a repeat of the same checkout must not move it.
+    const { published_at: publishedAt, ...first } = updates[0] as any;
+    expect(publishedAt).toBeInstanceOf(Date);
+    expect(updates[1]).toEqual(first);
   });
 });
 

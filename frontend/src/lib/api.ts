@@ -66,6 +66,26 @@ class ApiClient {
     this.bearerToken = bearerToken;
   }
 
+  private inFlight = new Map<string, Promise<ApiResponse<any>>>();
+
+  /**
+   * One network request for callers asking the same thing at the same moment.
+   *
+   * `useAuth` is a hook, not a context, so the header, the sidebar and the page
+   * each confirm the session on mount — four identical `/user/:id` requests on
+   * one page load, and two of `/user/favourite`, each paying the full trip to
+   * the database. Callers arriving while one is on its way now wait for that
+   * one. Nothing is kept once it lands, so the next call still asks afresh.
+   */
+  private shared<T = any>(endpoint: string): Promise<ApiResponse<T>> {
+    const key = `${localStorage.getItem('auth_token') ?? ''} ${endpoint}`;
+    const pending = this.inFlight.get(key);
+    if (pending) return pending as Promise<ApiResponse<T>>;
+    const request = this.request<T>(endpoint).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, request);
+    return request;
+  }
+
   /**
    * Public, not private: the subscription and pricing screens call it directly
    * for endpoints that have no helper of their own. `T` defaults to `any` so a
@@ -686,6 +706,25 @@ class ApiClient {
   /** Listings still in their early-access window, with days until they go public. */
   async getOffMarketListings() {
     return this.request('/listing/off-market', { method: 'GET' });
+  }
+
+  /**
+   * The featured listings for this view of the start page, or of one
+   * category. Every call is a page view and moves the rotation on, so call it
+   * once per time the page is shown — never to refresh or poll.
+   */
+  async getFeaturedListings(placement: 'start' | 'category', category?: string) {
+    const query = new URLSearchParams({ placement });
+    if (category) query.set('category', category);
+    return this.request<any[]>(`/listing/featured?${query.toString()}`, { method: 'GET' });
+  }
+
+  /** Someone opened a listing's page: counted once a month per person, for Popular. */
+  async recordListingView(listingId: string, visitorId?: string | null) {
+    return this.request(`/listing/${listingId}/view`, {
+      method: 'POST',
+      body: JSON.stringify({ visitorId: visitorId ?? undefined }),
+    });
   }
 
   /** Moderator queue of proof-of-funds cases, with the verified total. */
@@ -1409,7 +1448,7 @@ class ApiClient {
   }
 
   async getUserById(id: string) {
-    return this.request(`/user/${id}`);
+    return this.shared(`/user/${id}`);
   }
 
   async updateUser(id: string, userData: {
@@ -1574,7 +1613,7 @@ class ApiClient {
 
   // Favorites endpoints
   async getFavorites() {
-    return this.request('/user/favourite');
+    return this.shared('/user/favourite');
   }
 
   async getFavoritesByUserId(userId: string) {

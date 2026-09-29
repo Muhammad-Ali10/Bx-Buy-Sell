@@ -392,6 +392,9 @@ const BILLING_FIELDS = [
   'packageAddons',
   'successFeePercent',
   'addonEndsAt',
+  // When a seller started paying for a placement.
+  'startPageFeaturedSince',
+  'categoryPageFeaturedSince',
 ] as const;
 
 // `selectedPackage` deliberately stays public: the listing cards read it to

@@ -3,7 +3,7 @@ import { openListingChat } from "@/lib/openListingChat";
 import { orUnknown } from "@/lib/emptyValue";
 import { isLockedValue } from "@/lib/listingLock";
 import {  } from "@/lib/financialTableUtils";
-import { Heart, Share2, Crown, Lock } from "lucide-react";
+import { Heart, Share2, Crown, Lock, Star } from "lucide-react";
 import { LISTING_TITLE_COLOR } from "@/lib/listingTitle";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -34,6 +34,11 @@ interface ListingCardProps {
   managedByEx?: boolean;
   /** Seller booked the Premium package — shown as a badge on the listing. */
   isPremium?: boolean;
+  /**
+   * Shown in one of a category page's paid featured places. Marked, so a buyer
+   * can tell a paid place from the list below it.
+   */
+  featured?: boolean;
   listingId?: string;
   sellerId?: string;
   /**
@@ -64,6 +69,7 @@ const ListingCard = ({
   revenue,
   managedByEx = false,
   isPremium = false,
+  featured = false,
   listingId,
   sellerId,
   hideContactSeller = false,
@@ -337,6 +343,26 @@ const ListingCard = ({
           * the image rather than pushing anything off the bottom.
           */}
         <div className="absolute bottom-4 left-4 right-4 flex flex-wrap gap-2">
+          {featured && (
+            <Badge
+              variant="dark"
+              className="border-0 shadow-lg flex items-center justify-center gap-1.5"
+              style={{
+                height: "36px",
+                borderRadius: "60px",
+                padding: "7px 14px",
+                backdropFilter: "blur(44px)",
+              }}
+            >
+              <Star className="w-4 h-4" />
+              <span
+                className="font-lufga"
+                style={{ fontWeight: 500, fontSize: "14px", lineHeight: "140%" }}
+              >
+                Featured
+              </span>
+            </Badge>
+          )}
           {isPremium && (
             <Badge
               variant="dark"

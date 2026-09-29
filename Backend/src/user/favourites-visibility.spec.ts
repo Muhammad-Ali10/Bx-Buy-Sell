@@ -11,21 +11,22 @@ describe('photos on the Favourites page', () => {
   const build = (accessStatus: 'APPROVED' | 'PENDING' | null) => {
     const db = {
       favourite: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            id: 'f1',
-            listing: {
-              id: 'l1',
-              userId: 'seller-1',
-              status: 'PUBLISH',
-              category: [{ name: 'Software' }],
-              advertisement: [{ question: 'Photos', answer: JSON.stringify([PHOTO]), answer_type: 'PHOTO' }],
-              brand: [],
-              financials: [],
-              statistics: [],
-            },
-          },
-        ]),
+        findMany: jest.fn().mockResolvedValue([{ id: 'f1', listingId: 'l1' }]),
+      },
+      listing: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'l1', userId: 'seller-1', status: 'PUBLISH' }]),
+      },
+      listingCategory: {
+        findMany: jest.fn().mockResolvedValue([{ listingId: 'l1', name: 'Software' }]),
+      },
+      revenue: { findMany: jest.fn().mockResolvedValue([]) },
+      // Answered by which listing column the query asks about, as the database would.
+      listingQuestion: {
+        findMany: jest.fn(async ({ where }) =>
+          where.advertisementId
+            ? [{ advertisementId: 'l1', question: 'Photos', answer: JSON.stringify([PHOTO]), answer_type: 'PHOTO' }]
+            : [],
+        ),
       },
       listingConfidentialAccess: {
         findMany: jest.fn().mockResolvedValue(accessStatus ? [{ listingId: 'l1', status: accessStatus }] : []),

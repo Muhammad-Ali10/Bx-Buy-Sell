@@ -122,6 +122,54 @@ export class ListingController {
     return data;
   }
 
+  /**
+   * The featured listings for one view of the start page or a category page.
+   *
+   * Never cached, here or in the browser: every call is a page view and moves
+   * the rotation on by one, which is how each featured listing gets the same
+   * number of views. Declared above @Get(':id') for the reason given below.
+   */
+  @Public()
+  @Get('featured')
+  @ApiOperation({ summary: 'Featured listings for one page view, taken in turn' })
+  @ApiQuery({ name: 'placement', required: false, description: 'start (default) or category' })
+  @ApiQuery({ name: 'category', required: false, description: 'Category name, for placement=category' })
+  async findFeatured(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Query('placement') placement?: string,
+    @Query('category') category?: string,
+  ) {
+    const currentUser = (req as any).user;
+    const viewer = await this.listingService.resolveViewerContext(
+      currentUser?.id,
+      currentUser?.role,
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    return this.listingService.findFeatured(
+      placement === 'category' ? 'category' : 'start',
+      category,
+      viewer,
+    );
+  }
+
+  /** Someone opened the listing's page — counted for the Popular score. */
+  @Public()
+  @Post(':id/view')
+  @ApiParam({ name: 'id', type: String, description: 'Listing Id', required: true })
+  async recordView(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Body() body: { visitorId?: string },
+  ) {
+    const currentUser = (req as any).user;
+    return this.listingService.recordView(
+      id,
+      { userId: currentUser?.id, role: currentUser?.role },
+      body?.visitorId,
+    );
+  }
+
   // Declared above @Get(':id') on purpose — Nest matches in order, so the
   // wildcard would otherwise swallow "off-market" as an id.
   @Public()

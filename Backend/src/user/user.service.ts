@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { trimListingFeedRecord } from 'common/util/trim-listing-feed.util';
 import { canViewBlockedListing, grantsConfidentialAccess, maskListingFor } from '../listing/listing-visibility';
+import { listingsById } from '../listing/listings-by-id';
 import type { UpdateUserType, UserType } from './dto/user.dto';
 import type {
   UpdateAdminUserType,
@@ -299,7 +300,7 @@ export class UserService {
    *               member would see them rather than as a moderator.
    */
   async getAllFavourite(id: string, viewer?: { userId?: string; role?: string }) {
-    const rows = await this.db.favourite.findMany({
+    const saved = await this.db.favourite.findMany({
       where: {
         userId: `${id}`,
       },
@@ -314,45 +315,36 @@ export class UserService {
        * so it belongs at the top.
        */
       orderBy: { created_at: 'desc' },
-      // The favourites grid renders the same card as the feed, so it only needs
-      // these relations. Skipping tools/productQuestion/managementQuestion/
-      // social_account/handover means fewer DB round-trips per favourite. The
-      // user is narrowed to safe public fields (never password_hash/refresh_token).
-      include: {
-        listing: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                created_at: true,
-                first_name: true,
-                last_name: true,
-                profile_pic: true,
-              },
-            },
-            brand: true,
-            advertisement: true,
-            category: true,
-            financials: true,
-            statistics: true,
-          },
-        },
-      },
     });
+    const listingIds = [...new Set(saved.map((row) => row.listingId).filter(Boolean))];
 
+    // The favourites grid renders the same card as the feed, so it only needs
+    // these relations. Skipping tools/productQuestion/managementQuestion/
+    // social_account/handover means fewer DB round-trips per favourite. The
+    // user is narrowed to safe public fields (never password_hash/refresh_token).
+    //
+    // Fetched beside the listings rather than through an include, which on
+    // MongoDB waits for each relation in turn — see `listingsById`. The
+    // agreements go out in the same wave.
+    //
     // Favouriting a listing grants no extra sight of it, so these run through
     // the same rules as the feed. One query covers every agreement this user
     // has already accepted.
-    const listingIds = rows
-      .map((row) => row.listing?.id)
-      .filter((listingId): listingId is string => Boolean(listingId));
-
-    const accessRows = listingIds.length
-      ? await this.db.listingConfidentialAccess.findMany({
-          where: { buyerId: id, listingId: { in: listingIds } },
-          select: { listingId: true, status: true },
-        })
-      : [];
+    const [listings, accessRows] = listingIds.length
+      ? await Promise.all([
+          listingsById(
+            this.db,
+            listingIds,
+            ['brand', 'advertisement', 'category', 'financials', 'statistics'],
+            { id: true, created_at: true, first_name: true, last_name: true, profile_pic: true },
+          ),
+          this.db.listingConfidentialAccess.findMany({
+            where: { buyerId: id, listingId: { in: listingIds } },
+            select: { listingId: true, status: true },
+          }),
+        ])
+      : [new Map<string, any>(), []];
+    const rows = saved.map((row) => ({ ...row, listing: listings.get(row.listingId) ?? null }));
     // Unlocked only once the seller has approved — the rule the listing page
     // uses. Any row used to count, so a request still waiting showed the
     // photos here that the listing itself kept blurred.

@@ -31,12 +31,15 @@ import { showsPremiumBadge } from "@/lib/packageContent";
  * The listings on the home page: three rows, Popular, Featured and Newest,
  * each with a link to the full list. They replaced a single grid of six
  * under a row of category pills. How each row is chosen, and why no listing
- * appears in two of them, is in homeSections.ts. All three come from the one
- * feed request below.
+ * appears in two of them, is in homeSections.ts. Popular and Newest come from
+ * the feed; Featured from its own request, which takes the paid placements in
+ * turn.
  */
 const Listings = () => {
   const viewerCurrency = useDisplayCurrency();
   const [listings, setListings] = useState<any[]>([]);
+  // The three featured listings this view shows, chosen on the server.
+  const [featured, setFeatured] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const { isAuthenticated, loading: authLoading } = useAuth();
 
@@ -69,9 +72,17 @@ const Listings = () => {
        * a browser at all, rather than being fetched and hidden.
        */
       const feedParams = { status: 'PUBLISH', limit: 1000 };
-      const response = isAuthenticated
-        ? await apiClient.getSecureListings(feedParams)
-        : await apiClient.getListings(feedParams); // Cached public feed (TTL ~10s, purged on create/update/delete)
+      // Featured is asked for once per time the page is shown: each request
+      // is a view, and moves the rotation on to the next three.
+      const [response, featuredResponse] = await Promise.all([
+        isAuthenticated
+          ? apiClient.getSecureListings(feedParams)
+          : apiClient.getListings(feedParams), // Cached public feed (TTL ~10s, purged on create/update/delete)
+        apiClient.getFeaturedListings("start"),
+      ]);
+      setFeatured(
+        featuredResponse.success && Array.isArray(featuredResponse.data) ? featuredResponse.data : [],
+      );
       console.log("📦 API Response (ALL):", response);
 
       if (response.success) {
@@ -433,7 +444,7 @@ const Listings = () => {
     );
   };
 
-  const sections = pickHomeSections(listings);
+  const sections = pickHomeSections(listings, featured);
   // Shown in the design's order. A row with nothing in it is left out —
   // Featured in particular, which only holds placements sellers paid for.
   const rows = [

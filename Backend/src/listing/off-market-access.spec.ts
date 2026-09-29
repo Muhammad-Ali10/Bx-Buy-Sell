@@ -32,6 +32,8 @@ describe('Off-market early access', () => {
         findMany: jest.fn(async () => [listing('l-own', OWNER), listing('l-other', OTHER)]),
       },
       listingConfidentialAccess: { findMany: jest.fn(async () => []) },
+      // No featured placements: every listing here is inside its Pro week.
+      listingAddon: { findMany: jest.fn(async () => []) },
       chat: { findMany: jest.fn(async () => []) },
       listingConfidentialRequest: { findMany: jest.fn(async () => []) },
     };
