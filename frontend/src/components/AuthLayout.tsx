@@ -43,9 +43,8 @@ const StepProgress = ({ currentStep, totalSteps }: { currentStep: number; totalS
     {Array.from({ length: totalSteps }).map((_, idx) => (
       <div
         key={idx}
-        className={`h-1 w-14 sm:w-16 rounded-full transition-colors ${
-          idx + 1 === currentStep ? "bg-accent" : "bg-border"
-        }`}
+        className={`h-1 w-14 sm:w-16 rounded-full transition-colors ${idx + 1 === currentStep ? "bg-accent" : "bg-border"
+          }`}
       />
     ))}
   </div>
@@ -76,7 +75,7 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
     return (
       <div className="min-h-screen flex flex-col lg:flex-row bg-[#19181F]">
         {/* Left Panel - Background Image (50% width) */}
-        <div 
+        <div
           className="hidden lg:flex w-1/2 relative overflow-hidden"
           style={{
             minHeight: '100vh',
@@ -113,16 +112,16 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
         </div>
 
         {/* Right Panel - Login Form (50% width) */}
-        <div 
+        <div
           className="flex-1 lg:w-1/2 flex flex-col p-8 lg:p-16 bg-white"
           style={{
             minHeight: '100vh',
           }}
         >
           <Link to="/" className="mb-8">
-            <img 
-              src={logo} 
-              alt="EX Logo" 
+            <img
+              src={logo}
+              alt="EX Logo"
               className="h-16 w-16 object-contain"
               decoding="async"
               sizes="64px"
@@ -148,9 +147,9 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
       {/* Left Panel - Form */}
       <div className="flex-1 flex flex-col p-8 lg:p-16 bg-background">
         <Link to="/" className="mb-8">
-          <img 
-            src={logo} 
-            alt="EX Logo" 
+          <img
+            src={logo}
+            alt="EX Logo"
             className="h-16 w-16 object-contain"
             decoding="async"
             sizes="64px"
@@ -168,7 +167,7 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
       </div>
 
       {/* Right Panel - Background & Testimonial */}
-      <div 
+      <div
         className="hidden lg:flex flex-1 relative items-end p-16 bg-cover bg-center"
         style={{ backgroundImage: `url(${authBackground})` }}
       >
@@ -176,7 +175,7 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
 
         {/* Frosted squares drifting over the photo, as in the design. Decorative
             only, so they are hidden from assistive tech and ignore pointers. */}
-        {/* <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
           {[
             { top: "6%", right: "8%", size: 96 },
             { top: "14%", right: "20%", size: 56 },
@@ -196,14 +195,14 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
               }}
             />
           ))}
-        </div> */}
+        </div>
 
         <div className="relative z-10 max-w-2xl">
           <div className="backdrop-blur-xl bg-background/10 rounded-3xl p-8 border border-white/20">
             <blockquote className="text-white text-2xl font-medium mb-8 leading-relaxed">
               "{testimonials[activeTestimonial].quote}"
             </blockquote>
-            
+
             <div className="space-y-2">
               <h3 className="text-white text-xl font-semibold">
                 {testimonials[activeTestimonial].title}
