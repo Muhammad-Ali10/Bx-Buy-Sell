@@ -334,7 +334,11 @@ const Chat = () => {
               selectedConversation={selectedConversation}
               onSelectConversation={handleSelectConversation}
               userId={user.id}
-                refreshTrigger={`${selectedConversation || ""}-${listRefreshToken}`} // Trigger refresh when conversation changes or label updates
+                // Only a label change asks the list to refresh. Opening a
+                // conversation used to as well, so every click refetched the
+                // whole list while the conversation itself was loading; its
+                // unread badge is now cleared in the cache when it is read.
+                refreshTrigger={listRefreshToken ? String(listRefreshToken) : null}
               onConversationDeleted={handleConversationDeleted}
             />
           </div>

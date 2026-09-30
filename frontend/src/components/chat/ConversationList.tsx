@@ -30,7 +30,7 @@ import {
 } from "@/lib/chatListFilters";
 import { ChatLabelChip } from "./ChatLabelChip";
 import { cn } from "@/lib/utils";
-import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
+import { createSocketConnection, getSessionSocket, getWebSocketUrl, holdUserRoom } from "@/lib/socket";
 import { Socket } from "socket.io-client";
 import { callLogLabel } from "@/lib/callLog";
 
@@ -129,27 +129,26 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
   });
 
   useEffect(() => {
-    // Set up WebSocket connection for real-time updates
-    // NOTE: ConversationList socket does NOT join any rooms - it only listens for updates
-    const socket = createSocketConnection({
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-    });
-    
+    // The session's connection, shared with the chat window and the call
+    // ringer; this list opened a socket of its own before. It joins no chat
+    // room — it only listens for updates. Its own socket only when the
+    // session has none.
+    const sharedSocket = getSessionSocket();
+    const socket =
+      sharedSocket ??
+      createSocketConnection({
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+      });
     socketRef.current = socket;
-    
-    socket.on('connect', () => {
-      const authUser = JSON.parse(localStorage.getItem('user_data') || '{}');
-      if (authUser?.id) {
-        setTimeout(() => {
-          socket.emit('video:register', { userId: authUser.id });
-        }, 100);
-      }
-    });
-    
+
+    // `message:notify` goes to the user room. Held while the list is on
+    // screen, re-joined on every reconnect (see holdUserRoom).
+    const authUser = JSON.parse(localStorage.getItem('user_data') || '{}');
+    const releaseUserRoom = authUser?.id ? holdUserRoom(socket, authUser.id) : null;
+
     // Also listen for incoming video calls to show notifications
-    socket.removeAllListeners('video:incoming-call');
-    socket.on('video:incoming-call', (data: { from: string; to: string; channelName: string; chatId: string }) => {
+    const onIncomingCall = (data: { from: string; to: string; channelName: string; chatId: string }) => {
       if ('Notification' in window && Notification.permission === 'granted') {
         new Notification('Incoming Video Call', {
           body: 'You have an incoming video call',
@@ -177,11 +176,11 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
       if (window.location.pathname !== '/chat') {
         window.location.href = `/chat?chatId=${data.chatId}`;
       }
-    });
-    
-    socket.on('message:notify', (data: { chatId: string; senderId: string }) => {
-      scheduleFetch(400);
-    });
+    };
+    socket.on('video:incoming-call', onIncomingCall);
+
+    const onNotify = () => scheduleFetch(400);
+    socket.on('message:notify', onNotify);
     
     // NOTE: the 30s fallback poll now lives on the shared query
     // (refetchInterval) instead of a manual interval here.
@@ -206,20 +205,24 @@ export const ConversationList = ({ selectedConversation, onSelectConversation, u
         clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;
       }
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      // Only this list's own handlers come off; the shared connection stays
+      // open for the call ringer.
+      socket.off('video:incoming-call', onIncomingCall);
+      socket.off('message:notify', onNotify);
+      releaseUserRoom?.();
+      if (!sharedSocket) socket.disconnect();
+      socketRef.current = null;
       window.removeEventListener("chat:unarchived", handleChatUnarchived);
     };
   }, [userId, onSelectConversation]);
 
-  // Refresh conversations when selected conversation changes (to update unread counts after marking as read)
+  // Refresh when the page asks — a label changed. Not on every change of
+  // conversation: reading one clears its unread badge in the shared cache.
   useEffect(() => {
     if (refreshTrigger) {
       scheduleFetch(800);
     }
-  }, [refreshTrigger, selectedConversation]);
+  }, [refreshTrigger]);
 
   // Debounced "refresh soon" — used by socket events and child-triggered
   // refreshes. The network fetch itself is the shared React Query refetch.

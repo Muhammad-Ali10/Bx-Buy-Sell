@@ -2043,10 +2043,13 @@ class ApiClient {
     return this.request(url);
   }
 
+  /**
+   * Shared while in flight: opening a conversation mounts the window and the
+   * details panel together, and each asked for the whole conversation — two
+   * of the slowest requests on the page, for one answer.
+   */
   async getChatById(chatId: string) {
-    return this.request(`/chat/${chatId}`, {
-      method: 'GET',
-    });
+    return this.shared(`/chat/${chatId}`);
   }
 
   // Chat assignment endpoints

@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { Socket } from "socket.io-client";
 import { useAuth } from "@/hooks/useAuth";
 import { useUnconfirmedMessages } from "@/hooks/useUnconfirmedMessages";
-import { createSocketConnection, getWebSocketUrl } from "@/lib/socket";
+import { createSocketConnection, getSessionSocket, getWebSocketUrl, holdUserRoom } from "@/lib/socket";
 import chatSearchIcon from "@/assets/chatsearch.svg";
 import videoCallIcon from "@/assets/vedio call.svg";
 import fileIcon from "@/assets/file.svg";
@@ -35,6 +35,7 @@ import { ManualApprovalLockedDialog, PACKAGE_REQUIRED } from "./ManualApprovalLo
 import { ATTACHMENT_ACCEPT, asAllowedAttachment, formatMaxSize, getFileExtension, maxBytesFor, refusedAttachmentsMessage } from "@/lib/fileTypes";
 import { ProtectedImg } from "@/components/ProtectedImg";
 import { openProtected } from "@/hooks/useProtectedUrl";
+import { chatRoomsQueryKey, withRoomRead, type EnrichedChatRoom } from "@/lib/chatRooms";
 
 interface Message {
   id: string;
@@ -388,25 +389,9 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       mounted = false;
       // Stop ringing sound on cleanup
       stopRingingSound();
-      if (socketRef.current) {
-        console.log('🧹 Cleaning up socket listeners and disconnecting...');
-        // Remove ALL listeners before disconnecting to prevent memory leaks and duplicate handlers
-        socketRef.current.removeAllListeners('message');
-        socketRef.current.removeAllListeners('connect');
-        socketRef.current.removeAllListeners('disconnect');
-        socketRef.current.removeAllListeners('connect_error');
-        socketRef.current.removeAllListeners('error');
-        socketRef.current.removeAllListeners('room:joined');
-        socketRef.current.removeAllListeners('video:incoming-call');
-        socketRef.current.removeAllListeners('video:call-accepted');
-        socketRef.current.removeAllListeners('video:call-rejected');
-        socketRef.current.removeAllListeners('video:call-ended');
-        socketRef.current.removeAllListeners('video:user-offline');
-        socketRef.current.removeAllListeners('video:registered');
-        socketRef.current.emit('leave:room', { chatId: 'all' });
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      // Only this window's own listeners come off, and only its own socket is
+      // closed: the session's connection carries the call ringer and the list.
+      releaseSocket('all');
       setSocket(null);
       setIsConnected(false);
       chatRoomLoadedRef.current = false;
@@ -462,13 +447,14 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         setMessages(prev => prev.map(msg => 
           msg.senderId !== currentUserId ? { ...msg, read: true } : msg
         ));
-        // Refresh conversation list to update unread count. One immediate call
-        // plus a single trailing one is enough — the parent throttles refetches
-        // anyway, so the old 6-call burst just wasted timers and requests.
-        if (refreshConversations) {
-          refreshConversations();
-          setTimeout(() => refreshConversations(), 1500);
-        }
+        // The list's unread badge for this conversation is all that changed,
+        // so it is cleared in the shared cache rather than by refetching the
+        // whole list — which cost two list requests on every open, racing
+        // this conversation's own load. New messages still arrive by socket
+        // and the list's 30-second poll.
+        queryClient.setQueryData(chatRoomsQueryKey(currentUserId), (rooms: EnrichedChatRoom[] | undefined) =>
+          withRoomRead(rooms, chatId),
+        );
       } else {
         console.error('❌ Failed to mark messages as read:', response.error);
         // Even if backend fails, update local state to show messages as read in UI
@@ -489,7 +475,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
         refreshConversations();
       }
     }
-  }, [currentUserId, refreshConversations]);
+  }, [currentUserId, refreshConversations, queryClient]);
 
   // STEP 3: Mark messages as read when chat window is opened/viewed AND messages are loaded
   useEffect(() => {
@@ -850,6 +836,43 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
   };
 
   // Connect WebSocket - called AFTER chat room is loaded
+  // This window's listeners and holds, so it can take off exactly its own.
+  const ownListenersRef = useRef<Array<[Socket, string, (...args: any[]) => void]>>([]);
+  const ownsSocketRef = useRef(false);
+  const releaseUserRoomRef = useRef<(() => void) | null>(null);
+
+  const listen = (target: Socket, event: string, handler: (...args: any[]) => void) => {
+    target.on(event, handler);
+    ownListenersRef.current.push([target, event, handler]);
+  };
+  const listenOnce = (target: Socket, event: string, handler: (...args: any[]) => void) => {
+    target.once(event, handler);
+    ownListenersRef.current.push([target, event, handler]);
+  };
+
+  /**
+   * Stop listening, and leave the conversation's room.
+   *
+   * Every event used to be cleared with removeAllListeners and the socket
+   * closed, which was fine while each window had a socket of its own. On the
+   * shared connection that would also silence the call ringer and the list.
+   */
+  const releaseSocket = (leaveChatId?: string) => {
+    const current = socketRef.current;
+    for (const [target, event, handler] of ownListenersRef.current) target.off(event, handler);
+    ownListenersRef.current = [];
+    releaseUserRoomRef.current?.();
+    releaseUserRoomRef.current = null;
+    if (current) {
+      if (leaveChatId && current.connected) current.emit('leave:room', { chatId: leaveChatId });
+      if (ownsSocketRef.current) current.disconnect();
+    }
+    socketRef.current = null;
+    ownsSocketRef.current = false;
+    setIsConnected(false);
+    listenersRegisteredRef.current = false;
+  };
+
   const connectSocket = (chatRoomId?: string) => {
     // Use chatRoom from state - try both chatRoom and check if it's being set
     const currentChatRoomId = chatRoomId || chatRoom?.id;
@@ -874,37 +897,28 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     const wsUrl = getWebSocketUrl();
     console.log('🔌 Connecting to Socket.IO:', wsUrl, 'for room:', currentChatRoomId);
     
-    // Disconnect existing socket if any
-    if (socketRef.current) {
-      console.log('🔄 Disconnecting existing socket before reconnecting...');
-      // Remove all listeners before disconnecting
-      socketRef.current.removeAllListeners('message');
-      socketRef.current.removeAllListeners('connect');
-      socketRef.current.removeAllListeners('disconnect');
-      socketRef.current.removeAllListeners('connect_error');
-      socketRef.current.removeAllListeners('error');
-      socketRef.current.removeAllListeners('room:joined');
-      socketRef.current.emit('leave:room', { chatId: currentChatRoomId });
-      socketRef.current.disconnect();
-      socketRef.current = null;
-      setIsConnected(false);
-      listenersRegisteredRef.current = false; // Reset listener registration flag
-    }
-    
-    const authToken = localStorage.getItem('auth_token') || undefined;
-    const newSocket = createSocketConnection({
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 3,
-      reconnectionDelay: 300, // Reduced from 500ms to 300ms
-      timeout: 3000, // Reduced from 5000ms to 3000ms (3 seconds) for faster connection
-      forceNew: true, // Force new connection
-      upgrade: true, // Allow transport upgrade
-      auth: {
-        token: authToken,
-      },
-    });
-    
+    // Let go of whatever this window held before: its listeners, its hold on
+    // the user room, and its own socket if it had one. The session's shared
+    // connection is never closed here — the call ringer and the list use it.
+    releaseSocket(currentChatRoomId);
+
+    // The session's connection when there is one, so opening a conversation
+    // no longer waits for a handshake of its own. Otherwise, as before.
+    const sharedSocket = getSessionSocket();
+    const newSocket =
+      sharedSocket ??
+      createSocketConnection({
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 3,
+        reconnectionDelay: 300,
+        timeout: 3000,
+        forceNew: true,
+        upgrade: true,
+        auth: { token: localStorage.getItem('auth_token') || undefined },
+      });
+    ownsSocketRef.current = !sharedSocket;
+
     socketRef.current = newSocket;
     setSocket(newSocket);
     setIsConnected(false); // Reset connection state
@@ -918,40 +932,10 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       }
     }, 3000);
 
-    newSocket.on('connect', () => {
+    const onConnect = () => {
       console.log('✅ Socket.IO connected! ID:', newSocket.id);
       clearTimeout(connectionTimeout);
       setIsConnected(true);
-      
-      // Register user for video calls - IMPORTANT: Must be done on every connect
-      if (currentUserId) {
-        // Register immediately for video calls - critical for receiving calls
-        const registerForVideoCalls = () => {
-          if (newSocket.connected) {
-            newSocket.emit('video:register', { userId: currentUserId });
-            console.log('📹 ChatWindow: Registering user for video calls:', currentUserId);
-          } else {
-            // Wait for connection, then register
-            newSocket.once('connect', () => {
-              newSocket.emit('video:register', { userId: currentUserId });
-              console.log('📹 ChatWindow: Registering user for video calls after connect:', currentUserId);
-            });
-          }
-        };
-        
-        // Register immediately if connected, or wait for connection
-        if (newSocket.connected) {
-          registerForVideoCalls();
-        } else {
-          newSocket.once('connect', registerForVideoCalls);
-        }
-      }
-      
-      // Listen for registration confirmation
-      newSocket.removeAllListeners('video:registered');
-      newSocket.on('video:registered', (data: { userId: string; room: string; success: boolean }) => {
-        console.log('✅ Video call registration confirmed:', data);
-      });
       
       // Join room immediately - use currentChatRoomId from closure if chatRoom state not updated yet
       const roomId = chatRoom?.id || currentChatRoomId;
@@ -978,9 +962,18 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
           }
         }, 200);
       }
+    };
+    listen(newSocket, 'connect', onConnect);
+    listen(newSocket, 'video:registered', (data: { userId: string; room: string; success: boolean }) => {
+      console.log('✅ Video call registration confirmed:', data);
     });
+    // In the user room while this window is open, for the old one-to-one call
+    // events; as the signed-in person, which is the only registration the
+    // server accepts.
+    const ownId = currentUser?.id || currentUserId;
+    if (ownId) releaseUserRoomRef.current = holdUserRoom(newSocket, ownId);
 
-    newSocket.on('disconnect', (reason) => {
+    listen(newSocket, 'disconnect', (reason) => {
       console.log('❌ Socket.IO disconnected:', reason);
       setIsConnected(false);
       if (reason === 'io server disconnect') {
@@ -988,7 +981,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       }
     });
 
-    newSocket.on('connect_error', (error: any) => {
+    listen(newSocket, 'connect_error', (error: any) => {
       console.error('❌ Socket.IO connection error:', error);
       console.error('Connection error details:', {
         message: error.message,
@@ -1002,22 +995,21 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     });
     
     // Listen for room join confirmation
-    newSocket.on('room:joined', (data: { chatId: string; success: boolean; clientCount: number }) => {
+    listen(newSocket, 'room:joined', (data: { chatId: string; success: boolean; clientCount: number }) => {
       console.log('✅ Room join confirmed:', data);
       if (data.chatId === chatRoom?.id) {
         console.log('✅ Successfully joined correct room:', data.chatId, 'with', data.clientCount, 'other client(s)');
       }
     });
     
-    newSocket.on('error', (error: any) => {
+    listen(newSocket, 'error', (error: any) => {
       console.error('❌ Socket error:', error);
       toast.error(error.message || 'Socket connection error');
     });
 
     // A refused message comes back as an exception, never as the message. Take
     // down whatever this window was still waiting on, and say why.
-    newSocket.removeAllListeners('exception');
-    newSocket.on('exception', (payload: any) => {
+    listen(newSocket, 'exception', (payload: any) => {
       const reason = typeof payload?.message === 'string' ? payload.message : undefined;
       unconfirmed.failAll(reason);
     });
@@ -1026,16 +1018,14 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     // Backend only sends 'message' event now (removed 'message:recieve' to prevent duplicates)
     // CRITICAL: Always remove existing listeners first, then register with the memoized handler
     // This ensures we use the latest handler reference and don't have duplicate listeners
-    newSocket.removeAllListeners('message');
-    newSocket.on('message', (data: string) => {
+    listen(newSocket, 'message', (data: string) => {
       const message = typeof data === 'string' ? JSON.parse(data) : data;
       console.log('📨 RECEIVE new_message:', message.id);
       handleIncomingMessage(data, 'message');
     });
 
     // Listen for message edit events
-    newSocket.removeAllListeners('message:edited');
-    newSocket.on('message:edited', (data: string) => {
+    listen(newSocket, 'message:edited', (data: string) => {
       try {
         const editedMessage = typeof data === 'string' ? JSON.parse(data) : data;
         console.log('✏️ Message edited:', editedMessage.id);
@@ -1050,8 +1040,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     });
 
     // Listen for message delete events
-    newSocket.removeAllListeners('message:deleted');
-    newSocket.on('message:deleted', (data: string) => {
+    listen(newSocket, 'message:deleted', (data: string) => {
       try {
         const deleteEvent = typeof data === 'string' ? JSON.parse(data) : data;
         console.log('🗑️ Message deleted:', deleteEvent.messageId);
@@ -1062,8 +1051,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     });
 
     // Listen for incoming video call - Show immediately regardless of current chat
-    newSocket.removeAllListeners('video:incoming-call');
-    newSocket.on('video:incoming-call', async (data: { from: string; to: string; channelName: string; chatId: string }) => {
+    listen(newSocket, 'video:incoming-call', async (data: { from: string; to: string; channelName: string; chatId: string }) => {
       console.log('📞 ChatWindow: Incoming video call from:', data.from, 'chatId:', data.chatId);
       
       // Not ours to answer: a call we placed, or the team ringing the other
@@ -1185,8 +1173,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     window.addEventListener('video:incoming-call', handleWindowIncomingCall);
 
     // Listen for video call accepted
-    newSocket.removeAllListeners('video:call-accepted');
-    newSocket.on('video:call-accepted', async (data: { from: string; to: string; channelName: string }) => {
+    listen(newSocket, 'video:call-accepted', async (data: { from: string; to: string; channelName: string }) => {
       console.log('✅ Video call accepted by:', data.from);
       
       // Stop ringing sound IMMEDIATELY
@@ -1220,8 +1207,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     });
 
     // Listen for video call rejected
-    newSocket.removeAllListeners('video:call-rejected');
-    newSocket.on('video:call-rejected', (data: { from: string }) => {
+    listen(newSocket, 'video:call-rejected', (data: { from: string }) => {
       console.log('❌ Video call rejected by:', data.from);
       stopRingingSound();
       setIsInCall(false);
@@ -1233,8 +1219,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     });
 
     // Listen for video call ended
-    newSocket.removeAllListeners('video:call-ended');
-    newSocket.on('video:call-ended', (data: { from: string; duration?: number }) => {
+    listen(newSocket, 'video:call-ended', (data: { from: string; duration?: number }) => {
       console.log('📴 Video call ended by:', data.from, 'duration:', data.duration);
       
       // Stop ringing sound IMMEDIATELY
@@ -1253,8 +1238,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     });
 
     // Listen for user offline
-    newSocket.removeAllListeners('video:user-offline');
-    newSocket.on('video:user-offline', (data: { userId: string }) => {
+    listen(newSocket, 'video:user-offline', (data: { userId: string }) => {
       console.log('⚠️ User is offline:', data.userId);
       // Keep call UI open and show "calling" state, but stop ringing
       stopRingingSound();
@@ -1272,8 +1256,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
     });
 
     // CRITICAL: Listen for user status changes (online/offline) for real-time status updates
-    newSocket.removeAllListeners('user:status-changed');
-    newSocket.on('user:status-changed', (data: { userId: string; isOnline: boolean }) => {
+    listen(newSocket, 'user:status-changed', (data: { userId: string; isOnline: boolean }) => {
       console.log('👤 User status changed:', data.userId, 'isOnline:', data.isOnline);
       
       // Update other user's online status if it matches the other user in this chat
@@ -1291,6 +1274,7 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
 
     listenersRegisteredRef.current = true;
     console.log('👂 Registered message and video call listeners on socket:', newSocket.id);
+    if (newSocket.connected) onConnect();
   };
 
   // Join room - simplified, no retries needed since chatRoom.id is guaranteed
@@ -2363,17 +2347,26 @@ export const ChatWindow = ({ conversationId, currentUserId, userId, sellerId, li
       setIsConnected(false);
       
       // Poll for socket creation more frequently
+      // Named, and taken off again: on the session's shared connection a
+      // listener left behind outlives this window.
+      const onConnected = () => setIsConnected(true);
+      const onDisconnected = () => setIsConnected(false);
+      let watched: Socket | null = null;
       const pollSocket = setInterval(() => {
         if (socketRef.current) {
           clearInterval(pollSocket);
           checkConnection();
-          // Also set up listeners
-          socketRef.current.on('connect', () => setIsConnected(true));
-          socketRef.current.on('disconnect', () => setIsConnected(false));
+          watched = socketRef.current;
+          watched.on('connect', onConnected);
+          watched.on('disconnect', onDisconnected);
         }
       }, 200);
-      
-      return () => clearInterval(pollSocket);
+
+      return () => {
+        clearInterval(pollSocket);
+        watched?.off('connect', onConnected);
+        watched?.off('disconnect', onDisconnected);
+      };
     }
   }, [isVideoCallDialogOpen]);
 

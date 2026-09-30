@@ -120,6 +120,52 @@ export const closePresenceConnection = () => {
 };
 
 /**
+ * The session's connection, for screens that used to open their own.
+ *
+ * The chat page opened three: this one, one for the conversation list and a
+ * new one for the conversation window every time a conversation was chosen —
+ * each with its own handshake before the window could join its room. They
+ * now share this one. A screen that finds none (signed out, or not opened
+ * yet) opens its own as before.
+ */
+export const getSessionSocket = (): Socket | null => presenceSocket;
+
+/**
+ * Keep this socket in the `user:<id>` room while anyone needs it.
+ *
+ * That room is where the server sends `message:notify` — how the conversation
+ * list hears of a new message at once — and the old one-to-one call events.
+ * The session's connection deliberately stays out of it everywhere else, so
+ * the list and the chat window each take a hold, the room is joined on the
+ * first and on every reconnect, and left when the last one lets go. Leaving
+ * as soon as the window let go would have cut the list off whenever a
+ * different conversation was opened.
+ */
+const userRoomHolds = new WeakMap<Socket, { count: number; register: () => void; userId: string }>();
+
+export const holdUserRoom = (socket: Socket, userId: string): (() => void) => {
+  let hold = userRoomHolds.get(socket);
+  if (!hold) {
+    const register = () => socket.emit('video:register', { userId });
+    hold = { count: 0, register, userId };
+    userRoomHolds.set(socket, hold);
+    socket.on('connect', register);
+    if (socket.connected) register();
+  }
+  hold.count += 1;
+  let released = false;
+  return () => {
+    if (released || !hold) return;
+    released = true;
+    hold.count -= 1;
+    if (hold.count > 0) return;
+    socket.off('connect', hold.register);
+    userRoomHolds.delete(socket);
+    if (socket.connected) socket.emit('video:disconnect', { userId: hold.userId });
+  };
+};
+
+/**
  * Get the WebSocket URL
  */
 export const getWebSocketUrl = (): string => {

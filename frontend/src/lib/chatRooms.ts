@@ -65,6 +65,23 @@ export const chatRoomsQueryKey = (userId: string | undefined) => [
   userId,
 ];
 
+/**
+ * The rooms with one conversation's unread count set to nothing, as it is once
+ * its messages have been read.
+ *
+ * Reading a conversation used to refetch the whole list — twice, through the
+ * window and again through the list's own "conversation changed" refresh —
+ * each fetch as slow as the list itself and all of them racing the
+ * conversation being opened. The only thing reading changes is this number.
+ */
+export const withRoomRead = (
+  rooms: EnrichedChatRoom[] | undefined,
+  chatId: string,
+): EnrichedChatRoom[] | undefined =>
+  Array.isArray(rooms)
+    ? rooms.map((room) => (room.id === chatId && room.unreadCount ? { ...room, unreadCount: 0 } : room))
+    : rooms;
+
 /** Rooms where the user is the buyer or the seller, fetched in parallel,
  * deduplicated and sorted newest-first. */
 export async function fetchChatRooms(userId: string): Promise<EnrichedChatRoom[]> {

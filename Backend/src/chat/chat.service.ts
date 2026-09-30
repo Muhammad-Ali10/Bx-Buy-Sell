@@ -1442,95 +1442,83 @@ export class ChatService {
     return `${from > 0 ? '…' : ''}${text.slice(from, to)}${to < text.length ? '…' : ''}`;
   }
 
+  /**
+   * One conversation with everything the window and the details panel show,
+   * shaped as an `include` would shape it.
+   *
+   * Through the include, Prisma on MongoDB fetched each part one after
+   * another: the two people, the listing and each of its four relations, the
+   * messages and their senders, the labels, the monitors — ten trips or so,
+   * about a second and a half from the server, while the window said
+   * "Loading chat room…". Everything here is keyed by the chat's own id or by
+   * the ids it holds, so it goes out at once: three trips' wait.
+   */
   async getChatById(chatId: string) {
-    return await this.db.chat.findUnique({
-      where: {
-        id: chatId,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            profile_pic: true,
-            // Which side of the platform they are on. The chat window shows
-            // its two standing notices only between two members: telling
-            // somebody to keep the conversation on the platform, while they
-            // are talking to the platform, is nonsense — and there is no deal
-            // to start with the support team.
-            role: true,
-            // The details panel says "Last online 2 hours ago".
-            is_online: true,
-            last_offline: true,
-          },
+    const chat = await this.db.chat.findUnique({ where: { id: chatId } });
+    if (!chat) return null;
+
+    const [people, listings, messages, chatLabels, monitorViews] = await Promise.all([
+      this.db.user.findMany({
+        where: { id: { in: [...new Set([chat.userId, chat.sellerId])] } },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          profile_pic: true,
+          // Which side of the platform they are on. The chat window shows
+          // its two standing notices only between two members: telling
+          // somebody to keep the conversation on the platform, while they
+          // are talking to the platform, is nonsense — and there is no deal
+          // to start with the support team.
+          role: true,
+          // The details panel says "Last online 2 hours ago".
+          is_online: true,
+          last_offline: true,
         },
-        seller: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            profile_pic: true,
-            // Which side of the platform they are on. The chat window shows
-            // its two standing notices only between two members: telling
-            // somebody to keep the conversation on the platform, while they
-            // are talking to the platform, is nonsense — and there is no deal
-            // to start with the support team.
-            role: true,
-            // The details panel says "Last online 2 hours ago".
-            is_online: true,
-            last_offline: true,
-          },
-        },
-        // Loading a conversation by its id is now the main path, and both the
-        // window header and the details panel name it after the listing — so
-        // the answer rows that hold that name have to come with it.
-        listing: {
-          include: {
-            brand: true,
-            advertisement: true,
-            category: true,
-            // The details panel prints the listing's revenue and net profit
-            // beside its price, and those live in the financial rows.
-            financials: true,
-          },
-        },
-        messages: {
-          orderBy: {
-            createdAt: 'asc',
-          },
-          include: {
-            sender: {
-              select: {
-                id: true,
-                first_name: true,
-                last_name: true,
-                profile_pic: true,
-                // Who is speaking as staff. Without it the window cannot mark a
-                // moderator's message when it reloads the conversation.
-                role: true,
-              },
+      }),
+      // Both the window header and the details panel name the conversation
+      // after the listing, and the panel prints its revenue and net profit
+      // beside its price — those live in the financial rows.
+      listingsById(this.db, [chat.listingId], ['brand', 'advertisement', 'category', 'financials']),
+      this.db.message.findMany({
+        where: { chatId },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              profile_pic: true,
+              // Who is speaking as staff. Without it the window cannot mark a
+              // moderator's message when it reloads the conversation.
+              role: true,
             },
           },
         },
-        // Carries each person's own row, so the window can tell whoever is
-        // looking whether *they* have filed or pinned this conversation.
-        chatLabels: {
-          select: {
-            label: true,
-            userId: true,
-            archived: true,
-            pinned: true,
-          },
-        },
-        monitorViews: {
-          select: {
-            monitorId: true,
-            viewedAt: true,
-          },
-        },
-      },
-    });
+      }),
+      // Carries each person's own row, so the window can tell whoever is
+      // looking whether *they* have filed or pinned this conversation.
+      this.db.chatLabel.findMany({
+        where: { chatId },
+        select: { label: true, userId: true, archived: true, pinned: true },
+      }),
+      this.db.chatMonitor.findMany({
+        where: { chatId },
+        select: { monitorId: true, viewedAt: true },
+      }),
+    ]);
+
+    const person = new Map(people.map((p) => [p.id, p] as const));
+    return {
+      ...chat,
+      user: person.get(chat.userId) ?? null,
+      seller: person.get(chat.sellerId) ?? null,
+      listing: (chat.listingId && listings.get(chat.listingId)) || null,
+      messages,
+      chatLabels,
+      monitorViews,
+    };
   }
 
   async getMangaedChatRoomsCountById(userId: string) {
