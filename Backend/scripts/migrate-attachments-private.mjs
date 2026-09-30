@@ -3,6 +3,8 @@
  *
  *   node scripts/migrate-attachments-private.mjs           # show what it would do
  *   node scripts/migrate-attachments-private.mjs --apply   # write it
+ *   node scripts/migrate-attachments-private.mjs --apply --only=<publicId>,<publicId>
+ *                                                        # just these, to try it first
  *
  * Every attachment sits on a public CDN URL today, so a contract or a P&L can
  * be read by anyone holding the link, with no account at all — I fetched
@@ -29,6 +31,11 @@ import { writeFileSync } from 'node:fs';
 
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes('--apply');
+const ONLY = (process.argv.find((arg) => arg.startsWith('--only=')) ?? '')
+  .slice('--only='.length)
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean);
 
 /** Only documents. Photos are public on purpose. */
 const DOCUMENT_FOLDER = 'listings/ad-attachments';
@@ -131,7 +138,9 @@ const run = async () => {
 
   const existing = await prisma.attachment.findMany({ select: { publicId: true } });
   const done = new Set(existing.map((a) => a.publicId));
-  const todo = [...assets.values()].filter((a) => !done.has(a.publicId));
+  const todo = [...assets.values()]
+    .filter((a) => !done.has(a.publicId))
+    .filter((a) => ONLY.length === 0 || ONLY.includes(a.publicId));
 
   console.log(`references found:          ${references.length}`);
   console.log(`distinct files:            ${assets.size}`);
@@ -158,6 +167,11 @@ const run = async () => {
     console.log(`  ${asset.fileName}   (${asset.references.length} reference(s))`);
     console.log(`      ${asset.resourceType}  ${asset.publicId}`);
   }
+
+  // One of each pipeline, for a first --only run.
+  const firstOfEach = new Map();
+  for (const a of todo) if (!firstOfEach.has(a.resourceType)) firstOfEach.set(a.resourceType, a.publicId);
+  console.log(`\none of each pipeline:      ${[...firstOfEach.values()].join(',')}`);
 
   if (!APPLY) {
     console.log('\nNothing was changed. Re-run with --apply to carry out the plan.');

@@ -3,6 +3,23 @@ import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'node:stream';
 
 /**
+ * The format to name in a delivery URL, for an image or video whose id
+ * already ends in an extension.
+ *
+ * The CDN reads a trailing ".mp4" as the format and strips it from the id, so
+ * an asset whose id is "clip.mp4" — some older uploads were stored that way,
+ * which is why their names end ".mp4.mp4" — was looked for as "clip" and came
+ * back 404. Naming the format keeps the id whole. Raw files are addressed by
+ * their full id, extension and all, so they need nothing.
+ */
+export function deliveryFormat(publicId: string, resourceType: string): { format?: string } {
+  if (resourceType === 'raw') return {};
+  const last = publicId.split('/').pop() ?? '';
+  const match = last.match(/\.([A-Za-z0-9]{2,5})$/);
+  return match ? { format: match[1].toLowerCase() } : {};
+}
+
+/**
  * The server's own access to the file store.
  *
  * Until now nothing on the server could reach Cloudinary at all: uploads went
@@ -61,6 +78,7 @@ export class CloudinaryService {
       type: deliveryType,
       sign_url: true,
       secure: true,
+      ...deliveryFormat(publicId, resourceType),
     });
   }
 
