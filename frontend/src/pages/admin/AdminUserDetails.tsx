@@ -19,7 +19,7 @@ import { formatMoney } from "@/lib/formatNumber";
 import { TeamMemberStatistics } from "@/components/admin/TeamMemberStatistics";
 import { UserSubscriptionsList } from "@/components/admin/UserSubscriptionsPanel";
 import { ChangePasswordDialog } from "@/components/admin/ChangePasswordDialog";
-import { UserInvoiceList } from "@/components/admin/UserInvoiceList";
+import { UserBillingDetails } from "@/components/admin/UserBillingDetails";
 import { MemberActivityLog } from "@/components/admin/MemberActivityLog";
 
 const ACCOUNT_TABS = [
@@ -81,7 +81,6 @@ const ROLE_LABELS: Record<string, string> = {
 };
 import { ProBadge } from "@/components/admin/ProBadge";
 import { isProMember } from "@/lib/proMembership";
-import simIcon from "@/assets/sim icon.svg";
 import verifiedTick from "@/assets/Tick.svg";
 import { useUserDetails } from "@/hooks/useUserDetails";
 import { useUserListings } from "@/hooks/useUserListings";
@@ -143,7 +142,6 @@ export default function AdminUserDetails() {
   });
   const [adminNote, setAdminNote] = useState("");
   const [isPro, setIsPro] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<any>(null);
   // Every hook must run on every render, so these live above the loading and
   // not-found returns below. Declared after them, they only ran once data had
   // arrived, and React refused to render the page at all.
@@ -169,25 +167,6 @@ export default function AdminUserDetails() {
         if (response.success && response.data) {
           const data = response.data as any;
           setIsPro(isProMember(data));
-          
-          // Fetch payment method if user has active subscription
-          if (data.stripeCustomerId && data.status === 'ACTIVE') {
-            const pmResponse = await (apiClient as any).request(`/subscription/payment-method/${id}`);
-            /*
-             * The body arrives wrapped twice. The controller returns its own
-             * `{ success, data }`, and the global ResponseInterceptor puts a
-             * `{ status, timestamp, path, data }` around that; the api client
-             * peels off only the outer one. Taking `pmResponse.data` therefore
-             * stored the controller's envelope, not the card — every field
-             * read undefined, and `brand.charAt(0)` threw before the tab could
-             * paint. `??` keeps a null card null, and falls back to the single
-             * -wrapped shape if the interceptor ever stops double-wrapping.
-             */
-            const card = pmResponse?.data?.data ?? pmResponse?.data;
-            if (pmResponse.success && card?.brand) {
-              setPaymentMethod(card);
-            }
-          }
         }
       } catch (error) {
         console.error('Error checking user subscription:', error);
@@ -495,7 +474,9 @@ export default function AdminUserDetails() {
             {/* Settings sits level with the title, as the design has it: it
                 acts on the account, not on the profile card below. */}
             <div className="flex items-start justify-between gap-4">
-              <h2 className="text-xl font-semibold">Your Account Details</h2>
+              <h2 className="text-xl font-semibold">
+                {activeTab === "billing" ? "User's Billing Details" : "User's Account Details"}
+              </h2>
                 {/* Moderators see this menu too — they police ordinary members,
                     including resetting a forgotten password. Which entries they
                     get is decided per action below, and enforced server-side. */}
@@ -947,146 +928,9 @@ export default function AdminUserDetails() {
             />
           )}
 
-          {/* How they pay lives under Billing, not on the overview. */}
-          {activeTab === "billing" && (
-          <Card
-            className="p-5 bg-card border-border"
-            style={{
-              borderRadius: '20px',
-              background: '#FFFFFF',
-              boxShadow: '0px 3px 33px 0px #00000017',
-            }}
-          >
-            <h3
-              className="font-lufga mb-4"
-              style={{
-                fontWeight: 500,
-                fontSize: '20px',
-                lineHeight: '140%',
-                letterSpacing: '0%',
-                color: '#000000',
-              }}
-            >
-              Payment Information
-            </h3>
-            <div className="flex items-start" style={{ columnGap: '50px' }}>
-              <div
-                className="p-5"
-                style={{
-                  width: '389px',
-                  height: '218px',
-                  borderRadius: '19.55px',
-                  background: '#C6FE1F',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div className="flex items-start justify-between">
-                  <img src={simIcon} alt="SIM" style={{ width: '50px', height: '35px' }} />
-                  <span style={{ fontFamily: 'Helvetica Now Display', fontWeight: 700, fontSize: '16px', color: '#000000' }}>
-                    {paymentMethod?.brand?.toUpperCase() || 'VISA'}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    fontFamily: 'Helvetica Now Display',
-                    fontWeight: 700,
-                    fontSize: '19.55px',
-                    lineHeight: '100%',
-                    letterSpacing: '7%',
-                    color: '#000000',
-                  }}
-                >
-                  **** **** **** {paymentMethod?.last4 || '****'}
-                </div>
-                <div className="flex items-end justify-between">
-                  <div>
-                    <div
-                      style={{
-                        fontFamily: 'Helvetica Now Display',
-                        fontWeight: 400,
-                        fontSize: '11.73px',
-                        lineHeight: '100%',
-                        letterSpacing: '0%',
-                        color: '#00000099',
-                      }}
-                    >
-                      Exp {paymentMethod ? `${paymentMethod.expMonth}/${paymentMethod.expYear?.toString().slice(-2)}` : '-/-'}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div
-                      style={{
-                        fontFamily: 'Helvetica Neue',
-                        fontWeight: 700,
-                        fontSize: '12px',
-                        lineHeight: '100%',
-                        letterSpacing: '7%',
-                        color: '#000000',
-                      }}
-                    >
-                      CVV
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: 'Helvetica Neue',
-                        fontWeight: 400,
-                        fontSize: '12px',
-                        lineHeight: '100%',
-                        letterSpacing: '0%',
-                        color: '#00000099',
-                      }}
-                    >
-                      ***
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div
-                className="grid"
-                style={{
-                  gridTemplateColumns: 'auto auto',
-                  columnGap: '40px',
-                  rowGap: '14px',
-                  marginRight: '40px',
-                }}
-              >
-                <div style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Card Type</div>
-                <div style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-                  {/* Guard the brand itself, not just the card: a payment
-                      method without one crashed the whole tab. The card row
-                      above has always read `paymentMethod?.brand?.`. */}
-                  {paymentMethod?.brand
-                    ? paymentMethod.brand.charAt(0).toUpperCase() + paymentMethod.brand.slice(1)
-                    : '-'}
-                </div>
-                <div style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Card Holder</div>
-                <div style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-                  {paymentMethod?.holderName || profile.full_name || "-"}
-                </div>
-                <div style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Expire</div>
-                <div style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-                  {/* Stripe leaves these null on a non-card method, and
-                      String(null) printed a literal "null/null" here. */}
-                  {paymentMethod?.expMonth && paymentMethod?.expYear
-                    ? `${String(paymentMethod.expMonth).padStart(2, '0')}/${paymentMethod.expYear}`
-                    : '-'}
-                </div>
-                <div style={{ fontFamily: 'ABeeZee', fontWeight: 400, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#00000080' }}>Card Number</div>
-                <div style={{ fontFamily: 'Lufga', fontWeight: 500, fontSize: '18px', lineHeight: '140%', letterSpacing: '0%', color: '#000000' }}>
-                  **** **** **** {paymentMethod?.last4 || '****'}
-                </div>
-              </div>
-            </div>
-
-            {/* What they were actually charged, so a billing question can be
-                answered here instead of in the Stripe dashboard. */}
-            <div className="mt-8 border-t border-border pt-6">
-              {id && <UserInvoiceList userId={id} />}
-            </div>
-          </Card>
-          )}
+          {/* How they pay lives under Billing, not on the overview. Read-only:
+              only the member adds or changes a card or an invoice address. */}
+          {activeTab === "billing" && id && <UserBillingDetails userId={id} />}
 
           {/* What they did and what the team did to them: sign-ins, messages,
               listings, payments. */}

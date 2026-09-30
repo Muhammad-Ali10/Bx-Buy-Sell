@@ -947,6 +947,16 @@ class ApiClient {
     return this.request(`/billing/invoices/${userId}`, { method: 'GET' });
   }
 
+  /** A member's saved cards, for the team (read-only). */
+  async getPaymentMethodsForUser(userId: string) {
+    return this.request(`/billing/payment-methods/${userId}`, { method: 'GET' });
+  }
+
+  /** A member's saved invoice address, for the team (read-only). */
+  async getInvoiceAddressForUser(userId: string) {
+    return this.request(`/billing/address/${userId}`, { method: 'GET' });
+  }
+
   /** The saved invoice address, and the profile to start from when there is none. */
   async getInvoiceAddress() {
     return this.request('/billing/address', { method: 'GET' });

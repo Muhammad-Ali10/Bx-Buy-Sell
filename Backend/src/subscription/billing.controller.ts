@@ -7,7 +7,7 @@ import { invoiceAddressSchema, InvoiceAddressInput } from './billing.dto';
 
 /**
  * Account Details → Billing. Everyone works on their own account; the team may
- * read someone's invoices, and nothing more.
+ * read someone's cards, invoices and invoice address, and nothing more.
  */
 @ApiTags('Billing')
 @Controller('billing')
@@ -19,6 +19,18 @@ export class BillingController {
   @ApiOperation({ summary: 'Saved cards, and which one renewals are charged to' })
   listPaymentMethods(@Req() req: any) {
     return this.billing.listPaymentMethods(req.user.id);
+  }
+
+  /**
+   * Someone else's saved cards, for the Billing tab on their account page.
+   * Read-only: the team never adds, removes or reorders a member's cards —
+   * only brand, last four and expiry ever leave Stripe.
+   */
+  @Roles(['ADMIN', 'MONITER'])
+  @Get('payment-methods/:userId')
+  @ApiOperation({ summary: "A member's saved cards (staff, read-only)" })
+  listPaymentMethodsFor(@Param('userId') userId: string) {
+    return this.billing.listPaymentMethods(userId);
   }
 
   @Roles(['USER', 'SELLER', 'ADMIN'])
@@ -69,6 +81,21 @@ export class BillingController {
   @ApiOperation({ summary: 'The invoice address, or the profile to start from' })
   getInvoiceAddress(@Req() req: any) {
     return this.billing.getInvoiceAddress(req.user.id);
+  }
+
+  /**
+   * Someone else's invoice address, as they saved it (staff, read-only).
+   *
+   * Only what was saved. The member's own form starts from their profile when
+   * nothing is saved, but shown to the team that guess would read as the
+   * address their invoices go to — and it is not.
+   */
+  @Roles(['ADMIN', 'MONITER'])
+  @Get('address/:userId')
+  @ApiOperation({ summary: "A member's saved invoice address (staff, read-only)" })
+  async getInvoiceAddressFor(@Param('userId') userId: string) {
+    const { saved } = await this.billing.getInvoiceAddress(userId);
+    return { saved };
   }
 
   @Roles(['USER', 'SELLER', 'ADMIN'])

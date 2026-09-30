@@ -43,7 +43,7 @@ import {
  * comes back.
  */
 
-interface SavedCard {
+export interface SavedCard {
   id: string;
   brand: string;
   last4: string;
@@ -248,16 +248,20 @@ export const AccountBilling = () => {
   );
 };
 
-const CardRow = ({
+/**
+ * One saved card. Without the two handlers it is read-only — the team's view
+ * of a member's cards shows the Default and Expired marks and no actions.
+ */
+export const CardRow = ({
   card,
-  busy,
+  busy = false,
   onMakeDefault,
   onRemove,
 }: {
   card: SavedCard;
-  busy: boolean;
-  onMakeDefault: () => void;
-  onRemove: () => void;
+  busy?: boolean;
+  onMakeDefault?: () => void;
+  onRemove?: () => void;
 }) => (
   <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#E9EBF2] bg-white p-3.5">
     {/* Wraps on a phone: the name and date keep their line and the actions
@@ -288,7 +292,7 @@ const CardRow = ({
         >
           Default
         </span>
-      ) : (
+      ) : onMakeDefault ? (
         <button
           type="button"
           onClick={onMakeDefault}
@@ -298,17 +302,19 @@ const CardRow = ({
         >
           Set as Default
         </button>
-      )}
+      ) : null}
 
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={busy}
-        aria-label={`Remove ${cardTitle(card.brand, card.last4)}`}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FEE2E2] text-[#DC2626] hover:bg-[#FECACA] disabled:opacity-60"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={busy}
+          aria-label={`Remove ${cardTitle(card.brand, card.last4)}`}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FEE2E2] text-[#DC2626] hover:bg-[#FECACA] disabled:opacity-60"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
     </div>
   </div>
 );
