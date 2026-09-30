@@ -177,11 +177,11 @@ export const AuthLayout = ({ children, currentStep = 1, totalSteps = 4, variant 
             only, so they are hidden from assistive tech and ignore pointers. */}
         <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
           {[
-            { top: "6%", right: "8%", size: 96 },
-            { top: "14%", right: "20%", size: 56 },
-            { top: "34%", left: "12%", size: 76 },
-            { top: "42%", left: "24%", size: 44 },
-            { top: "52%", right: "14%", size: 84 },
+            { top: "6%", right: "8%", size: 101 },
+            { top: "11%", right: "4%", size: 80 },
+            { top: "34%", left: "12%", size: 101 },
+            { top: "39%", left: "18%", size: 101 },
+            { top: "52%", right: "14%", size: 101 },
           ].map((box, index) => (
             <span
               key={index}
