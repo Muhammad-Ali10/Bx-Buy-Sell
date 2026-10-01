@@ -15,6 +15,7 @@ import { ListingCheckoutService } from './listing-checkout.service';
 import { SubscriptionService } from './subscription.service';
 import { StripeService, subscriptionPeriodEnd } from './stripe.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { endPlacementsFromStripe, recordListingRenewal } from '../listing/listing-stripe-sync';
 import { Public } from 'common/decorator/public.decorator';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 
@@ -182,6 +183,9 @@ export class WebhookController {
   private async handleSubscriptionUpdated(subscription: any) {
     this.logger.log(`Subscription updated: ${subscription.id}`);
 
+    // A listing's package or placement, renewed or changed at Stripe.
+    if (await recordListingRenewal(this.db as any, subscription)) return;
+
     const dbSubscription = await this.db.userSubscription.findUnique({
       where: { stripeSubscriptionId: subscription.id },
     });
@@ -205,6 +209,8 @@ export class WebhookController {
 
     // A listing package has no UserSubscription row, so handle it first.
     if (await this.deactivateListingPackage(subscription.id)) return;
+    // A placement's own subscription ended: the placement goes with it.
+    if (await endPlacementsFromStripe(this.db as any, subscription.id)) return;
 
     const dbSubscription = await this.db.userSubscription.findUnique({
       where: { stripeSubscriptionId: subscription.id },

@@ -389,6 +389,31 @@ export class ListingService {
         ? new Date(current.packageExpiresAt)
         : fallbackEnd;
 
+      /*
+       * Tell Stripe too, before the listing records it: the renewal is
+       * Stripe's. Writing the downgrade to the listing alone left Stripe to
+       * renew at the old price — Premium charged again after a move to
+       * Starter, and a package dropped to Minimum billed every month. To
+       * Minimum the subscription simply stops at the period's end; to a lower
+       * paid package, or a shorter cycle, the next period is billed at the new
+       * price. Nothing is charged today either way.
+       */
+      if (current.packageStripeSubscriptionId) {
+        if (input.packageId === 'MINIMUM') {
+          await this.stripeService.cancelSubscription(current.packageStripeSubscriptionId, false);
+        } else {
+          const nextLine = computePackageCharge({
+            listingPrice,
+            packageId: input.packageId,
+            addon: 'NONE',
+            billingCycle: input.billingCycle,
+          }).lines.find((line) => line.kind === 'package');
+          if (nextLine) {
+            await this.stripeService.scheduleNextPeriod(current.packageStripeSubscriptionId, nextLine);
+          }
+        }
+      }
+
       await this.db.listing.update({
         where: { id: listingId },
         data: {
@@ -585,6 +610,11 @@ export class ListingService {
     }
     if (!(listing as any).pendingPackage) {
       throw new BadRequestException('There is no scheduled change to cancel.');
+    }
+
+    // Stripe was told about the downgrade, so it is told it is off.
+    if ((listing as any).packageStripeSubscriptionId) {
+      await this.stripeService.clearScheduledChange((listing as any).packageStripeSubscriptionId);
     }
 
     await this.db.listing.update({

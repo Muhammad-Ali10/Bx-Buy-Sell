@@ -261,7 +261,13 @@ export class StripeService {
         this.logger.log(`Subscription cancelled immediately: ${subscriptionId}`);
         return subscription;
       } else {
-        // Cancel at period end
+        // Cancel at period end. A subscription a schedule controls (a queued
+        // downgrade) refuses that, so the schedule is let go first: the
+        // seller has now chosen to stop, not to drop a tier.
+        const current: any = await this.stripe.subscriptions.retrieve(subscriptionId);
+        const scheduleId =
+          typeof current.schedule === 'string' ? current.schedule : current.schedule?.id;
+        if (scheduleId) await this.stripe.subscriptionSchedules.release(scheduleId);
         const subscription = await this.stripe.subscriptions.update(subscriptionId, {
           cancel_at_period_end: true,
         });
@@ -347,6 +353,88 @@ export class StripeService {
     } catch (error) {
       this.logger.error(`Error scheduling price change ${subscriptionId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * From the next renewal, bill this instead: a listing package's downgrade,
+   * or its move to a shorter billing cycle.
+   *
+   * A downgrade used to be written to the listing alone, so Stripe went on
+   * renewing at the old price — a seller dropping from Premium to Starter was
+   * charged Premium again, and one dropping to Minimum was charged every month
+   * for a package they no longer had.
+   *
+   * A subscription schedule rather than a price swap: the period being paid
+   * for runs out on the old price, the next one starts on the new price at
+   * the renewal date, nothing is charged today, and — unlike swapping the
+   * price on the subscription — it works when the cycle length changes too.
+   * The schedule lets go of the subscription after that, so it carries on as
+   * an ordinary one.
+   */
+  async scheduleNextPeriod(
+    subscriptionId: string,
+    next: { name: string; amount: number; intervalMonths: number },
+  ) {
+    const sub: any = await this.stripe.subscriptions.retrieve(subscriptionId);
+    const item = sub.items.data[0];
+    const periodEnd: number = item.current_period_end ?? sub.current_period_end;
+
+    // A seller who had cancelled and now downgrades instead wants it to renew.
+    if (sub.cancel_at_period_end && !sub.schedule) {
+      await this.stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: false });
+    }
+
+    // One schedule per subscription: a second downgrade replaces the first.
+    const scheduleId = typeof sub.schedule === 'string' ? sub.schedule : sub.schedule?.id;
+    const schedule: any = scheduleId
+      ? await this.stripe.subscriptionSchedules.retrieve(scheduleId)
+      : await this.stripe.subscriptionSchedules.create({ from_subscription: subscriptionId });
+
+    const nextPrice = await this.stripe.prices.create({
+      currency: item.price.currency,
+      unit_amount: Math.round(next.amount * 100),
+      recurring: { interval: 'month', interval_count: next.intervalMonths },
+      product_data: { name: next.name },
+    });
+
+    const updated = await this.stripe.subscriptionSchedules.update(schedule.id, {
+      end_behavior: 'release',
+      phases: [
+        {
+          // The period already paid for, on what was paid for it.
+          start_date: schedule.current_phase?.start_date ?? schedule.phases[0].start_date,
+          end_date: periodEnd,
+          items: [{ price: item.price.id, quantity: item.quantity ?? 1 }],
+          proration_behavior: 'none',
+        },
+        {
+          items: [{ price: nextPrice.id, quantity: 1 }],
+          duration: { interval: 'month', interval_count: next.intervalMonths },
+          proration_behavior: 'none',
+        },
+      ],
+    } as any);
+
+    this.logger.log(
+      `Subscription ${subscriptionId}: from ${new Date(periodEnd * 1000).toISOString()} bills "${next.name}"`,
+    );
+    return updated;
+  }
+
+  /**
+   * Forget a change queued with `scheduleNextPeriod` (or a pending cancel):
+   * the subscription renews on what it is paying now.
+   */
+  async clearScheduledChange(subscriptionId: string) {
+    const sub: any = await this.stripe.subscriptions.retrieve(subscriptionId);
+    const scheduleId = typeof sub.schedule === 'string' ? sub.schedule : sub.schedule?.id;
+    if (scheduleId) {
+      await this.stripe.subscriptionSchedules.release(scheduleId);
+      this.logger.log(`Subscription ${subscriptionId}: scheduled change dropped`);
+    }
+    if (sub.cancel_at_period_end) {
+      await this.stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: false });
     }
   }
 
