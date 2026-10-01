@@ -73,3 +73,86 @@ export async function listingsById(
   });
   return byId;
 }
+
+/** The people a listing points at, and the column on the listing that names each. */
+export type ListingPerson = 'user' | 'responsible';
+
+const PERSON_KEY: Record<ListingPerson, string> = {
+  user: 'userId',
+  responsible: 'responsibleId',
+};
+
+/**
+ * Listings already fetched, given their relations: the same shape a Prisma
+ * `include` gives, in the same order they came in.
+ *
+ * For a list whose ids are not known until it has been read — a filtered,
+ * sorted page such as the feed — so `listingsById` cannot fetch the listings
+ * alongside their relations. What it can still do is send every relation at
+ * once: one trip's wait after the listings, where the feed's include of seven
+ * relations was seven trips more, one after another.
+ *
+ * `people` names the user relations to add and which fields of each; one
+ * that the listing does not point at comes back null, as an include gives it.
+ */
+export async function withListingRelations<T extends { id: string }>(
+  db: Db & { user: { findMany(args: any): Promise<any[]> } },
+  listings: T[],
+  relations: ListingRelation[],
+  people: Partial<Record<ListingPerson, Prisma.UserSelect>> = {},
+): Promise<Array<T & Record<string, any>>> {
+  if (listings.length === 0) return [];
+  const ids = [...new Set(listings.map((listing) => listing.id))];
+  const personRelations = Object.keys(people) as ListingPerson[];
+  // One request for everyone, whichever relation names them.
+  const personIds = [
+    ...new Set(
+      personRelations.flatMap((relation) =>
+        listings.map((listing: any) => listing[PERSON_KEY[relation]]).filter(Boolean),
+      ),
+    ),
+  ];
+  const personSelect = Object.assign({}, ...personRelations.map((relation) => people[relation]), {
+    id: true,
+  });
+
+  const [persons, ...related] = await Promise.all([
+    personIds.length
+      ? db.user.findMany({ where: { id: { in: personIds } }, select: personSelect })
+      : Promise.resolve([]),
+    ...relations.map((relation) => relatedRows(db, relation, ids)),
+  ]);
+
+  const personById = new Map<string, any>(persons.map((person) => [person.id, person]));
+  // Each relation keeps only the fields it asked for, though they were fetched together.
+  const pick = (person: any, select: Prisma.UserSelect) =>
+    person
+      ? Object.fromEntries(
+          Object.entries(select)
+            .filter(([, wanted]) => wanted)
+            .map(([field]) => [field, person[field]]),
+        )
+      : null;
+
+  const grouped = relations.map((relation, index) => {
+    const key = LISTING_KEY[relation];
+    const byListing = new Map<string, any[]>();
+    for (const row of related[index]) {
+      const rows = byListing.get(row[key]) ?? [];
+      rows.push(row);
+      byListing.set(row[key], rows);
+    }
+    return byListing;
+  });
+
+  return listings.map((listing: any) => {
+    const full: any = { ...listing };
+    for (const relation of personRelations) {
+      full[relation] = pick(personById.get(listing[PERSON_KEY[relation]]), people[relation]!);
+    }
+    relations.forEach((relation, index) => {
+      full[relation] = grouped[index].get(listing.id) ?? [];
+    });
+    return full;
+  });
+}

@@ -66,6 +66,7 @@ import {
   type PlacementRow,
 } from './featured-rotation';
 import { POPULARITY_WINDOW_DAYS, popularityScores } from './popularity';
+import { ListingRelation, withListingRelations } from './listings-by-id';
 import { newestPublishedFirst, publishDateFor, publishedAt, publishedWhere } from './published-at';
 import { ListingFxService } from '../fx/listing-fx.service';
 import {
@@ -117,34 +118,37 @@ type ListingActivity = {
  * social_account/handover are deliberately skipped — each omitted relation is
  * one fewer round-trip to the database per feed load and a smaller payload.
  * Shared by the feed and the featured places, which show the same cards.
+ *
+ * Loaded with `withListingRelations`, not as an include: on MongoDB an include
+ * waits for each relation in turn, and these seven made the start page wait
+ * about three seconds on the server.
  */
-const FEED_INCLUDE = {
+const FEED_PEOPLE = {
   // Same shape as findOne, so a seller's identity is never richer on one
   // endpoint than the other. The email address is deliberately absent —
   // no screen shows it and contact runs through in-app chat.
   user: {
-    select: {
-      id: true,
-      created_at: true,
-      first_name: true,
-      last_name: true,
-      profile_pic: true,
-      // Whether the seller has been through the identity check. The
-      // listing page drew an "ID Verified" badge beside every seller
-      // because it had nothing to consult; this is what it consults.
-      verified: true,
-    },
+    id: true,
+    created_at: true,
+    first_name: true,
+    last_name: true,
+    profile_pic: true,
+    // Whether the seller has been through the identity check. The
+    // listing page drew an "ID Verified" badge beside every seller
+    // because it had nothing to consult; this is what it consults.
+    verified: true,
   },
   // Who on the team is looking after this listing, for the admin table.
-  responsible: {
-    select: { id: true, first_name: true, last_name: true, profile_pic: true },
-  },
-  brand: true,
-  category: true,
-  financials: true,
-  statistics: true,
-  advertisement: true,
+  responsible: { id: true, first_name: true, last_name: true, profile_pic: true },
 } as const;
+
+const FEED_RELATIONS: ListingRelation[] = [
+  'brand',
+  'category',
+  'financials',
+  'statistics',
+  'advertisement',
+];
 
 @Injectable()
 export class ListingService {
@@ -942,9 +946,9 @@ export class ListingService {
     // Featured listings are no longer pinned to the top of this list: the
     // start page and the category pages ask for theirs from `findFeatured`,
     // which takes them in turn. All Listings itself is in plain order.
+    // The listings' own fields only: presentFeed adds the relations.
     const listings = await this.db.listing.findMany({
       where,
-      include: FEED_INCLUDE,
       skip: skip > 0 ? skip : undefined,
       take: limit,
       orderBy: byPublishDate
@@ -959,26 +963,28 @@ export class ListingService {
   }
 
   /**
-   * Feed records as a viewer may see them: trimmed, masked, and with the
-   * figures the cards read — how many buyers have been in touch, and the
-   * Popular score.
+   * Feed records as a viewer may see them: with the relations a card reads,
+   * trimmed, masked, and with the figures the cards read — how many buyers
+   * have been in touch, and the Popular score.
+   *
+   * Takes listings without their relations. Everything here needs only the
+   * listing ids, so the relations and the figures are all asked for at once.
    */
   private async presentFeed(listings: any[], viewer: ViewerContext) {
-    const trimmed = listings.map((listing) => trimListingFeedRecord(listing as Record<string, any>));
-
     // One query for every listing this viewer already has access to, rather
     // than one lookup per row.
-    // trimListingFeedRecord widens the record, so read the id back as a string.
-    const listingIds = trimmed.map((listing) => String(listing.id));
-    const [accessibleIds, activity, guestStatistics, popularity] = await Promise.all([
+    const listingIds = listings.map((listing) => String(listing.id));
+    const [withRelations, accessibleIds, activity, guestStatistics, popularity] = await Promise.all([
+      withListingRelations(this.db as any, listings, FEED_RELATIONS, FEED_PEOPLE),
       this.confidentialAccessIds(listingIds, viewer.userId),
       this.listingActivityFor(listingIds),
       this.guestStatisticsFor(viewer.userId),
       popularityScores(
         this.db as any,
-        trimmed.map((listing) => ({ id: String(listing.id), userId: listing.userId as string })),
+        listings.map((listing) => ({ id: String(listing.id), userId: listing.userId as string })),
       ),
     ]);
+    const trimmed = withRelations.map((listing) => trimListingFeedRecord(listing));
 
     return trimmed.map((listing) =>
       maskListingFor(
@@ -1072,7 +1078,7 @@ export class ListingService {
     if (placement === 'category') where.category = { some: { name: categoryName } };
 
     const [listings, turn] = await Promise.all([
-      this.db.listing.findMany({ where, include: FEED_INCLUDE }),
+      this.db.listing.findMany({ where }),
       nextTurn(this.db as any, counterKey(placement, categoryName)),
     ]);
     const cycle = cycleOrder(

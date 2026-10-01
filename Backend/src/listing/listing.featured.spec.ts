@@ -43,6 +43,10 @@ describe('featured places and listing views', () => {
       user: { findMany: jest.fn(async () => []) },
       adminQuestion: { findMany: jest.fn(async () => []) },
       category: { findMany: jest.fn(async () => []) },
+      // The card's relations, which the feed asks for after the listings.
+      listingQuestion: { findMany: jest.fn(async () => []) },
+      listingCategory: { findMany: jest.fn(async () => []) },
+      revenue: { findMany: jest.fn(async () => []) },
       listingView: {
         findMany: jest.fn(async () => []),
         findFirst: jest.fn(async ({ where }) =>

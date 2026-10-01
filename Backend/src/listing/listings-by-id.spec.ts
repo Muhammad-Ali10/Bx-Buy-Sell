@@ -1,4 +1,4 @@
-import { listingsById } from './listings-by-id';
+import { listingsById, withListingRelations } from './listings-by-id';
 
 /**
  * The conversation list and Favourites took over a second on the server,
@@ -57,5 +57,72 @@ describe('listings with their relations, fetched together', () => {
     };
     expect((await listingsById(db, [null, undefined], ['brand'])).size).toBe(0);
     expect(db.listing.findMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The start page's listings took three seconds on the server: the feed asked
+ * for seven relations as an include, one trip after another.
+ */
+describe('relations for listings already fetched', () => {
+  const db = () => ({
+    listing: { findMany: jest.fn() },
+    listingQuestion: {
+      findMany: jest.fn(async ({ where }) =>
+        where.brandQuestionId ? [{ id: 'b1', brandQuestionId: 'l2' }] : [],
+      ),
+    },
+    listingCategory: { findMany: jest.fn(async () => [{ id: 'c1', listingId: 'l1' }]) },
+    revenue: { findMany: jest.fn(async () => []) },
+    user: {
+      findMany: jest.fn(async () => [
+        { id: 'u1', first_name: 'Sam', verified: true },
+        { id: 'staff', first_name: 'Kim', verified: false },
+      ]),
+    },
+  });
+
+  it('keeps the order it was given and puts every row under its own listing', async () => {
+    const d = db();
+    const out = await withListingRelations(
+      d,
+      [
+        { id: 'l2', userId: 'u1', responsibleId: null },
+        { id: 'l1', userId: 'u1', responsibleId: 'staff' },
+      ],
+      ['brand', 'category'],
+      { user: { id: true, first_name: true, verified: true }, responsible: { id: true, first_name: true } },
+    );
+    expect(out.map((listing) => listing.id)).toEqual(['l2', 'l1']);
+    expect(out[0]).toMatchObject({ brand: [{ id: 'b1' }], category: [], responsible: null });
+    expect(out[1]).toMatchObject({ brand: [], category: [{ id: 'c1' }] });
+    expect(out[1].user).toEqual({ id: 'u1', first_name: 'Sam', verified: true });
+    // Only the fields the responsible relation asked for, though fetched with the seller.
+    expect(out[1].responsible).toEqual({ id: 'staff', first_name: 'Kim' });
+    // Everyone in one request, and no listing fetched again.
+    expect(d.user.findMany).toHaveBeenCalledTimes(1);
+    expect((d.user.findMany.mock.calls[0] as any[])[0].where).toEqual({ id: { in: ['u1', 'staff'] } });
+    expect(d.listing.findMany).not.toHaveBeenCalled();
+  });
+
+  it('asks for the people and every relation before any of them answers', async () => {
+    let answer!: (rows: any[]) => void;
+    const d = db();
+    d.user.findMany = jest.fn(() => new Promise<any[]>((resolve) => (answer = resolve))) as any;
+    const loading = withListingRelations(d, [{ id: 'l1', userId: 'u1' }], ['brand', 'category', 'financials'], {
+      user: { id: true },
+    });
+    expect(d.listingQuestion.findMany).toHaveBeenCalled();
+    expect(d.listingCategory.findMany).toHaveBeenCalled();
+    expect(d.revenue.findMany).toHaveBeenCalled();
+    answer([]);
+    expect((await loading)[0].user).toBeNull();
+  });
+
+  it('asks nothing for no listings', async () => {
+    const d = db();
+    expect(await withListingRelations(d, [], ['brand'], { user: { id: true } })).toEqual([]);
+    expect(d.listingQuestion.findMany).not.toHaveBeenCalled();
+    expect(d.user.findMany).not.toHaveBeenCalled();
   });
 });
