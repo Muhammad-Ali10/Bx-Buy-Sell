@@ -1213,6 +1213,7 @@ const AllListings = () => {
                   {/* Join Premium Button */}
                   <button
                     type="button"
+                    onClick={() => navigate("/manage-subscription")}
                     className="font-lufga text-xs"
                     style={{
                       fontFamily: "Lufga, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
@@ -1306,11 +1307,7 @@ const AllListings = () => {
                   {/* Join Premium Button */}
                   <button
                     type="button"
-                    onClick={() =>
-                      document
-                        .getElementById("off-market")
-                        ?.scrollIntoView({ behavior: "smooth" })
-                    }
+                    onClick={() => navigate("/manage-subscription")}
                     className="font-lufga text-xs"
                     style={{
                       fontFamily: "Lufga, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
@@ -1341,9 +1338,14 @@ const AllListings = () => {
                     Join Premium
                   </button>
 
-                  {/* Discover Off-Market Listings Button */}
+                  {/* Discover Off-Market Listings Button: down to the section below. */}
                   <button
                     type="button"
+                    onClick={() =>
+                      document
+                        .getElementById("off-market")
+                        ?.scrollIntoView({ behavior: "smooth" })
+                    }
                     className="font-lufga text-xs"
                     style={{
                       fontFamily: "Lufga, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
