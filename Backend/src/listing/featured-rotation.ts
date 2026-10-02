@@ -4,7 +4,7 @@ import {
   addonIsLive,
   earliestGrant,
 } from './listing-addon.util';
-import { approvalLocked } from './confidential-notice';
+import { packageLapsed } from './confidential-notice';
 
 /**
  * Which featured listings a page view shows, in turn.
@@ -71,7 +71,7 @@ export function isFeaturedOn(
   now: Date = new Date(),
 ): boolean {
   if (!listing?.[FLAG[placement]]) return false;
-  if (approvalLocked(listing)) return false;
+  if (packageLapsed(listing)) return false;
   return rows.some(
     (row) => row.listingId === listing.id && GRANTS[placement](row.addon) && addonIsLive(row, now),
   );

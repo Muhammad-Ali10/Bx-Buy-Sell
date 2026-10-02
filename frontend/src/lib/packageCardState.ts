@@ -164,7 +164,10 @@ export function packageCardViews(
     ? (state.selectedPackage ?? "MINIMUM")
     : "MINIMUM";
   const currentIsPaid = state.packageActive && current !== "MINIMUM";
-  const cancelled = Boolean(state.packageEndsAt);
+  // Cancelled and still running out: only a paid package that is still being
+  // paid for. One that has already ended can carry its old end date, and
+  // read as "cancelled" it put "Ends in 28 Days" and Reactivate on Minimum.
+  const cancelled = currentIsPaid && Boolean(state.packageEndsAt);
   const pending = state.pendingPackage;
 
   // A change already in flight owns the page: it is what the seller most needs

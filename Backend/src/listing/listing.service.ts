@@ -1716,7 +1716,11 @@ export class ListingService {
    * Carries a code, not only a sentence, so the browser can offer the way out —
    * upgrade, or switch manual approval off — instead of printing the error.
    */
-  private assertMayDecide(listing: { selectedPackage?: string | null; packageActive?: boolean | null }) {
+  private assertMayDecide(listing: {
+    selectedPackage?: string | null;
+    packageActive?: boolean | null;
+    approveBuyersManually?: boolean | null;
+  }) {
     if (approvalLocked(listing)) {
       throw new ForbiddenException({
         message: 'Your package has expired. Please renew it to approve buyers.',
@@ -1776,7 +1780,13 @@ export class ListingService {
   ) {
     const listing = await this.db.listing.findUnique({
       where: { id: listingId },
-      select: { id: true, userId: true, selectedPackage: true, packageActive: true },
+      select: {
+        id: true,
+        userId: true,
+        selectedPackage: true,
+        packageActive: true,
+        approveBuyersManually: true,
+      },
     });
     if (!listing) throw new NotFoundException('Listing not found');
     if (listing.userId !== sellerId) {
@@ -1831,6 +1841,7 @@ export class ListingService {
         confidentialControl: true,
         selectedPackage: true,
         packageActive: true,
+        approveBuyersManually: true,
       },
     });
 
@@ -2645,9 +2656,23 @@ export class ListingService {
               select: { selectedPackage: true },
             }))?.selectedPackage;
 
-      updateData.approveBuyersManually = this.canApproveBuyersManually(packageForCheck)
-        ? (body.approveBuyersManually ?? null)
-        : false;
+      if (this.canApproveBuyersManually(packageForCheck)) {
+        updateData.approveBuyersManually = body.approveBuyersManually ?? null;
+      } else {
+        /*
+         * Without a paid package the switch cannot be turned on, and a save
+         * does not turn it off either. It is on here only because a paid
+         * package once allowed it; the wizard hides it on Minimum and sends
+         * false, so treating that as the seller's choice let every waiting
+         * buyer in the moment a downgraded listing was edited. Switching it
+         * off is the popup's "Save", which also lets the waiting buyers in.
+         */
+        const current = await this.db.listing.findUnique({
+          where: { id },
+          select: { approveBuyersManually: true },
+        });
+        updateData.approveBuyersManually = current?.approveBuyersManually === true ? true : false;
+      }
     }
     
     // Include all the nested updates

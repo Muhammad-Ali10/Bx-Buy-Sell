@@ -191,21 +191,48 @@ export function manualApprovalApplies(listing: {
   selectedPackage?: string | null;
   packageActive?: boolean | null;
 }): boolean {
-  if (listing.approveBuyersManually !== true) return false;
-  return listing.selectedPackage === 'STARTER' || listing.selectedPackage === 'PREMIUM';
+  /*
+   * The switch alone decides, whatever the package now says.
+   *
+   * It can only be switched on with Starter or Premium, so a listing on any
+   * other package has it on only because a paid package once allowed it. It
+   * used to count only while the package still read Starter or Premium: a
+   * package that ended by cancellation kept its name and stayed vetted, but
+   * one moved to Minimum by a downgrade lost the name — and with it every
+   * check, so the next buyer walked straight in. The client's rule is that
+   * both end the same way.
+   */
+  return listing.approveBuyersManually === true;
 }
 
+const isPaidPackage = (selectedPackage?: string | null) =>
+  selectedPackage === 'STARTER' || selectedPackage === 'PREMIUM';
+
 /**
- * Whether the seller may answer requests right now.
- *
- * Not once a paid package has lapsed: they have to buy one again first.
- * Listings from before packages were tracked (`packageActive` null) count as
- * active.
+ * A paid package that has stopped: still named Starter or Premium, no longer
+ * paid for. Listings from before packages were tracked (`packageActive` null)
+ * count as running. What the featured places check — a lapsed package's
+ * placements end with it.
  */
-export function approvalLocked(listing: {
+export function packageLapsed(listing: {
   selectedPackage?: string | null;
   packageActive?: boolean | null;
 }): boolean {
-  const paid = listing.selectedPackage === 'STARTER' || listing.selectedPackage === 'PREMIUM';
-  return paid && listing.packageActive === false;
+  return isPaidPackage(listing.selectedPackage) && listing.packageActive === false;
+}
+
+/**
+ * Whether the seller may not answer requests right now.
+ *
+ * Not once the paid package behind manual approval has ended: they have to buy
+ * one again first, or switch manual approval off. Ended either way — the paid
+ * package lapsed, or it was dropped to Minimum with the switch still on.
+ */
+export function approvalLocked(listing: {
+  approveBuyersManually?: boolean | null;
+  selectedPackage?: string | null;
+  packageActive?: boolean | null;
+}): boolean {
+  if (packageLapsed(listing)) return true;
+  return listing.approveBuyersManually === true && !isPaidPackage(listing.selectedPackage);
 }

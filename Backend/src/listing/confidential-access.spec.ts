@@ -147,14 +147,13 @@ describe('ListingService confidential access requests', () => {
       expect(kinds(store)).toEqual(['CONFIDENTIAL_ACCESS_REQUESTED']);
     });
 
-    it('is approved straight away when the seller is on Minimum', async () => {
-      // The switch stayed on after the package ended. The client's rule is a
-      // Starter or Premium seller who switched it on.
-      const { service, store, db } = build({ selectedPackage: 'MINIMUM', packageActive: false });
+    it('waits after a downgrade to Minimum, as after a cancelled package', async () => {
+      // The client, Expiry Test 4: the downgraded seller had switched manual
+      // approval on, so the next buyer waits for them — they are not let in.
+      const { service, store } = build({ selectedPackage: 'MINIMUM', packageActive: false });
       const result: any = await service.acceptConfidentialityAgreement(LISTING, BUYER);
-      expect(result).toMatchObject({ granted: true, pendingApproval: false });
-      expect(store.access.status).toBe('APPROVED');
-      expect(db.chat.create).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ granted: false, pendingApproval: true });
+      expect(store.access.status).toBe('PENDING');
     });
 
     it('waits when the paid package has lapsed — restricted, not opened up', async () => {
@@ -202,6 +201,18 @@ describe('ListingService confidential access requests', () => {
       expect(store.access.status).toBe('APPROVED');
       // Told in their conversation, as an approval would.
       expect(kinds(store)).toEqual(['CONFIDENTIAL_ACCESS_APPROVED']);
+    });
+
+    it('refuses an approval the same way after a downgrade to Minimum', async () => {
+      // The client, Expiry Test 4: Accept on an older request approved it at
+      // once, with no popup. It has to ask for the package, as Test 1 does.
+      const { service, store } = build(
+        { selectedPackage: 'MINIMUM', packageActive: false },
+        { status: 'PENDING', chatId: null },
+      );
+      const error = await service.grantConfidentialAccess(LISTING, SELLER, BUYER).catch((e) => e);
+      expect(refusal(error)).toMatchObject({ code: 'PACKAGE_REQUIRED' });
+      expect(store.access.status).toBe('PENDING');
     });
 
     it('lets only the seller switch it off', async () => {

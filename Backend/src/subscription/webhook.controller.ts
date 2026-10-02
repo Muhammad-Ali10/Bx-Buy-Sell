@@ -164,6 +164,13 @@ export class WebhookController {
         packageActive: false,
         featuredOnCategoryPage: false,
         featuredOnStartPage: false,
+        // The package has ended, so it no longer "ends on" a date: left in
+        // place, Manage Subscription went on counting down to it and offering
+        // Reactivate on a package that was already gone.
+        packageEndsAt: null,
+        pendingPackage: null,
+        pendingPackageCycle: null,
+        pendingPackageChangeAt: null,
       } as any,
     });
     this.logger.log(`Listing ${listing.id}: package deactivated`);

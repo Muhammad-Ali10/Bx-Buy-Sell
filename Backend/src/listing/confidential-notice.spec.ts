@@ -81,15 +81,25 @@ describe('confidential access building blocks', () => {
       ).toBe(true);
     });
 
-    it('not on Minimum, even with the switch still on', () => {
-      // One listing here was left exactly like this: the package dropped to
-      // Minimum and the switch stayed on.
+    it('on Minimum too, once a downgrade has left the switch on', () => {
+      // The client, Expiry Test 4: a package that ended by "Downgrade to
+      // Minimum" must keep buyers waiting exactly as a cancelled one does.
       expect(
         manualApprovalApplies({
           approveBuyersManually: true,
           selectedPackage: 'MINIMUM',
           packageActive: false,
         }),
+      ).toBe(true);
+    });
+
+    it('and the seller cannot answer until they renew or switch it off', () => {
+      expect(
+        approvalLocked({ approveBuyersManually: true, selectedPackage: 'MINIMUM', packageActive: false }),
+      ).toBe(true);
+      // Without the switch there is nothing to vet, and nothing locked.
+      expect(
+        approvalLocked({ approveBuyersManually: false, selectedPackage: 'MINIMUM', packageActive: false }),
       ).toBe(false);
     });
 
