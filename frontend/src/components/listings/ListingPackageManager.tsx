@@ -178,7 +178,15 @@ export const ListingPackageManager = ({
     [held, openAddon],
   );
 
-  const current: PackageId = data?.selectedPackage ?? "MINIMUM";
+  /*
+   * The package being paid for, as the cards read it. A paid package that has
+   * ended keeps its name in `selectedPackage`, and taken from there the
+   * summary went on saying "Starter Package — Currently Paying $49" for a
+   * listing on Minimum, and the panel treated buying Starter again as no change.
+   */
+  const current: PackageId = data?.packageActive
+    ? (data?.selectedPackage ?? "MINIMUM")
+    : "MINIMUM";
 
   /** The cycle a card is offering, defaulting to the one already in use. */
   const cycleForPackage = packageCycle ?? data?.packageBillingCycle ?? "MONTHLY";
