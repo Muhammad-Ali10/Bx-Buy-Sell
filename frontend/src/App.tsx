@@ -97,7 +97,9 @@ const router = createBrowserRouter(
     { path: "/verify-account", element: <VerifyAccount /> },
     { path: "/verify-funds", element: <VerifyFunds /> },
     { path: "/profile", element: <Profile /> },
-    { path: "/pricing", element: <Pricing /> },
+    // The old plans page. Plans are bought on Manage Subscription now; old
+    // links and bookmarks land there instead of on the outdated page.
+    { path: "/pricing", element: <Navigate to="/manage-subscription" replace /> },
     { path: "/manage-subscription", element: <ManageSubscription /> },
     // With a listing, the page manages that listing's package instead of the
     // buyer's plan — sellers have no account-wide plan, only per-listing ones.

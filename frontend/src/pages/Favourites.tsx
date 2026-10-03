@@ -408,7 +408,7 @@ const Favourites = () => {
                         sellerId={listing.userId || listing.user_id}
                         imageLocked={imageIsLocked}
                         imageLockType={photoQuestion?.lockType ?? null}
-                        lockRedirectTo={listing?.lockAction?.redirectTo || '/pricing'}
+                        lockRedirectTo={listing?.lockAction?.redirectTo || '/manage-subscription'}
                       />
                     </div>
                   );

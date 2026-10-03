@@ -187,7 +187,7 @@ const ListingCard = ({
       navigate(listingLink);
       return;
     }
-    navigate(lockRedirectTo || "/pricing");
+    navigate(lockRedirectTo || "/manage-subscription");
   };
 
   const handleContactSeller = async () => {

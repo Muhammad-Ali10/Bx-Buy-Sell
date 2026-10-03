@@ -61,7 +61,7 @@ export class SubscriptionController {
   ) {
     const frontendUrl = subscriptionConfig.frontendUrl;
     const successUrl = `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${frontendUrl}/pricing`;
+    const cancelUrl = `${frontendUrl}/manage-subscription`;
 
     return this.subscriptionService.createCheckoutSession(
       req.user.id,

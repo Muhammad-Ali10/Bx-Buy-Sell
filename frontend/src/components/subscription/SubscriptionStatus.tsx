@@ -42,7 +42,7 @@ export const SubscriptionStatus = () => {
   };
 
   const handleUpgrade = () => {
-    navigate("/pricing");
+    navigate("/manage-subscription");
   };
 
   const handleManageBilling = async () => {

@@ -1650,7 +1650,7 @@ const AllListings = () => {
                           featured={featuredIds.has(String(listing.id))}
                           listingId={listing.id}
                           sellerId={listing.userId || listing.user_id}
-                          lockRedirectTo={listing?.lockAction?.redirectTo || '/pricing'}
+                          lockRedirectTo={listing?.lockAction?.redirectTo || '/manage-subscription'}
                         />
                       );
                     })}

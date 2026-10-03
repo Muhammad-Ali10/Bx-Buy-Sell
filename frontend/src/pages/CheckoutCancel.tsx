@@ -59,7 +59,7 @@ const CheckoutCancel = () => {
 
         <div style={{ display: "flex", gap: "12px" }}>
           <button
-            onClick={() => navigate("/pricing")}
+            onClick={() => navigate("/manage-subscription")}
             style={{
               flex: 1,
               height: "56px",

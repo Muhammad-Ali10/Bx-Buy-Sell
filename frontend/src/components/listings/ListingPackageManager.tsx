@@ -15,6 +15,7 @@ import {
 import {
   addonCardViews,
   packageCardViews,
+  packageRank,
   type ButtonTone,
   type CardAction,
   type HeldAddon,
@@ -132,6 +133,38 @@ export const ListingPackageManager = ({
   const [packageCycle, setPackageCycle] = useState<BillingCycleId | null>(null);
   const [addonCycle, setAddonCycle] = useState<BillingCycleId | null>(null);
 
+  /*
+   * One change at a time: a package or an add-on, never both open. Each is
+   * paid for by its own button, so the summary below can only ever show what
+   * that button charges.
+   */
+  const choosePackage = (id: PackageId | null) => {
+    setOpenPackage(id);
+    setPackageCycle(null);
+    setOpenAddon(null);
+    setAddonCycle(null);
+  };
+  const chooseAddon = (id: PaidAddonId | null) => {
+    setOpenAddon(id);
+    setAddonCycle(null);
+    setOpenPackage(null);
+    setPackageCycle(null);
+  };
+
+  /*
+   * A click on an open card closes it again — the client could not unselect an
+   * add-on short of reloading the page. Clicks on the card's own buttons and
+   * cycle choices are theirs, not the card's.
+   */
+  const closeOnCardClick = (isOpen: boolean, close: () => void) =>
+    isOpen
+      ? (event?: { target?: EventTarget | null }) => {
+          const target = event?.target as HTMLElement | null | undefined;
+          if (target?.closest?.("button, input, label")) return;
+          close();
+        }
+      : undefined;
+
   const { data, isLoading, error } = useQuery<PackageState>({
     queryKey: ["listing-package", listingId],
     queryFn: async () => {
@@ -240,8 +273,7 @@ export const ListingPackageManager = ({
       case "downgrade":
       case "manage":
         if (openPackage !== id) {
-          setOpenPackage(id);
-          setPackageCycle(null);
+          choosePackage(id);
           return;
         }
         // Already open, so this press is the confirm.
@@ -307,8 +339,7 @@ export const ListingPackageManager = ({
       case "subscribe":
       case "manage":
         if (openAddon !== id) {
-          setOpenAddon(id);
-          setAddonCycle(null);
+          chooseAddon(id);
           return;
         }
         void run(
@@ -448,6 +479,79 @@ export const ListingPackageManager = ({
     return { rows, total: rows.reduce((sum, row) => sum + row.total, 0) };
   }, [packageOptions, addonOptions, held, current, data?.packageBillingCycle]);
 
+  /*
+   * The change being chosen, priced as the button below it will charge it.
+   *
+   * The summary only ever listed what was already paid for, so choosing a
+   * package or an add-on left it at "$0" or the current package and the seller
+   * could not see what they were about to pay — while the Packages step,
+   * built from the same cards, always showed it. A lower package or a shorter
+   * cycle is charged nothing today: it starts at the next renewal.
+   */
+  const selection = useMemo(() => {
+    if (openPackage && (openPackage !== current || packageCycleChanged)) {
+      const option = packageOptions.find((entry) => entry.id === openPackage);
+      const cycle = getBillingCycle(openPackage === "MINIMUM" ? "MONTHLY" : cycleForPackage);
+      const { discount, total } = priceOverCycle(option?.monthlyPrice ?? 0, cycle);
+      const currentMonths = getBillingCycle(data?.packageBillingCycle ?? "MONTHLY").months;
+      const waits =
+        current !== "MINIMUM" &&
+        (packageRank(openPackage) < packageRank(current) ||
+          (openPackage === current && cycle.months < currentMonths));
+      return {
+        rows: [
+          {
+            key: "chosen-package",
+            item: option?.label ?? openPackage,
+            // Minimum has no billing cycle to name.
+            cycleLabel:
+              openPackage === "MINIMUM"
+                ? "From next renewal"
+                : waits
+                  ? `${cycle.label} · from next renewal`
+                  : cycle.label,
+            discount,
+            total,
+          },
+        ],
+        dueToday: waits ? 0 : total,
+      };
+    }
+    if (openAddon && addonChanged) {
+      const option = addonOptions.find((entry) => entry.id === openAddon);
+      const cycle = getBillingCycle(cycleForAddon);
+      const { discount, total } = priceOverCycle(option?.monthlyPrice ?? 0, cycle);
+      const waits =
+        Boolean(heldAddon) && cycle.months < getBillingCycle(heldAddon!.billingCycle).months;
+      return {
+        rows: [
+          {
+            key: "chosen-addon",
+            item: option?.label ?? openAddon,
+            cycleLabel: waits ? `${cycle.label} · from next renewal` : cycle.label,
+            discount,
+            total,
+          },
+        ],
+        dueToday: waits ? 0 : total,
+      };
+    }
+    return null;
+  }, [
+    openPackage,
+    openAddon,
+    current,
+    packageCycleChanged,
+    addonChanged,
+    heldAddon,
+    packageOptions,
+    addonOptions,
+    cycleForPackage,
+    cycleForAddon,
+    data?.packageBillingCycle,
+  ]);
+  const summaryRows = selection?.rows ?? summary.rows;
+
   if (isLoading) {
     return (
       <div className="mt-10 flex justify-center py-16">
@@ -493,6 +597,7 @@ export const ListingPackageManager = ({
               features={card.features}
               price={packagePrice(option?.monthlyPrice ?? 0)}
               highlighted={isPremium}
+              onClick={closeOnCardClick(openPackage === view.id, () => choosePackage(null))}
               footer={
                 <>
                   {view.panel && (
@@ -538,6 +643,7 @@ export const ListingPackageManager = ({
               description={card.description}
               radioOn={view.radioOn}
               surface={surface}
+              onClick={closeOnCardClick(openAddon === view.id, () => chooseAddon(null))}
               badge={isBundle ? <BlackBadge>Best Option</BlackBadge> : undefined}
               footer={
                 <>
@@ -572,15 +678,15 @@ export const ListingPackageManager = ({
         * "Amount Due Today $0".
         */}
       <SummaryTable
-        rows={summary.rows.map((row) => ({
+        rows={summaryRows.map((row) => ({
           key: row.key,
           item: row.item,
           cycle: row.cycleLabel,
           discount: row.discount > 0 ? `-${addonPrice(row.discount)} Discount` : "$0",
           total: addonPrice(row.total),
         }))}
-        totalLabel={summary.rows.length > 0 ? "Currently Paying" : "Amount Due Today"}
-        total={addonPrice(summary.total)}
+        totalLabel={selection || summary.rows.length === 0 ? "Amount Due Today" : "Currently Paying"}
+        total={addonPrice(selection ? selection.dueToday : summary.total)}
       />
 
       <div className="flex flex-col gap-[16px] sm:flex-row">

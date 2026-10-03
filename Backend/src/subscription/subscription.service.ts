@@ -873,7 +873,7 @@ export class SubscriptionService {
       listingAccess: {
         proEarlyAccessDays: 7,
         upgradeCtaText: 'upgrade to unlock 🔓',
-        upgradeRedirectTo: '/pricing',
+        upgradeRedirectTo: '/manage-subscription',
         registerCtaText: 'register to unlock 🔓',
         registerRedirectTo: '/register',
         unregisteredHiddenFields: [
@@ -952,7 +952,7 @@ export class SubscriptionService {
       listingAccess: {
         proEarlyAccessDays: 7,
         upgradeCtaText: 'upgrade to unlock 🔓',
-        upgradeRedirectTo: '/pricing',
+        upgradeRedirectTo: '/manage-subscription',
         registerCtaText: 'register to unlock 🔓',
         registerRedirectTo: '/register',
         unregisteredHiddenFields: [
