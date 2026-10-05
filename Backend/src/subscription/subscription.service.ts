@@ -560,7 +560,8 @@ export class SubscriptionService {
     if (meta.listingId) {
       try {
         await this.listingCheckout.applyFromSession(session);
-        return { success: true, kind: 'listing' as const };
+        // Which listing, so the page can finish what the seller chose with it.
+        return { success: true, kind: 'listing' as const, listingId: meta.listingId as string };
       } catch (error) {
         this.logger.error(`Could not apply listing checkout ${sessionId}:`, error);
         return {

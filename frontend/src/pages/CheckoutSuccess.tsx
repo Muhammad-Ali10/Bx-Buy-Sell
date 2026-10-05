@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, Loader2 } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { takePackageChange } from "@/lib/afterCheckout";
 
 /**
  * Where Stripe sends someone after paying — for a buyer plan and for a
@@ -52,6 +53,18 @@ const CheckoutSuccess = () => {
       // Anything cached before the purchase describes the account without it.
       void queryClient.invalidateQueries();
       if (data?.kind === "listing") {
+        // A downgrade chosen with the add-on just paid for, held until now.
+        const change = takePackageChange(data?.listingId ?? null);
+        if (change) {
+          const res: any = await apiClient.createListingPackageCheckout(change.listingId, {
+            packageId: change.packageId,
+            billingCycle: change.billingCycle,
+            returnTo: "manage",
+          });
+          if (res?.success === false) {
+            setDetail("Your add-on is active, but the package change could not be saved. Please choose it again on Manage Subscription.");
+          }
+        }
         setState("listing");
         window.setTimeout(() => navigate("/my-listings"), 2500);
         return;

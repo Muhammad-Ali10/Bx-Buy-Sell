@@ -787,6 +787,8 @@ class ApiClient {
       billingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
       /** The add-on's own cycle, chosen separately from the package's. */
       addonBillingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
+      /** Where Stripe's "back" returns: Manage Subscription, or the wizard (default). */
+      returnTo?: 'manage' | 'wizard';
     },
   ) {
     return this.request(`/listing/${listingId}/package-checkout`, {

@@ -433,6 +433,8 @@ export class ListingController {
       addon?: 'NONE' | 'CATEGORY_PAGE' | 'START_PAGE' | 'BUNDLE';
       billingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
       addonBillingCycle?: 'MONTHLY' | 'THREE_MONTH' | 'SIX_MONTH';
+      /** Where Stripe's "back" leads: Manage Subscription, or the wizard (default). */
+      returnTo?: 'manage' | 'wizard';
     },
   ) {
     const { id: userId } = (req as any).user;
@@ -444,7 +446,12 @@ export class ListingController {
       billingCycle: body.billingCycle || 'MONTHLY',
       addonBillingCycle: body.addonBillingCycle || 'MONTHLY',
       successUrl: `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${frontendUrl}/dashboard/listing/${id}`,
+      // Back to where the seller started. `/dashboard/listing/:id` was never a
+      // route, so leaving Stripe without paying ended on a page that is not there.
+      cancelUrl:
+        body.returnTo === 'manage'
+          ? `${frontendUrl}/manage-subscription/${id}`
+          : `${frontendUrl}/dashboard/edit/${id}?step=packages`,
     });
 
     await this.clearListingCaches(id);
@@ -491,7 +498,8 @@ export class ListingController {
       addon,
       billingCycle: body?.billingCycle || 'MONTHLY',
       successUrl: `${frontendUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${frontendUrl}/listing/${id}/manage-subscription`,
+      // `/listing/:id/manage-subscription` is not a route; this is the page it meant.
+      cancelUrl: `${frontendUrl}/manage-subscription/${id}`,
     });
 
     await this.clearListingCaches(id);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Building2, Globe, LayoutGrid, Sparkles } from "lucide-react";
@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
 import { resolveListingTitle } from "@/lib/listingTitle";
+import { dropPackageChange } from "@/lib/afterCheckout";
 import { ListingPackageManager } from "@/components/listings/ListingPackageManager";
 import { TrustBand, WhyPanel } from "@/components/marketing/TrustAndWhy";
 import { BUYER_CYCLES, buyerCyclePrice, type BuyerCycle } from "@/lib/buyerPlanCycles";
@@ -83,6 +84,10 @@ const ManageSubscription = () => {
    * that listing's card.
    */
   const { listingId } = useParams<{ listingId?: string }>();
+  // Back here from an add-on checkout without paying: the downgrade held for it is dropped.
+  useEffect(() => {
+    if (listingId) dropPackageChange(listingId);
+  }, [listingId]);
   const { data: listing } = useQuery<any>({
     queryKey: ["listing-for-package", listingId],
     queryFn: async () => {

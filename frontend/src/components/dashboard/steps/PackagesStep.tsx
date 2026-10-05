@@ -1,3 +1,4 @@
+import { CurrentPlanPanel } from "@/components/dashboard/steps/CurrentPlanPanel";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
@@ -606,7 +607,16 @@ export const PackagesStep = ({
 
   const handleSubmit = async (
     statusOverride?: "DRAFT" | "PUBLISH",
-    opts?: { skipRedirect?: boolean },
+    opts?: {
+      skipRedirect?: boolean;
+      /**
+       * Save the listing and leave its package alone: a published listing
+       * being edited, whose package is changed on Manage Subscription only.
+       * The selection here is empty then, and sent as it is it would rewrite
+       * the package, its cycle and its success fee.
+       */
+      keepPackage?: boolean;
+    },
   ): Promise<string | null> => {
     const status = statusOverride ?? listingStatus;
 
@@ -638,6 +648,24 @@ export const PackagesStep = ({
 
     try {
       const listingPayload = await buildListingPayload(status);
+      if (opts?.keepPackage) {
+        for (const key of [
+          "selectedPackage",
+          "packageBillingCycle",
+          "addonBillingCycle",
+          "packageAddons",
+          "successFeePercent",
+          "featuredOnCategoryPage",
+          "featuredOnStartPage",
+          "confidentialControl",
+        ]) {
+          delete (listingPayload as any)[key];
+        }
+        // The switch as shown. The payload ties it to the package chosen here,
+        // and with nothing chosen it was sent as off; the server still allows
+        // it only on a paid package.
+        (listingPayload as any).approveBuyersManually = approveBuyersManually;
+      }
 
       console.log("Transformed listing payload:", JSON.stringify(listingPayload, null, 2));
 
@@ -783,6 +811,33 @@ export const PackagesStep = ({
   const addonCards = ADDON_CARDS;
 
   /* ---------------------------------------------------------------- screen 2 */
+  /*
+   * A published listing being edited shows the plan it runs on, not a package
+   * choice: the client's rule is that packages change on Manage Subscription
+   * only. A draft keeps the choice — it cannot be published without one.
+   */
+  if (listingId && !isGuest && formData.listingStatus === "PUBLISH") {
+    return (
+      <StepCard>
+        <div className="mb-[24px] flex flex-col items-center gap-[7px] text-center">
+          <h1 className="m-0 text-[28px] font-medium leading-[1.4] text-black" style={{ fontFamily: "Lufga" }}>
+            Packages and Options
+          </h1>
+          <p className="m-0 text-[15.5px] leading-[1.4]" style={{ fontFamily: "Lufga", color: "rgba(0,0,0,0.5)" }}>
+            Change your package and add-ons on Manage Subscription.
+          </p>
+        </div>
+        <CurrentPlanPanel
+          listingId={listingId}
+          manualApproval={approveBuyersManually}
+          onManualApprovalChange={setApproveBuyersManually}
+          saving={isSubmitting}
+          onSave={() => void handleSubmit("PUBLISH", { keepPackage: true })}
+        />
+      </StepCard>
+    );
+  }
+
   if (screen === "confidentiality") {
     return (
       <StepCard>

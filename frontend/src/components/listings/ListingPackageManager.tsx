@@ -4,6 +4,17 @@ import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
+import { holdPackageChange, takePackageChange } from "@/lib/afterCheckout";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ADDON_CARDS, PACKAGE_CARDS } from "@/lib/packageContent";
 import {
   formatUsd,
@@ -134,36 +145,41 @@ export const ListingPackageManager = ({
   const [addonCycle, setAddonCycle] = useState<BillingCycleId | null>(null);
 
   /*
-   * One change at a time: a package or an add-on, never both open. Each is
-   * paid for by its own button, so the summary below can only ever show what
-   * that button charges.
+   * A package and an add-on can be chosen together and paid for in one
+   * checkout, as on the Packages step — the client's answer. Each is opened by
+   * a click anywhere on its card and closed by another.
    */
   const choosePackage = (id: PackageId | null) => {
     setOpenPackage(id);
     setPackageCycle(null);
-    setOpenAddon(null);
-    setAddonCycle(null);
   };
   const chooseAddon = (id: PaidAddonId | null) => {
     setOpenAddon(id);
     setAddonCycle(null);
-    setOpenPackage(null);
-    setPackageCycle(null);
   };
 
   /*
-   * A click on an open card closes it again — the client could not unselect an
-   * add-on short of reloading the page. Clicks on the card's own buttons and
-   * cycle choices are theirs, not the card's.
+   * The whole card is the switch: a click on a closed card it can be chosen
+   * from opens its billing options, a click on an open one closes it. Clicks on
+   * the card's own buttons and cycle choices are theirs, not the card's.
    */
-  const closeOnCardClick = (isOpen: boolean, close: () => void) =>
-    isOpen
+  const cardClick = (isOpen: boolean, selectable: boolean, open: () => void, close: () => void) =>
+    isOpen || selectable
       ? (event?: { target?: EventTarget | null }) => {
           const target = event?.target as HTMLElement | null | undefined;
           if (target?.closest?.("button, input, label")) return;
-          close();
+          if (isOpen) close();
+          else open();
         }
       : undefined;
+
+  /** The cards' own buttons: never a purchase — that is the button at the bottom. */
+  const ON_CARD = new Set(["cancel", "reactivate", "keepCurrent", "none"]);
+
+  /** "Cancel Subscription" is asked about first: one click used to cancel at once. */
+  const [confirmCancel, setConfirmCancel] = useState<
+    { kind: "package" } | { kind: "addon"; id: PaidAddonId } | null
+  >(null);
 
   const { data, isLoading, error } = useQuery<PackageState>({
     queryKey: ["listing-package", listingId],
@@ -264,52 +280,48 @@ export const ListingPackageManager = ({
     }
   };
 
+  const packageMessage = (body: any) => {
+    const when = body?.effectiveAt ? new Date(body.effectiveAt) : null;
+    return body?.scheduled
+      ? when
+        ? `Your package changes on ${when.toLocaleDateString()}. Nothing changes before then.`
+        : "Your package will change at the end of this billing period."
+      : "Your package has been updated.";
+  };
+  const addonMessage = (body: any) => {
+    const when = body?.effectiveAt ? new Date(body.effectiveAt) : null;
+    return body?.scheduled && when
+      ? `This add-on moves to the new billing cycle on ${when.toLocaleDateString()}.`
+      : "Your add-on has been updated.";
+  };
+
+  const cancelPackageNow = () =>
+    void run(
+      () => apiClient.cancelListingPackage(listingId),
+      (body) => {
+        const when = body?.endsAt ? new Date(body.endsAt) : null;
+        toast.success(
+          when
+            ? `Your package runs until ${when.toLocaleDateString()}. You can reactivate it before then.`
+            : "Your package has been cancelled.",
+        );
+      },
+      "Could not cancel the subscription.",
+    );
+
   const onPackageAction = (id: PackageId, act: CardAction) => {
     if (act.disabled || busy) return;
 
     switch (act.intent) {
-      // Opening a card only opens it; the button beneath the radios buys.
+      // Opening a card only opens it; the button at the bottom buys.
       case "upgrade":
       case "downgrade":
       case "manage":
-        if (openPackage !== id) {
-          choosePackage(id);
-          return;
-        }
-        // Already open, so this press is the confirm.
-        void run(
-          () =>
-            apiClient.createListingPackageCheckout(listingId, {
-              packageId: id,
-              billingCycle: cycleForPackage,
-            }),
-          (body) => {
-            const when = body?.effectiveAt ? new Date(body.effectiveAt) : null;
-            toast.success(
-              body?.scheduled
-                ? when
-                  ? `Your package changes on ${when.toLocaleDateString()}. Nothing changes before then.`
-                  : "Your package will change at the end of this billing period."
-                : "Your package has been updated.",
-            );
-          },
-          "Could not save the changes.",
-        );
+        if (openPackage !== id) choosePackage(id);
         return;
 
       case "cancel":
-        void run(
-          () => apiClient.cancelListingPackage(listingId),
-          (body) => {
-            const when = body?.endsAt ? new Date(body.endsAt) : null;
-            toast.success(
-              when
-                ? `Your package runs until ${when.toLocaleDateString()}. You can reactivate it before then.`
-                : "Your package has been cancelled.",
-            );
-          },
-          "Could not cancel the subscription.",
-        );
+        setConfirmCancel({ kind: "package" });
         return;
 
       case "reactivate":
@@ -321,6 +333,11 @@ export const ListingPackageManager = ({
         return;
 
       case "keepCurrent":
+        // A lower card that was only opened has nothing scheduled to take back.
+        if (!data?.pendingPackage) {
+          choosePackage(null);
+          return;
+        }
         void run(
           () => apiClient.cancelScheduledPackageChange(listingId),
           () => toast.success("The scheduled change has been cancelled."),
@@ -332,43 +349,31 @@ export const ListingPackageManager = ({
     }
   };
 
+  const cancelAddonNow = (id: PaidAddonId) =>
+    void run(
+      () => apiClient.cancelListingAddon(listingId, id),
+      (body) => {
+        const when = body?.endsAt ? new Date(body.endsAt) : null;
+        toast.success(
+          when
+            ? `This add-on runs until ${when.toLocaleDateString()}. You can reactivate it before then.`
+            : "Your add-on has been cancelled.",
+        );
+      },
+      "Could not cancel the add-on.",
+    );
+
   const onAddonAction = (id: PaidAddonId, act: CardAction) => {
     if (act.disabled || busy) return;
 
     switch (act.intent) {
       case "subscribe":
       case "manage":
-        if (openAddon !== id) {
-          chooseAddon(id);
-          return;
-        }
-        void run(
-          () => apiClient.subscribeListingAddon(listingId, id, cycleForAddon),
-          (body) => {
-            const when = body?.effectiveAt ? new Date(body.effectiveAt) : null;
-            toast.success(
-              body?.scheduled && when
-                ? `This add-on moves to the new billing cycle on ${when.toLocaleDateString()}.`
-                : "Your add-on has been updated.",
-            );
-          },
-          "Could not update the add-on.",
-        );
+        if (openAddon !== id) chooseAddon(id);
         return;
 
       case "cancel":
-        void run(
-          () => apiClient.cancelListingAddon(listingId, id),
-          (body) => {
-            const when = body?.endsAt ? new Date(body.endsAt) : null;
-            toast.success(
-              when
-                ? `This add-on runs until ${when.toLocaleDateString()}. You can reactivate it before then.`
-                : "Your add-on has been cancelled.",
-            );
-          },
-          "Could not cancel the add-on.",
-        );
+        setConfirmCancel({ kind: "addon", id });
         return;
 
       case "reactivate":
@@ -415,24 +420,130 @@ export const ListingPackageManager = ({
    * checkout for what the seller is paying for today, so the button stays shut
    * until something on screen actually differs from it.
    */
-  const saveOpenChange =
-    openPackage && (openPackage !== current || packageCycleChanged)
-      ? () =>
-          onPackageAction(openPackage, {
-            label: "Save Changes",
-            tone: "accent",
-            intent: "manage",
-            disabled: false,
-          })
-      : openAddon && addonChanged
-        ? () =>
-            onAddonAction(openAddon, {
-              label: "Save Changes",
-              tone: "accent",
-              intent: "manage",
-              disabled: false,
-            })
-        : null;
+  const packageChosen = Boolean(openPackage && (openPackage !== current || packageCycleChanged));
+  const addonChosen = Boolean(openAddon && addonChanged);
+  /** Lower package or shorter cycle: nothing today, it lands at the next renewal. */
+  const packageWaits =
+    packageChosen &&
+    current !== "MINIMUM" &&
+    (packageRank(openPackage!) < packageRank(current) ||
+      (openPackage === current &&
+        getBillingCycle(cycleForPackage).months <
+          getBillingCycle(data?.packageBillingCycle ?? "MONTHLY").months));
+  const addonWaits =
+    addonChosen &&
+    Boolean(heldAddon) &&
+    getBillingCycle(cycleForAddon).months < getBillingCycle(heldAddon!.billingCycle).months;
+
+  const packageNow = packageChosen && !packageWaits;
+  const addonNow = addonChosen && !addonWaits;
+  /** A new add-on rides on the package's checkout; a held one, or the bundle replacing singles, cannot. */
+  const addonInline =
+    addonChosen &&
+    !heldAddon &&
+    !(openAddon === "BUNDLE" && held.some((row) => row.addon !== "BUNDLE"));
+  /** Both paid today but not in one checkout: two payments, so one at a time. */
+  const twoPayments = packageNow && addonNow && !addonInline;
+
+  /*
+   * Everything chosen, applied by one press.
+   *
+   * - A package paid for today takes a new add-on into the same checkout — the
+   *   one the Packages step uses — so both start today and renew together.
+   * - An add-on change that waits (a shorter cycle) is scheduled first; it
+   *   costs nothing and does not leave the page.
+   * - A package change that waits (a downgrade) and an add-on paid for today:
+   *   the add-on goes to Stripe, and the downgrade is held until it comes back
+   *   paid — scheduled first, it stayed in place when the seller walked away
+   *   from the add-on's checkout.
+   * - An add-on alone is bought on its own subscription, dated from today.
+   */
+  const submit = async () => {
+    if (busy || !(packageChosen || addonChosen) || twoPayments) return;
+    const failed = (res: any, fallback: string) => {
+      if (res?.success !== false) return false;
+      toast.error(res?.error || res?.message || fallback);
+      return true;
+    };
+    const bodyOf = (res: any) => res?.data ?? res;
+    const changePackage = (withAddon: boolean) =>
+      apiClient.createListingPackageCheckout(listingId, {
+        packageId: openPackage!,
+        billingCycle: cycleForPackage,
+        returnTo: "manage",
+        ...(withAddon ? { addon: openAddon!, addonBillingCycle: cycleForAddon } : {}),
+      });
+    const changeAddon = () => apiClient.subscribeListingAddon(listingId, openAddon!, cycleForAddon);
+
+    setBusy(true);
+    try {
+      // 1. An add-on change that only waits goes first: nothing to pay, no redirect.
+      if (addonChosen && addonWaits) {
+        const res: any = await changeAddon();
+        if (failed(res, "Could not update the add-on.")) return;
+        toast.success(addonMessage(bodyOf(res)));
+      }
+
+      // 2. A package paid for today, with a new add-on in the same checkout.
+      if (packageNow) {
+        const res: any = await changePackage(addonChosen && addonInline);
+        if (failed(res, "Could not save the changes.")) return;
+        const body = bodyOf(res);
+        if (body?.checkoutUrl) {
+          window.location.href = body.checkoutUrl;
+          return;
+        }
+        toast.success(packageMessage(body));
+        refresh();
+        return;
+      }
+
+      // 3. A downgrade with an add-on paid for today: the add-on first, the
+      //    downgrade once it is paid (see lib/afterCheckout).
+      if (packageChosen && addonNow) {
+        holdPackageChange({ listingId, packageId: openPackage!, billingCycle: cycleForPackage });
+        const res: any = await changeAddon();
+        if (failed(res, "Could not update the add-on.")) {
+          takePackageChange(listingId);
+          return;
+        }
+        const body = bodyOf(res);
+        if (body?.checkoutUrl) {
+          window.location.href = body.checkoutUrl;
+          return;
+        }
+        // Nothing to pay after all: schedule the downgrade now.
+        takePackageChange(listingId);
+        toast.success(addonMessage(body));
+      }
+
+      // 4. A package change that waits, on its own or after the add-on.
+      if (packageChosen) {
+        const res: any = await changePackage(false);
+        if (failed(res, "Could not save the changes.")) return;
+        toast.success(packageMessage(bodyOf(res)));
+        refresh();
+        return;
+      }
+
+      // 5. An add-on on its own, paid today.
+      if (addonNow) {
+        const res: any = await changeAddon();
+        if (failed(res, "Could not update the add-on.")) return;
+        const body = bodyOf(res);
+        if (body?.checkoutUrl) {
+          window.location.href = body.checkoutUrl;
+          return;
+        }
+        toast.success(addonMessage(body));
+      }
+      refresh();
+    } catch {
+      toast.error("Could not save the changes.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const summary = useMemo(() => {
     const rows: Array<{
@@ -489,66 +600,52 @@ export const ListingPackageManager = ({
    * cycle is charged nothing today: it starts at the next renewal.
    */
   const selection = useMemo(() => {
-    if (openPackage && (openPackage !== current || packageCycleChanged)) {
+    const rows: Array<{ key: string; item: string; cycleLabel: string; discount: number; total: number }> = [];
+    let dueToday = 0;
+    if (packageChosen && openPackage) {
       const option = packageOptions.find((entry) => entry.id === openPackage);
       const cycle = getBillingCycle(openPackage === "MINIMUM" ? "MONTHLY" : cycleForPackage);
       const { discount, total } = priceOverCycle(option?.monthlyPrice ?? 0, cycle);
-      const currentMonths = getBillingCycle(data?.packageBillingCycle ?? "MONTHLY").months;
-      const waits =
-        current !== "MINIMUM" &&
-        (packageRank(openPackage) < packageRank(current) ||
-          (openPackage === current && cycle.months < currentMonths));
-      return {
-        rows: [
-          {
-            key: "chosen-package",
-            item: option?.label ?? openPackage,
-            // Minimum has no billing cycle to name.
-            cycleLabel:
-              openPackage === "MINIMUM"
-                ? "From next renewal"
-                : waits
-                  ? `${cycle.label} · from next renewal`
-                  : cycle.label,
-            discount,
-            total,
-          },
-        ],
-        dueToday: waits ? 0 : total,
-      };
+      rows.push({
+        key: "chosen-package",
+        item: option?.label ?? openPackage,
+        // Minimum has no billing cycle to name.
+        cycleLabel:
+          openPackage === "MINIMUM"
+            ? "From next renewal"
+            : packageWaits
+              ? `${cycle.label} · from next renewal`
+              : cycle.label,
+        discount,
+        total,
+      });
+      if (!packageWaits) dueToday += total;
     }
-    if (openAddon && addonChanged) {
+    if (addonChosen && openAddon) {
       const option = addonOptions.find((entry) => entry.id === openAddon);
       const cycle = getBillingCycle(cycleForAddon);
       const { discount, total } = priceOverCycle(option?.monthlyPrice ?? 0, cycle);
-      const waits =
-        Boolean(heldAddon) && cycle.months < getBillingCycle(heldAddon!.billingCycle).months;
-      return {
-        rows: [
-          {
-            key: "chosen-addon",
-            item: option?.label ?? openAddon,
-            cycleLabel: waits ? `${cycle.label} · from next renewal` : cycle.label,
-            discount,
-            total,
-          },
-        ],
-        dueToday: waits ? 0 : total,
-      };
+      rows.push({
+        key: "chosen-addon",
+        item: option?.label ?? openAddon,
+        cycleLabel: addonWaits ? `${cycle.label} · from next renewal` : cycle.label,
+        discount,
+        total,
+      });
+      if (!addonWaits) dueToday += total;
     }
-    return null;
+    return rows.length ? { rows, dueToday } : null;
   }, [
+    packageChosen,
+    addonChosen,
+    packageWaits,
+    addonWaits,
     openPackage,
     openAddon,
-    current,
-    packageCycleChanged,
-    addonChanged,
-    heldAddon,
     packageOptions,
     addonOptions,
     cycleForPackage,
     cycleForAddon,
-    data?.packageBillingCycle,
   ]);
   const summaryRows = selection?.rows ?? summary.rows;
 
@@ -587,7 +684,9 @@ export const ListingPackageManager = ({
            * it. Every other panel keeps its button — Cancel Subscription,
            * Cancel Downgrade and keep …, Reactivate.
            */
-          const showButton = !(view.panel && view.action.intent === "upgrade");
+          const showButton = ON_CARD.has(view.action.intent);
+          const selectable =
+            ["upgrade", "downgrade", "manage"].includes(view.action.intent) && !view.action.disabled;
 
           return (
             <PackagePlanCard
@@ -597,7 +696,12 @@ export const ListingPackageManager = ({
               features={card.features}
               price={packagePrice(option?.monthlyPrice ?? 0)}
               highlighted={isPremium}
-              onClick={closeOnCardClick(openPackage === view.id, () => choosePackage(null))}
+              onClick={cardClick(
+                openPackage === view.id,
+                selectable && !busy,
+                () => onPackageAction(view.id, view.action),
+                () => choosePackage(null),
+              )}
               footer={
                 <>
                   {view.panel && (
@@ -610,6 +714,9 @@ export const ListingPackageManager = ({
                       disabled={busy}
                       surface={isPremium ? LIME : "#FFFFFF"}
                     />
+                  )}
+                  {!view.panel && selectable && (
+                    <CardButton asDiv label={view.action.label} tone={cardTone(view.action.tone, isPremium)} />
                   )}
                   {showButton && (
                     <CardButton
@@ -643,7 +750,12 @@ export const ListingPackageManager = ({
               description={card.description}
               radioOn={view.radioOn}
               surface={surface}
-              onClick={closeOnCardClick(openAddon === view.id, () => chooseAddon(null))}
+              onClick={cardClick(
+                openAddon === view.id,
+                ["subscribe", "manage"].includes(view.action.intent) && !view.action.disabled && !busy,
+                () => onAddonAction(view.id, view.action),
+                () => chooseAddon(null),
+              )}
               badge={isBundle ? <BlackBadge>Best Option</BlackBadge> : undefined}
               footer={
                 <>
@@ -658,13 +770,25 @@ export const ListingPackageManager = ({
                       surface={addonSurfaceColor(surface)}
                     />
                   )}
-                  <CardButton
-                    size="addon"
-                    label={view.action.label}
-                    tone={cardTone(view.action.tone, isBundle)}
-                    disabled={view.action.disabled || busy}
-                    onClick={() => onAddonAction(view.id, view.action)}
-                  />
+                  {!view.panel &&
+                    ["subscribe", "manage"].includes(view.action.intent) &&
+                    !view.action.disabled && (
+                      <CardButton
+                        asDiv
+                        size="addon"
+                        label={view.action.label}
+                        tone={cardTone(view.action.tone, isBundle)}
+                      />
+                    )}
+                  {ON_CARD.has(view.action.intent) && (
+                    <CardButton
+                      size="addon"
+                      label={view.action.label}
+                      tone={cardTone(view.action.tone, isBundle)}
+                      disabled={view.action.disabled || busy}
+                      onClick={() => onAddonAction(view.id, view.action)}
+                    />
+                  )}
                 </>
               }
             />
@@ -689,27 +813,65 @@ export const ListingPackageManager = ({
         total={addonPrice(selection ? selection.dueToday : summary.total)}
       />
 
+      {twoPayments && (
+        <p className="m-0 -mb-[14px] text-center text-[13px] text-[#B45309]" style={{ fontFamily: "Lufga" }}>
+          {heldAddon
+            ? "A package and a change to an add-on you already have are paid separately. Save the package first, then change the add-on."
+            : "The bundle replaces the single add-ons you have, so it is bought on its own. Save the package first, then choose the bundle."}
+        </p>
+      )}
+
       <div className="flex flex-col gap-[16px] sm:flex-row">
         <PageButton primary={false} onClick={() => navigate("/my-listings")} className="sm:flex-1">
           Go back
         </PageButton>
         <PageButton
           primary
-          onClick={() => saveOpenChange?.()}
-          disabled={!saveOpenChange || busy}
+          onClick={() => void submit()}
+          disabled={!(packageChosen || addonChosen) || twoPayments || busy}
           title={
-            saveOpenChange
+            packageChosen || addonChosen
               ? undefined
-              : "Open a package or a placement and choose what you want first"
+              : "Click a package or an add-on and choose its billing cycle first"
           }
           className="sm:flex-1"
         >
-          {busy ? "Saving…" : "Save Changes"}
+          {busy
+            ? "Saving…"
+            : (selection?.dueToday ?? 0) > 0
+              ? "Continue to Checkout"
+              : "Save Changes"}
         </PageButton>
+        <AlertDialog open={Boolean(confirmCancel)} onOpenChange={(next) => !next && setConfirmCancel(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Do you really want to cancel?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {confirmCancel?.kind === "addon"
+                  ? `${addonDisplayName(confirmCancel.id)} stops renewing. It stays active until the end of the period you have paid for.`
+                  : "Your package stops renewing. It stays active until the end of the period you have paid for."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep it</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-[#DC2626] text-white hover:bg-[#B91C1C]"
+                onClick={() => {
+                  const target = confirmCancel;
+                  setConfirmCancel(null);
+                  if (target?.kind === "package") cancelPackageNow();
+                  else if (target?.kind === "addon") cancelAddonNow(target.id);
+                }}
+              >
+                Yes, cancel
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {isDraft && (
           <PageButton
             primary
-            onClick={() => navigate(`/dashboard/listing/${listingId}`)}
+            onClick={() => navigate(`/dashboard/edit/${listingId}?step=packages`)}
             disabled={busy}
             className="sm:flex-1"
           >

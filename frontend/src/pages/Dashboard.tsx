@@ -606,6 +606,9 @@ const Dashboard = ({ mode: modeProp, listingId: listingIdProp }: ListingFormProp
       transformedData.confidentialControl = Boolean(listing.confidentialControl);
       transformedData.featuredOnCategoryPage = Boolean(listing.featuredOnCategoryPage);
       transformedData.featuredOnStartPage = Boolean(listing.featuredOnStartPage);
+      // The switch as the listing has it. Left out, the form started it off,
+      // and saving an edit switched a seller's manual approval off with it.
+      transformedData.approveBuyersManually = listing.approveBuyersManually === true;
 
       setFormData(transformedData);
       toast.success("Listing data loaded successfully");

@@ -622,7 +622,7 @@ export const ListingCardDashboard = ({
                 lineHeight: '140%',
                 letterSpacing: '0%',
               }}
-              onClick={() => toast.info("Push listing feature coming soon!")}
+              onClick={handlePush}
             >
               <span className="hidden sm:inline">Push Listing</span>
               <span className="sm:hidden">Push</span>
