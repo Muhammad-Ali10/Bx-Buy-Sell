@@ -123,7 +123,7 @@ export const ConfidentialAccessRequests = ({
   };
 
   return (
-    <div className="px-3 pb-3">
+    <div className="shrink-0 px-3 pb-3">
       <ManualApprovalLockedDialog
         open={lockedListing !== null}
         onOpenChange={(open) => !open && setLockedListing(null)}
@@ -149,14 +149,18 @@ export const ConfidentialAccessRequests = ({
           </span>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        {/* About two and a half requests tall, the rest scrolled inside: with
+            five waiting, the block took the whole sidebar and the
+            conversations under it could no longer be reached. The half row
+            showing is what says there are more. */}
+        <div className="chat-scrollbar flex max-h-[168px] flex-col gap-1.5 overflow-y-auto">
           {requests.map((request) => {
             const busy = deciding === request.id;
             const image = getChatListingImage(request.listing);
             return (
               <div
                 key={request.id}
-                className="flex items-center gap-2.5 rounded-lg bg-white px-2 py-2"
+                className="flex shrink-0 items-center gap-2.5 rounded-lg bg-white px-2 py-2"
               >
                 <div
                   className="shrink-0 overflow-hidden rounded-md bg-black/5"

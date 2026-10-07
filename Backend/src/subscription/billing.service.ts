@@ -349,6 +349,11 @@ export class BillingService {
           (invoice.post_payment_credit_notes_amount ?? 0);
         const cents = invoice.status === 'paid' ? invoice.amount_paid : invoice.total;
         const at = invoice.status_transitions?.paid_at ?? invoice.created;
+        // Every line, not the first: a package bought with an add-on is one
+        // invoice of two items, and Stripe puts the add-on first.
+        const items = ((invoice.lines?.data ?? []) as any[])
+          .map((line) => (typeof line?.description === 'string' ? line.description.trim() : ''))
+          .filter(Boolean) as string[];
         return {
           id: invoice.id,
           number: invoice.number ?? invoice.id,
@@ -356,7 +361,8 @@ export class BillingService {
           amount: (cents ?? 0) / 100,
           currency: invoice.currency ?? 'usd',
           status: invoiceStatus(invoice, refunded),
-          description: invoice.lines?.data?.[0]?.description ?? null,
+          description: items.length ? items.join(' + ') : null,
+          items,
           pdfUrl: invoice.invoice_pdf ?? null,
           hostedUrl: invoice.hosted_invoice_url ?? null,
         };

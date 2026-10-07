@@ -233,6 +233,35 @@ describe('invoices', () => {
     expect(invoiceStatus({ status: 'void' })).toBe('VOID');
   });
 
+  it('names every item of an invoice, not only the first', async () => {
+    const { service, stripe } = build();
+    stripe.invoices.list.mockResolvedValue({
+      data: [
+        {
+          id: 'in_2',
+          number: 'ZF3EMB5Z-0003',
+          status: 'paid',
+          amount_paid: 12400,
+          total: 12400,
+          currency: 'usd',
+          created: 1789029000,
+          lines: {
+            data: [
+              { description: 'Featured on Category Page — Monthly' },
+              { description: '1 × Starter Package — Monthly' },
+              { description: null },
+            ],
+          },
+        },
+      ],
+    });
+    stripe.charges.list.mockResolvedValue({ data: [] });
+
+    const [row] = await service.listInvoices('u1');
+    expect(row.items).toEqual(['Featured on Category Page — Monthly', '1 × Starter Package — Monthly']);
+    expect(row.description).toBe('Featured on Category Page — Monthly + 1 × Starter Package — Monthly');
+  });
+
   it('lists them from Stripe, finds refunds through the charge, and skips drafts', async () => {
     const { service, stripe } = build();
     stripe.invoices.list.mockResolvedValue({
@@ -267,6 +296,7 @@ describe('invoices', () => {
       status: 'REFUNDED',
       pdfUrl: 'https://pay.stripe.test/in_1.pdf',
       description: '1 × Premium Package — 6-Month Billing',
+      items: ['1 × Premium Package — 6-Month Billing'],
       date: new Date(1789029182 * 1000).toISOString(),
     });
   });

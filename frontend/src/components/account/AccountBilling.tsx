@@ -61,6 +61,8 @@ export interface InvoiceRow {
   currency: string;
   status: string;
   description?: string | null;
+  /** Every item on the invoice; `description` is the same joined into one line. */
+  items?: string[];
   pdfUrl?: string | null;
   hostedUrl?: string | null;
 }
@@ -371,10 +373,16 @@ export const InvoiceTable = ({
                   <p className="m-0 text-[12.5px] font-medium text-[#0F172A]">{invoice.number}</p>
                   {/* Which purchase it was: with several listings, an id alone
                       does not say. */}
-                  {invoice.description && (
-                    <p className="m-0 mt-0.5 max-w-[260px] truncate text-[11px] text-[#94A3B8]">
-                      {invoice.description}
-                    </p>
+                  {(invoice.items?.length ? invoice.items : invoice.description ? [invoice.description] : []).map(
+                    (item, index) => (
+                      <p
+                        key={index}
+                        title={item}
+                        className="m-0 mt-0.5 max-w-[260px] truncate text-[11px] text-[#94A3B8]"
+                      >
+                        {item}
+                      </p>
+                    ),
                   )}
                 </td>
                 <td className="py-3 pr-3 align-top text-[12.5px] text-[#475569]" style={FONT}>
