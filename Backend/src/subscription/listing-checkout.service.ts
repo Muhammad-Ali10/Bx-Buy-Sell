@@ -115,10 +115,15 @@ export class ListingCheckoutService {
     const subscriptionIsPackage = packagePaid !== '0';
 
     let periodEnd: Date | null = null;
+    // The card the seller just paid with. Checkout saves it on this
+    // subscription only; the add-on's own subscription needs it too.
+    let paymentMethod: string | null = null;
     if (subscriptionId) {
       try {
         const sub: any = await this.stripeService.getSubscription(subscriptionId);
         periodEnd = subscriptionPeriodEnd(sub);
+        const pm = sub?.default_payment_method;
+        paymentMethod = typeof pm === 'string' ? pm : (pm?.id ?? null);
       } catch (error) {
         this.logger.warn(`Could not read subscription ${subscriptionId}: ${error}`);
       }
@@ -196,6 +201,7 @@ export class ListingCheckoutService {
         addon,
         String(session.customer),
         session.metadata?.addonBillingCycle,
+        paymentMethod,
       );
       return;
     }
@@ -298,6 +304,7 @@ export class ListingCheckoutService {
     addon: string,
     customerId: string,
     cycleId?: string,
+    paymentMethod?: string | null,
   ) {
     try {
       const listing = await this.db.listing.findUnique({
@@ -342,6 +349,13 @@ export class ListingCheckoutService {
         amount,
         intervalMonths: cycle.months,
         trialEnd: Math.floor(firstBilling.getTime() / 1000),
+        /*
+         * The card to renew with. Without one the first month went through —
+         * it was paid on the package's invoice — and the first renewal did
+         * not: Stripe had no card for this subscription and left the invoice
+         * open and the placement past due.
+         */
+        defaultPaymentMethod: paymentMethod ?? (await this.stripeService.customerCard(customerId)),
         metadata: { listingId, addon, addonBillingCycle: cycle.id },
       });
 

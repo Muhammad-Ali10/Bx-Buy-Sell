@@ -20,14 +20,18 @@ const LISTING = 'listing-1';
 const SELLER = 'seller-1';
 const PERIOD_END = 1_800_000_000;
 
-function build({ existingAddon = null as any, packageSubscription = null as string | null } = {}) {
+function build({
+  existingAddon = null as any,
+  packageSubscription = null as string | null,
+  advertisement = [] as any[],
+} = {}) {
   const updates: any[] = [];
   const addonRows: any[] = [];
   // The listing keeps what is written to it, so a second run of the same
   // checkout sees what the first one left behind.
   let listing: any = {
     id: LISTING,
-    advertisement: [],
+    advertisement,
     packageStripeSubscriptionId: packageSubscription,
   };
   const db = {
@@ -53,9 +57,11 @@ function build({ existingAddon = null as any, packageSubscription = null as stri
     getSubscription: jest.fn(async (id: string) => ({
       id,
       status: 'active',
+      default_payment_method: 'pm_paid_with',
       items: { data: [{ current_period_end: PERIOD_END }] },
     })),
     createSubscriptionForCustomer: jest.fn(async () => ({ id: 'sub_new_addon' })),
+    customerCard: jest.fn(async () => 'pm_customer_default'),
     cancelSubscription: jest.fn(async () => ({})),
   };
   const service = new ListingCheckoutService(db as any, stripe as any);
@@ -232,6 +238,19 @@ describe('a placement on a cycle of its own', () => {
     deferredAddon: '1',
     addonBillingCycle: 'MONTHLY',
     billingCycle: 'THREE_MONTHS',
+  });
+
+  it('renews with the card the package was paid with', async () => {
+    const { service, stripe } = build({
+      advertisement: [{ question: 'Listing Price', answer: '150000' }],
+    });
+
+    await service.applyFromSession(deferred);
+
+    expect(stripe.createSubscriptionForCustomer).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: 'cus_1', defaultPaymentMethod: 'pm_paid_with' }),
+    );
+    expect(stripe.customerCard).not.toHaveBeenCalled();
   });
 
   it('is not given a second subscription when it already has one', async () => {

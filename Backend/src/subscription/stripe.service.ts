@@ -184,6 +184,20 @@ export class StripeService {
     }
   }
 
+  /** The customer's card: their default for invoices, else the newest one saved. */
+  async customerCard(customerId: string): Promise<string | null> {
+    try {
+      const customer: any = await this.stripe.customers.retrieve(customerId);
+      const fallback = customer?.invoice_settings?.default_payment_method;
+      if (fallback) return typeof fallback === 'string' ? fallback : fallback.id;
+      const cards = await this.stripe.paymentMethods.list({ customer: customerId, type: 'card', limit: 1 });
+      return cards.data[0]?.id ?? null;
+    } catch (error) {
+      this.logger.warn(`Could not read the card of customer ${customerId}: ${error}`);
+      return null;
+    }
+  }
+
   /**
    * Start a second subscription on an existing customer — used for an add-on
    * whose monthly cycle differs from the package's 3/6-month cycle, which Stripe
@@ -198,11 +212,14 @@ export class StripeService {
     metadata?: Record<string, string>;
     /** Unix seconds; skips billing until then (the first period is already paid). */
     trialEnd?: number;
+    /** The card it renews with; Stripe charges nothing it has no card for. */
+    defaultPaymentMethod?: string | null;
   }) {
     try {
       return await this.stripe.subscriptions.create({
         customer: params.customerId,
         ...(params.trialEnd ? { trial_end: params.trialEnd } : {}),
+        ...(params.defaultPaymentMethod ? { default_payment_method: params.defaultPaymentMethod } : {}),
         items: [
           {
             price_data: {
