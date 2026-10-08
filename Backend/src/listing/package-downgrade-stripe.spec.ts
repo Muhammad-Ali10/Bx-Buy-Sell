@@ -113,6 +113,51 @@ describe("Stripe's word reaching the listing", () => {
     });
   });
 
+  it('moves the listing onto a downgrade that waited for this renewal', async () => {
+    const periodStart = periodEnd - 31 * 86400;
+    const d = db({
+      listing: {
+        id: 'l1',
+        pendingPackage: 'STARTER',
+        pendingPackageCycle: 'MONTHLY',
+        pendingPackageChangeAt: new Date(periodStart * 1000),
+      },
+    });
+    const renewed = { id: 'sub_pkg', items: { data: [{ current_period_start: periodStart, current_period_end: periodEnd }] } };
+    await expect(recordListingRenewal(d, renewed)).resolves.toBe(true);
+    expect(d.listing.update).toHaveBeenCalledWith({
+      where: { id: 'l1' },
+      data: {
+        packageExpiresAt: new Date(periodEnd * 1000),
+        selectedPackage: 'STARTER',
+        packageBillingCycle: 'MONTHLY',
+        packageActive: true,
+        pendingPackage: null,
+        pendingPackageCycle: null,
+        pendingPackageChangeAt: null,
+      },
+    });
+  });
+
+  it('leaves a downgrade alone until its renewal comes', async () => {
+    const periodStart = periodEnd - 31 * 86400;
+    const d = db({
+      listing: {
+        id: 'l1',
+        pendingPackage: 'STARTER',
+        pendingPackageCycle: 'MONTHLY',
+        // Saved for the end of this period, not its start.
+        pendingPackageChangeAt: new Date(periodEnd * 1000),
+      },
+    });
+    const updated = { id: 'sub_pkg', items: { data: [{ current_period_start: periodStart, current_period_end: periodEnd }] } };
+    await recordListingRenewal(d, updated);
+    expect(d.listing.update).toHaveBeenCalledWith({
+      where: { id: 'l1' },
+      data: { packageExpiresAt: new Date(periodEnd * 1000) },
+    });
+  });
+
   it("carries a placement's renewal to its row", async () => {
     const d = db({ addons: [{ id: 'a1' }] });
     await expect(recordListingRenewal(d, sub('sub_addon'))).resolves.toBe(true);

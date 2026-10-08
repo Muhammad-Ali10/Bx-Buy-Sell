@@ -267,6 +267,7 @@ describe('the success page confirming a checkout', () => {
     await expect(service.syncCheckoutSession(USER, 'cs_1')).resolves.toEqual({
       success: true,
       kind: 'listing',
+      listingId: 'listing-1',
     });
     expect(listingCheckout.applyFromSession).toHaveBeenCalledWith(session);
     expect(db.userSubscription.upsert).not.toHaveBeenCalled();

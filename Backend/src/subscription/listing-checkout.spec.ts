@@ -271,7 +271,7 @@ describe('the success page confirming a listing checkout', () => {
     const result = await service.syncCheckoutSession(SELLER, 'cs_9');
 
     expect(listingCheckout.applyFromSession).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ success: true, kind: 'listing' });
+    expect(result).toEqual({ success: true, kind: 'listing', listingId: LISTING });
   });
 
   it('will not let another account confirm it', async () => {

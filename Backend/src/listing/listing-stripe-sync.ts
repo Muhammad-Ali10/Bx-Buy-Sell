@@ -21,6 +21,19 @@ type Db = {
   };
 };
 
+/** When the subscription's current period began, in Stripe's time. */
+function subscriptionPeriodStart(subscription: any): number | null {
+  const times: number[] = [];
+  if (typeof subscription?.current_period_start === 'number') times.push(subscription.current_period_start);
+  for (const item of subscription?.items?.data ?? []) {
+    if (typeof item?.current_period_start === 'number') times.push(item.current_period_start);
+  }
+  return times.length ? Math.max(...times) : null;
+}
+
+/** Stripe's renewal and the date saved for it can differ by the time a request takes. */
+const CHANGE_SLACK_MS = 10 * 60 * 1000;
+
 /**
  * A listing package or placement renewed: carry the new period end.
  *
@@ -34,11 +47,40 @@ export async function recordListingRenewal(db: Db, subscription: any): Promise<b
 
   const listing = await db.listing.findFirst({
     where: { packageStripeSubscriptionId: subscription.id },
-    select: { id: true },
+    select: { id: true, pendingPackage: true, pendingPackageCycle: true, pendingPackageChangeAt: true },
   });
   if (listing) {
-    if (periodEnd) {
-      await db.listing.update({ where: { id: listing.id }, data: { packageExpiresAt: periodEnd } });
+    /*
+     * A downgrade waiting for this renewal is applied here, on Stripe's word.
+     *
+     * It used to wait for the server's own clock to pass the date, read when
+     * someone next asked for the listing. Stripe's clock is the one that
+     * decides the renewal: a Stripe test clock moved a month ahead charged
+     * the new price while the listing still read the old package. Minimum is
+     * not here — its subscription ends instead of renewing.
+     */
+    const start = subscriptionPeriodStart(subscription);
+    const changeAt = listing.pendingPackageChangeAt ? new Date(listing.pendingPackageChangeAt).getTime() : null;
+    const changeDue =
+      Boolean(listing.pendingPackage) &&
+      listing.pendingPackage !== 'MINIMUM' &&
+      changeAt !== null &&
+      start !== null &&
+      start * 1000 >= changeAt - CHANGE_SLACK_MS;
+    const data: Record<string, unknown> = {};
+    if (periodEnd) data.packageExpiresAt = periodEnd;
+    if (changeDue) {
+      Object.assign(data, {
+        selectedPackage: listing.pendingPackage,
+        packageBillingCycle: listing.pendingPackageCycle,
+        packageActive: true,
+        pendingPackage: null,
+        pendingPackageCycle: null,
+        pendingPackageChangeAt: null,
+      });
+    }
+    if (Object.keys(data).length) {
+      await db.listing.update({ where: { id: listing.id }, data });
     }
     return true;
   }
