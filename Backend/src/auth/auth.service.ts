@@ -390,13 +390,24 @@ export class AuthService {
       );
     }
 
-    const isValid = await bcrypt.compare(
-      refreshToken,
-      user?.refresh_token as string,
-    );
+    const isValid =
+      Boolean(user?.refresh_token && refreshToken) &&
+      (await bcrypt.compare(refreshToken, user?.refresh_token as string));
 
     if (!isValid) {
-      await this.userService.updateUser(userId, { refresh_token: null });
+      /*
+       * Sign the account out only when this was one of its own refresh
+       * tokens — an old one, used again, which is how a stolen token shows.
+       * Clearing it for any wrong value let anyone who knew a user's id sign
+       * them out at will, the route being public.
+       */
+      const ownToken = await this.jwtService
+        .verifyAsync(String(refreshToken ?? ''), { secret: process.env.JWT_REFRESH_SECRET })
+        .then((payload: any) => payload?.id === userId)
+        .catch(() => false);
+      if (ownToken) {
+        await this.userService.updateUser(userId, { refresh_token: null });
+      }
       throw new HttpException(`Invalid Refresh Token`, HttpStatus.FORBIDDEN);
     }
 

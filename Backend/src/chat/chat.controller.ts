@@ -104,8 +104,15 @@ export class ChatController {
   createChatRoom(
     @Param('userId') userId: string,
     @Param('sellerId') sellerId: string,
+    @Req() req: any,
     @Query('listingId') listingId?: string, // CRITICAL: Optional listingId to create listing-specific chat
   ) {
+    // Only one of the two may open it, or the team: anyone could otherwise
+    // start a conversation between two other people, as fetchChatRoom refuses.
+    const currentUser = req?.user;
+    if (!currentUser || (!this.isStaffRole(currentUser.role) && currentUser.id !== userId && currentUser.id !== sellerId)) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.chatService.createChatRoom(userId, sellerId, listingId);
   }
 

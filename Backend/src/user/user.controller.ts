@@ -38,6 +38,8 @@ import { LogAction } from 'common/decorator/action.decorator';
 import { logSchema } from 'common/validator/logSchema.validator';
 import { ActivityLogService } from 'src/activity-log/activity-log.service';
 import { describeAccountChanges } from 'src/activity-log/account-changes';
+import { assertMayUpdateUser } from './user-update-access';
+import { mayReadWholeAccount, publicProfile } from './user-profile-view';
 import { requestOrigin } from 'src/activity-log/request-origin';
 @Roles(['ADMIN', 'MONITER', 'STAFF'])
 @Controller('user')
@@ -248,10 +250,12 @@ export class UserController {
   @Roles(['ADMIN', 'MONITER', 'USER', 'STAFF'])
   @Get(':id')
   @ApiParam({ name: 'id', description: 'User ID', type: String })
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @Req() req: any) {
+    // The whole account for its owner and the team; who someone is for anyone else.
+    const view = (data: any) => (mayReadWholeAccount(req?.user, id) ? data : publicProfile(data));
     const value = await this.cacheManager.get(`${this.constructor.name}:${id}`);
     if (value) {
-      return value;
+      return view(value);
     }
     const data = await this.userService.findOneByID(id);
     await this.cacheManager.set(
@@ -259,7 +263,7 @@ export class UserController {
       data,
       CACHE_TTL,
     );
-    return data;
+    return view(data);
   }
   @Post()
   @LogAction(logSchema('create', 'user'))
@@ -367,6 +371,8 @@ export class UserController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UserUpdateSchema)) body,
   ) {
+    // One's own account and its plain profile fields only, unless an admin.
+    assertMayUpdateUser(req?.user, id, body);
     const before = await this.userService.findOneByID(id);
     const payload = await this.userService.updateUser(id, body);
     await this.cacheManager.del(`${this.constructor.name}`);
